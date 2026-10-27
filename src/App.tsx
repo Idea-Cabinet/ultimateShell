@@ -176,7 +176,7 @@ export function App() {
         />
 
         {/* Terminals Container */}
-        <div className="flex-1 relative overflow-hidden bg-[var(--bg-terminal)]">
+        <div className="flex-1 relative overflow-hidden bg-[var(--bg-terminal)] border-none outline-none">
           {tabs.map((tab) => (
             <TerminalView
               key={tab.id}

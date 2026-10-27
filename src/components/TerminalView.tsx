@@ -175,8 +175,8 @@ export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme
   return (
     <div
       ref={containerRef}
-      className={`w-full h-full p-2 bg-[var(--bg-terminal)] ${isActive ? "block" : "hidden"}`}
-      style={{ outline: "none" }}
+      className={`w-full h-full p-2 bg-[var(--bg-terminal)] border-none outline-none ${isActive ? "block" : "hidden"}`}
+      style={{ outline: "none", border: "none" }}
     />
   );
 };

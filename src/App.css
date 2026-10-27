@@ -149,7 +149,31 @@ button:active, [role="button"]:active, .apple-clickable:active {
   }
 }
 
+/* Global focus ring reset to eliminate unwanted thick black outlines */
+*,
+*::before,
+*::after,
+:focus,
+:focus-visible,
+:focus-within {
+  outline: none !important;
+  outline-color: transparent !important;
+  -webkit-focus-ring-color: transparent !important;
+}
+
 /* xterm terminal container tuning */
+.xterm,
+.xterm *,
+.xterm-viewport,
+.xterm-screen,
+.xterm-helper-textarea {
+  outline: none !important;
+  outline-color: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  -webkit-focus-ring-color: transparent !important;
+}
+
 .xterm {
   padding: 8px 12px;
 }
