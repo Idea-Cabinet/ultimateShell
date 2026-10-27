@@ -47,9 +47,9 @@ fn pty_close(
 }
 
 #[tauri::command]
-fn fs_list_dir(
-    pty_mgr: State<PtyManager>,
-    sftp_pool: State<SftpPool>,
+async fn fs_list_dir(
+    pty_mgr: State<'_, PtyManager>,
+    sftp_pool: State<'_, SftpPool>,
     session_id: String,
     path: String,
     show_hidden: bool,
@@ -58,17 +58,22 @@ fn fs_list_dir(
         .get_opts(&session_id)
         .ok_or_else(|| "会话不存在或已关闭".to_string())?;
 
-    if opts.is_local {
-        sftp::list_local_dir(&path, show_hidden)
-    } else {
-        sftp::list_remote_dir(&sftp_pool, &opts, &path, show_hidden)
-    }
+    let pool = sftp_pool.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        if opts.is_local {
+            sftp::list_local_dir(&path, show_hidden)
+        } else {
+            sftp::list_remote_dir(&pool, &opts, &path, show_hidden)
+        }
+    })
+    .await
+    .map_err(|e| format!("异步执行错误: {}", e))?
 }
 
 #[tauri::command]
-fn fs_read_preview(
-    pty_mgr: State<PtyManager>,
-    sftp_pool: State<SftpPool>,
+async fn fs_read_preview(
+    pty_mgr: State<'_, PtyManager>,
+    sftp_pool: State<'_, SftpPool>,
     session_id: String,
     path: String,
 ) -> Result<String, String> {
@@ -76,12 +81,22 @@ fn fs_read_preview(
         .get_opts(&session_id)
         .ok_or_else(|| "会话不存在或已关闭".to_string())?;
 
-    sftp::read_file_preview_content(&sftp_pool, &opts, &path, 64 * 1024)
+    let pool = sftp_pool.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        sftp::read_file_preview_content(&pool, &opts, &path, 64 * 1024)
+    })
+    .await
+    .map_err(|e| format!("异步执行错误: {}", e))?
 }
 
 #[tauri::command]
-fn get_session_stats(pty_mgr: State<PtyManager>, session_id: String) -> (String, usize) {
-    pty_mgr.get_cwd_stats(&session_id)
+async fn get_session_stats(pty_mgr: State<'_, PtyManager>, session_id: String) -> Result<(String, usize), String> {
+    let mgr = pty_mgr.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        mgr.get_cwd_stats(&session_id)
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -162,6 +177,7 @@ pub fn run() {
         .manage(pty_mgr)
         .manage(sftp_pool)
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             pty_spawn,
             pty_write,

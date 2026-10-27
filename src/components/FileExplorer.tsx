@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { DirResult, FileEntry, TabSession } from "../types";
 import {
@@ -42,13 +42,14 @@ interface FileExplorerProps {
 type SortField = "name" | "size" | "mtime" | "file_type";
 type SortDirection = "asc" | "desc";
 
-// Tree node interface for left visual directory tree
-interface TreeNode {
+// Dynamic Tree Node with 100% Lazy Loading
+interface LazyTreeNode {
   path: string;
   name: string;
+  isDir: boolean;
   isExpanded: boolean;
   isLoading: boolean;
-  children: TreeNode[] | null;
+  children: LazyTreeNode[] | null; // null means not yet loaded (lazy)
 }
 
 export function FileExplorer({
@@ -86,9 +87,12 @@ export function FileExplorer({
   // Selection
   const [selectedEntry, setSelectedEntry] = useState<FileEntry | null>(null);
 
-  // Left sidebar tree toggle
+  // Left sidebar tree toggle & lazy root
   const [showTreePane, setShowTreePane] = useState<boolean>(true);
-  const [treeRoots, setTreeRoots] = useState<TreeNode[]>([]);
+  const [rootNodes, setRootNodes] = useState<LazyTreeNode[]>([]);
+
+  // Request counter to discard stale async responses
+  const activeReqId = useRef<number>(0);
 
   // Preview Modal
   const [previewFile, setPreviewFile] = useState<FileEntry | null>(null);
@@ -102,9 +106,11 @@ export function FileExplorer({
     entry: FileEntry;
   } | null>(null);
 
-  // Fetch directory contents
+  // Fetch directory contents lazily for the main table view
   const loadDirectory = async (path: string, pushHistory = true) => {
-    if (!session.id) return;
+    if (!session.id || !isOpen) return;
+    const reqId = ++activeReqId.current;
+
     setLoading(true);
     setErrorMsg(null);
     setSelectedEntry(null);
@@ -115,6 +121,8 @@ export function FileExplorer({
         path,
         showHidden,
       });
+
+      if (reqId !== activeReqId.current) return; // Stale response discarded
 
       setCurrentPath(res.current_path);
       setParentPath(res.parent_path);
@@ -132,79 +140,114 @@ export function FileExplorer({
         });
       }
     } catch (err: any) {
+      if (reqId !== activeReqId.current) return;
       console.error("加载目录失败:", err);
-      setErrorMsg(typeof err === "string" ? err : err.message || "读取目录失败");
+      setErrorMsg(typeof err === "string" ? err : err.message || "读取目录超时或失败");
     } finally {
-      setLoading(false);
+      if (reqId === activeReqId.current) {
+        setLoading(false);
+      }
     }
   };
 
-  // Initial load when opened or session changes
-  useEffect(() => {
-    if (isOpen) {
-      loadDirectory("~", false);
-      initQuickTree();
-    }
-  }, [isOpen, session.id, showHidden]);
+  // 100% Lazy Root Initialization: Only load the outermost root items!
+  const initLazyRoot = async () => {
+    if (!session.id || !isOpen) return;
 
-  // Quick tree roots
-  const initQuickTree = () => {
-    const isLocal = session.isLocal;
-    const initialRoots: TreeNode[] = [
-      { path: "~", name: "主目录 (~)", isExpanded: false, isLoading: false, children: null },
-      { path: "/", name: "根目录 (/)", isExpanded: false, isLoading: false, children: null },
-      { path: "/etc", name: "系统配置 (/etc)", isExpanded: false, isLoading: false, children: null },
-      { path: "/var/log", name: "系统日志 (/var/log)", isExpanded: false, isLoading: false, children: null },
-      { path: "/tmp", name: "临时文件 (/tmp)", isExpanded: false, isLoading: false, children: null },
-      { path: isLocal ? "/usr/local" : "/opt", name: isLocal ? "/usr/local" : "/opt", isExpanded: false, isLoading: false, children: null },
-    ];
-    setTreeRoots(initialRoots);
+    try {
+      // Fetch only the outermost items of the home or root path
+      const res = await invoke<DirResult>("fs_list_dir", {
+        sessionId: session.id,
+        path: "/",
+        showHidden: false,
+      });
+
+      // Construct outermost tree nodes with children: null (pure lazy loading!)
+      const topFolders: LazyTreeNode[] = res.entries
+        .filter((e) => e.is_dir)
+        .map((e) => ({
+          path: e.path,
+          name: e.name,
+          isDir: true,
+          isExpanded: false,
+          isLoading: false,
+          children: null, // Subfolders NOT loaded until clicked!
+        }));
+
+      setRootNodes(topFolders);
+    } catch (err) {
+      console.error("初始化根目录树失败:", err);
+      setRootNodes([]);
+    }
   };
 
-  // Expand / collapse tree node
-  const toggleTreeNode = async (node: TreeNode) => {
+  // Lazy load sub-folder only when the user clicks that specific folder
+  const handleToggleFolderNode = async (node: LazyTreeNode) => {
+    // If already expanded, just collapse (0 network call)
     if (node.isExpanded) {
       node.isExpanded = false;
-      setTreeRoots([...treeRoots]);
+      setRootNodes([...rootNodes]);
       return;
     }
 
-    if (node.children) {
+    // If children already cached, just expand (0 network call)
+    if (node.children !== null) {
       node.isExpanded = true;
-      setTreeRoots([...treeRoots]);
+      setRootNodes([...rootNodes]);
+      loadDirectory(node.path);
       return;
     }
 
+    // Pure on-demand lazy fetch for this specific folder!
     node.isLoading = true;
-    setTreeRoots([...treeRoots]);
+    setRootNodes([...rootNodes]);
 
     try {
       const res = await invoke<DirResult>("fs_list_dir", {
         sessionId: session.id,
         path: node.path,
-        showHidden: false,
+        showHidden,
       });
 
-      const dirChildren: TreeNode[] = res.entries
+      // Only extract child folders for the tree, keep children unexpanded (lazy)
+      const childNodes: LazyTreeNode[] = res.entries
         .filter((e) => e.is_dir)
         .map((e) => ({
           path: e.path,
           name: e.name,
+          isDir: true,
           isExpanded: false,
           isLoading: false,
-          children: null,
+          children: null, // Nested subdirectories are also lazy!
         }));
 
-      node.children = dirChildren;
+      node.children = childNodes;
       node.isExpanded = true;
+      // Also update table view to this folder
+      loadDirectory(node.path);
     } catch (err) {
-      console.error("加载树节点失败:", err);
+      console.error(`加载子文件夹 ${node.path} 失败:`, err);
       node.children = [];
     } finally {
       node.isLoading = false;
-      setTreeRoots([...treeRoots]);
+      setRootNodes([...rootNodes]);
     }
   };
+
+  // Only trigger when opened
+  useEffect(() => {
+    if (isOpen && session.id) {
+      loadDirectory("~", false);
+      initLazyRoot();
+    }
+  }, [isOpen, session.id]);
+
+  // Reload when showHidden toggles
+  useEffect(() => {
+    if (isOpen && session.id && currentPath) {
+      loadDirectory(currentPath, false);
+    }
+  }, [showHidden]);
 
   // Navigation handlers
   const handleGoBack = () => {
@@ -245,7 +288,7 @@ export function FileExplorer({
     }
   };
 
-  // Double click file / folder
+  // Double click file / folder in table view
   const handleItemDoubleClick = (entry: FileEntry) => {
     if (entry.is_dir) {
       loadDirectory(entry.path);
@@ -364,8 +407,8 @@ export function FileExplorer({
     return <File className="w-4 h-4 text-[var(--text-tertiary)] flex-shrink-0" />;
   };
 
-  // Render tree node recursive component
-  const renderTreeNode = (node: TreeNode, depth: number = 0) => {
+  // Render a lazy tree node recursively with pure on-demand expansion
+  const renderLazyTreeNode = (node: LazyTreeNode, depth: number = 0) => {
     const isCurrent = currentPath === node.path;
 
     return (
@@ -377,18 +420,18 @@ export function FileExplorer({
               : "text-[var(--text-secondary)] hover:bg-[var(--hover-item)] hover:text-[var(--text-primary)]"
           }`}
           style={{ paddingLeft: `${8 + depth * 14}px` }}
-          onClick={() => loadDirectory(node.path)}
+          onClick={() => handleToggleFolderNode(node)}
         >
-          {/* Chevron */}
+          {/* Lazy Expand Chevron */}
           <button
             onClick={(e) => {
               e.stopPropagation();
-              toggleTreeNode(node);
+              handleToggleFolderNode(node);
             }}
             className="w-3.5 h-3.5 flex items-center justify-center text-[var(--text-tertiary)] hover:text-[var(--text-primary)] rounded"
           >
             {node.isLoading ? (
-              <RotateCw className="w-2.5 h-2.5 animate-spin" />
+              <RotateCw className="w-2.5 h-2.5 animate-spin text-[#007AFF]" />
             ) : node.isExpanded ? (
               <ChevronDown className="w-3 h-3" />
             ) : (
@@ -405,17 +448,18 @@ export function FileExplorer({
           <span className="truncate flex-1 tracking-tight">{node.name}</span>
         </div>
 
+        {/* Lazy Children: Render only when expanded */}
         {node.isExpanded && node.children && (
           <div>
             {node.children.length === 0 ? (
               <div
-                className="text-[10.5px] text-[var(--text-tertiary)] py-0.5"
+                className="text-[10px] text-[var(--text-tertiary)] py-0.5"
                 style={{ paddingLeft: `${24 + depth * 14}px` }}
               >
-                (空目录)
+                (空文件夹)
               </div>
             ) : (
-              node.children.map((child) => renderTreeNode(child, depth + 1))
+              node.children.map((child) => renderLazyTreeNode(child, depth + 1))
             )}
           </div>
         )}
@@ -459,7 +503,7 @@ export function FileExplorer({
           <button
             onClick={handleRefresh}
             className="p-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
-            title="刷新 (Refresh)"
+            title="刷新当前目录 (Refresh)"
           >
             <RotateCw className={`w-3.5 h-3.5 ${loading ? "animate-spin text-[#007AFF]" : ""}`} />
           </button>
@@ -588,14 +632,27 @@ export function FileExplorer({
 
       {/* 2. Main Dual-Pane Body */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Left Tree & Quick Access Pane */}
+        {/* Left Tree Pane (Pure Lazy Loading) */}
         {showTreePane && (
           <div className="w-52 flex-shrink-0 border-r border-[var(--border-subtle)] bg-[var(--bg-sidebar)] flex flex-col overflow-hidden">
-            <div className="p-2 text-[10.5px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider">
-              快速访问与目录树
+            <div className="p-2 text-[10.5px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider flex items-center justify-between">
+              <span>目录树 (最外层懒加载)</span>
+              <button
+                onClick={initLazyRoot}
+                className="hover:text-[var(--text-primary)]"
+                title="重新载入外层目录"
+              >
+                <RotateCw className="w-2.5 h-2.5" />
+              </button>
             </div>
             <div className="flex-1 overflow-y-auto px-1 pb-4">
-              {treeRoots.map((root) => renderTreeNode(root))}
+              {rootNodes.length === 0 ? (
+                <div className="p-3 text-[11px] text-[var(--text-tertiary)] text-center">
+                  点击刷新载入外层目录
+                </div>
+              ) : (
+                rootNodes.map((node) => renderLazyTreeNode(node))
+              )}
             </div>
           </div>
         )}
@@ -604,7 +661,7 @@ export function FileExplorer({
         <div className="flex-1 flex flex-col bg-[var(--bg-app)] overflow-hidden">
           {errorMsg ? (
             <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
-              <div className="w-10 h-10 rounded-full bg-red-500/10 text-red-500 flex items-center justify-center mb-2">
+              <div className="w-10 h-10 rounded-full bg-amber-500/10 text-amber-500 flex items-center justify-center mb-2">
                 <X className="w-5 h-5" />
               </div>
               <div className="text-[13px] font-medium text-[var(--text-primary)]">无法加载此目录</div>
@@ -666,7 +723,12 @@ export function FileExplorer({
 
               {/* Table Rows */}
               <div className="flex-1 overflow-y-auto">
-                {filteredEntries.length === 0 ? (
+                {loading && filteredEntries.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-12 text-[var(--text-tertiary)] text-[12px]">
+                    <RotateCw className="w-6 h-6 animate-spin text-[#007AFF] mb-2" />
+                    <span>正在按需加载目录...</span>
+                  </div>
+                ) : filteredEntries.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-12 text-[var(--text-tertiary)] text-[12px]">
                     <Folder className="w-8 h-8 opacity-40 mb-2 stroke-1" />
                     <span>{searchQuery ? "未匹配到任何文件" : "此文件夹为空"}</span>

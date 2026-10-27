@@ -25,9 +25,9 @@ export function App() {
     fileCount: 0,
   });
 
-  // File Explorer drawer state
+  // File Explorer drawer state (default collapsed for zero lag on connection)
   const [isFileExplorerOpen, setIsFileExplorerOpen] = useState<boolean>(() => {
-    return localStorage.getItem("ultimateshell_explorer_open") !== "false";
+    return localStorage.getItem("ultimateshell_explorer_open") === "true";
   });
   const [explorerHeight, setExplorerHeight] = useState<number>(() => {
     const saved = localStorage.getItem("ultimateshell_explorer_height");
@@ -116,7 +116,7 @@ export function App() {
     };
 
     fetchStats();
-    const interval = setInterval(fetchStats, 3000);
+    const interval = setInterval(fetchStats, 10000);
     return () => clearInterval(interval);
   }, [activeTabId]);
 

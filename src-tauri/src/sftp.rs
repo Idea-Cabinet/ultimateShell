@@ -2,7 +2,7 @@ use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::net::TcpStream;
+use std::net::{TcpStream, ToSocketAddrs};
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -36,6 +36,7 @@ pub struct DirResult {
     pub total_files: usize,
 }
 
+#[derive(Clone)]
 pub struct SftpPool {
     // Cache active ssh2 sessions by session_id to make file operations instantaneous
     sessions: Arc<Mutex<HashMap<String, Arc<ssh2::Session>>>>,
@@ -61,12 +62,19 @@ impl SftpPool {
         let port = opts.port.unwrap_or(22);
         let user = opts.username.as_deref().unwrap_or("root");
 
-        let tcp = TcpStream::connect(format!("{}:{}", host, port))
-            .map_err(|e| format!("无法连接至 {}:{}: {}", host, port, e))?;
-        tcp.set_read_timeout(Some(Duration::from_secs(8))).ok();
-        tcp.set_write_timeout(Some(Duration::from_secs(8))).ok();
+        let addr = format!("{}:{}", host, port)
+            .to_socket_addrs()
+            .map_err(|e| format!("无法解析地址 {}:{}: {}", host, port, e))?
+            .next()
+            .ok_or_else(|| format!("无法解析主机地址: {}", host))?;
+
+        let tcp = TcpStream::connect_timeout(&addr, Duration::from_secs(3))
+            .map_err(|e| format!("连接超时 (3s) {}:{}: {}", host, port, e))?;
+        tcp.set_read_timeout(Some(Duration::from_secs(4))).ok();
+        tcp.set_write_timeout(Some(Duration::from_secs(4))).ok();
 
         let mut sess = ssh2::Session::new().map_err(|e| e.to_string())?;
+        sess.set_timeout(4000); // 4s timeout for SSH operations
         sess.set_tcp_stream(tcp);
         sess.handshake().map_err(|e| format!("SSH 握手失败: {}", e))?;
 

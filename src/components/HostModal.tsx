@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { HostProfile } from "../types";
-import { X, Server, Lock } from "lucide-react";
+import { X, Server, Lock, FolderOpen } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 
 interface Props {
   isOpen: boolean;
@@ -53,6 +54,21 @@ export const HostModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialHos
   }, [initialHost, isOpen]);
 
   if (!isOpen) return null;
+
+  const handleSelectPrivateKey = async () => {
+    try {
+      const selected = await open({
+        multiple: false,
+        directory: false,
+        title: "选择 SSH 私钥文件",
+      });
+      if (selected && typeof selected === "string") {
+        setFormData((prev) => ({ ...prev, identity_file: selected }));
+      }
+    } catch (err) {
+      console.error("选择私钥文件失败:", err);
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -181,13 +197,24 @@ export const HostModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialHos
             <label className="block text-[11px] font-medium text-[var(--text-secondary)] mb-1">
               私钥文件 (可选)
             </label>
-            <input
-              type="text"
-              placeholder="~/.ssh/id_rsa"
-              value={formData.identity_file || ""}
-              onChange={(e) => setFormData({ ...formData, identity_file: e.target.value })}
-              className="w-full px-3 py-1.5 bg-[var(--input-bg)] border border-[var(--border-subtle)] rounded-[8px] text-[12px] text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none focus:border-[#007AFF] focus:ring-1 focus:ring-[#007AFF]/40 font-mono"
-            />
+            <div className="flex items-center space-x-2">
+              <input
+                type="text"
+                placeholder="~/.ssh/id_rsa 或从右侧选择私钥"
+                value={formData.identity_file || ""}
+                onChange={(e) => setFormData({ ...formData, identity_file: e.target.value })}
+                className="flex-1 px-3 py-1.5 bg-[var(--input-bg)] border border-[var(--border-subtle)] rounded-[8px] text-[12px] text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none focus:border-[#007AFF] focus:ring-1 focus:ring-[#007AFF]/40 font-mono"
+              />
+              <button
+                type="button"
+                onClick={handleSelectPrivateKey}
+                className="px-3 py-1.5 bg-[var(--active-item)] hover:bg-[var(--hover-item)] border border-[var(--border-subtle)] hover:border-[var(--border-strong)] rounded-[8px] text-[12px] text-[var(--text-primary)] flex items-center space-x-1.5 flex-shrink-0 active:scale-[0.97] transition-all"
+                title="打开系统文件选择器"
+              >
+                <FolderOpen className="w-3.5 h-3.5 text-[#007AFF]" />
+                <span>选择文件</span>
+              </button>
+            </div>
           </div>
 
           <div>
