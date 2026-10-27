@@ -117,6 +117,24 @@ export const translations = {
     "perf.net": "网络",
     "perf.disk": "磁盘",
     "perf.cores": "{cores} 核",
+
+    // Host Modal
+    "modal.host.addTitle": "添加服务器连接",
+    "modal.host.editTitle": "编辑服务器连接",
+    "modal.host.subtitle": "配置 SSH 远程主机连接与硬件加密凭据",
+    "modal.host.name": "名称",
+    "modal.host.namePlaceholder": "例如: 生产机器 / 香港主节点",
+    "modal.host.address": "主机地址 / IP",
+    "modal.host.port": "端口",
+    "modal.host.username": "用户名",
+    "modal.host.group": "分组",
+    "modal.host.password": "服务器登录密码 (硬件指纹安全加密)",
+    "modal.host.passwordPlaceholder": "输入密码以实现免密自动连接",
+    "modal.host.privateKey": "私钥文件 (可选)",
+    "modal.host.privateKeyPlaceholder": "~/.ssh/id_rsa 或从右侧选择私钥",
+    "modal.host.selectFile": "选择文件",
+    "modal.host.description": "备注",
+    "modal.host.descriptionPlaceholder": "可选备忘说明",
   },
   "en-US": {
     // App Title & Brand
@@ -232,6 +250,24 @@ export const translations = {
     "perf.net": "Network",
     "perf.disk": "Disk",
     "perf.cores": "{cores} Cores",
+
+    // Host Modal
+    "modal.host.addTitle": "Add Server Connection",
+    "modal.host.editTitle": "Edit Server Connection",
+    "modal.host.subtitle": "Configure SSH remote host & hardware-encrypted credentials",
+    "modal.host.name": "Name",
+    "modal.host.namePlaceholder": "e.g. Production / US-West Node",
+    "modal.host.address": "Host Address / IP",
+    "modal.host.port": "Port",
+    "modal.host.username": "Username",
+    "modal.host.group": "Group",
+    "modal.host.password": "Password (Hardware Fingerprint Encrypted)",
+    "modal.host.passwordPlaceholder": "Enter password for auto-login",
+    "modal.host.privateKey": "Private Key (Optional)",
+    "modal.host.privateKeyPlaceholder": "~/.ssh/id_rsa or browse key file",
+    "modal.host.selectFile": "Browse",
+    "modal.host.description": "Notes",
+    "modal.host.descriptionPlaceholder": "Optional description or notes",
   },
 } as const;
 

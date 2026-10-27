@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { HostProfile, TabSession } from "../types";
+import { HostProfile, TabSession, isDefaultGroup } from "../types";
 import { ServerPerfMonitor } from "./ServerPerfMonitor";
 import { useI18n } from "../i18n";
 import {
@@ -207,13 +207,18 @@ export const Sidebar: React.FC<Props> = ({
     });
   };
 
+  const defaultGroupLabel = t("sidebar.defaultGroup");
+
   // Filter hosts from displayHosts snapshot
-  let filteredHosts = displayHosts.filter(
-    (h) =>
-      h.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      h.host.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (h.group && h.group.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
+  let filteredHosts = displayHosts.filter((h) => {
+    const term = searchTerm.toLowerCase();
+    const groupName = isDefaultGroup(h.group) ? defaultGroupLabel : h.group!;
+    return (
+      h.name.toLowerCase().includes(term) ||
+      h.host.toLowerCase().includes(term) ||
+      groupName.toLowerCase().includes(term)
+    );
+  });
 
   // Sort hosts
   filteredHosts.sort((a, b) => {
@@ -228,10 +233,9 @@ export const Sidebar: React.FC<Props> = ({
     }
   });
 
-  const defaultGroupLabel = t("sidebar.defaultGroup");
   const groups: Record<string, HostProfile[]> = {};
   filteredHosts.forEach((h) => {
-    const g = h.group || defaultGroupLabel;
+    const g = isDefaultGroup(h.group) ? defaultGroupLabel : h.group!.trim();
     if (!groups[g]) groups[g] = [];
     groups[g].push(h);
   });
@@ -578,7 +582,7 @@ export const Sidebar: React.FC<Props> = ({
 
               <button
                 onClick={() => {
-                  onNewHost(contextMenu.groupName === defaultGroupLabel ? undefined : contextMenu.groupName);
+                  onNewHost(isDefaultGroup(contextMenu.groupName) ? undefined : contextMenu.groupName);
                   setContextMenu(null);
                 }}
                 className="w-full flex items-center space-x-2 px-3 py-1.5 hover:bg-[#007AFF] hover:text-white text-left transition"

@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { HostProfile, TabSession } from "./types";
+import { HostProfile, TabSession, isDefaultGroup } from "./types";
 import { useTheme } from "./hooks/useTheme";
 import { useI18n } from "./i18n";
 import { Sidebar } from "./components/Sidebar";
@@ -303,7 +303,11 @@ export function App() {
 
   const handleSaveHost = async (host: HostProfile, password?: string) => {
     try {
-      await invoke("save_host", { host, password });
+      const normalizedHost: HostProfile = {
+        ...host,
+        group: isDefaultGroup(host.group) ? undefined : host.group?.trim(),
+      };
+      await invoke("save_host", { host: normalizedHost, password });
       await refreshHosts();
     } catch (err) {
       console.error(`保存失败: ${err}`);
@@ -333,7 +337,8 @@ export function App() {
   const handleChangeHostGroup = async (hostId: string, newGroup: string) => {
     const target = hosts.find((h) => h.id === hostId);
     if (!target) return;
-    const updated = { ...target, group: newGroup.trim() || undefined };
+    const isDef = isDefaultGroup(newGroup);
+    const updated = { ...target, group: isDef ? undefined : newGroup.trim() };
     await invoke("save_host", { host: updated });
     await refreshHosts();
   };
@@ -341,10 +346,14 @@ export function App() {
   const handleRenameGroup = async (oldGroup: string, newGroup: string) => {
     const trimmed = newGroup.trim();
     if (!trimmed || trimmed === oldGroup) return;
+    const isOldDef = isDefaultGroup(oldGroup);
+    const isNewDef = isDefaultGroup(trimmed);
     for (const h of hosts) {
-      const g = h.group || "默认分组";
-      if (g === oldGroup) {
-        await invoke("save_host", { host: { ...h, group: trimmed } });
+      const match = isOldDef ? isDefaultGroup(h.group) : h.group === oldGroup;
+      if (match) {
+        await invoke("save_host", {
+          host: { ...h, group: isNewDef ? undefined : trimmed },
+        });
       }
     }
     await refreshHosts();
@@ -390,13 +399,14 @@ export function App() {
         }}
         onDelete={handleDeleteHost}
         onNewHost={(initialGroup?: string) => {
-          setEditingHost(initialGroup ? {
+          const group = isDefaultGroup(initialGroup) ? undefined : initialGroup?.trim();
+          setEditingHost(group ? {
             id: "",
             name: "",
             host: "",
             port: 22,
             username: "root",
-            group: initialGroup,
+            group,
           } : null);
           setIsModalOpen(true);
         }}

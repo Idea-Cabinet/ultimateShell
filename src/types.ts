@@ -12,6 +12,12 @@ export interface HostProfile {
   has_password?: boolean;
 }
 
+export function isDefaultGroup(group?: string | null): boolean {
+  if (!group) return true;
+  const g = group.trim().toLowerCase();
+  return g === "" || g === "默认分组" || g === "default group";
+}
+
 export interface TabSession {
   id: string;
   title: string;
