@@ -24,7 +24,7 @@ export const TabBar: React.FC<Props> = ({
   return (
     <div
       data-tauri-drag-region
-      className={`h-12 apple-vibrancy-toolbar border-b border-[var(--border-subtle)] flex items-center px-3 space-x-1.5 overflow-x-auto select-none z-10 transition-all ${
+      className={`h-12 apple-vibrancy-toolbar border-b border-[var(--border-subtle)] flex items-center px-3 space-x-1.5 overflow-x-auto select-none z-10 transition-[padding] duration-[180ms] ${
         isSidebarCollapsed ? "pl-[78px]" : ""
       }`}
     >

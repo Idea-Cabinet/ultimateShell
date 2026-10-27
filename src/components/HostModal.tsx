@@ -51,8 +51,9 @@ export const HostModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialHos
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 backdrop-blur-md transition-all">
-      <div className="apple-card rounded-2xl w-[450px] overflow-hidden text-sm animate-in fade-in zoom-in-95 duration-150 text-[var(--text-primary)]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 backdrop-blur-md">
+      {/* Modal with Emil Kowalski physical scale(0.95) -> scale(1) entrance */}
+      <div className="apple-card apple-modal-enter rounded-2xl w-[450px] overflow-hidden text-sm text-[var(--text-primary)]">
         {/* Sheet Header */}
         <div className="flex items-center justify-between px-6 pt-5 pb-3">
           <div className="flex items-center space-x-2.5">
@@ -68,7 +69,7 @@ export const HostModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialHos
           </div>
           <button
             onClick={onClose}
-            className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)] p-1.5 hover:bg-[var(--hover-item)] rounded-full transition active:scale-[0.95]"
+            className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)] p-1.5 hover:bg-[var(--hover-item)] rounded-full active:scale-[0.95]"
           >
             <X className="w-4 h-4" strokeWidth={2} />
           </button>
@@ -85,7 +86,7 @@ export const HostModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialHos
               placeholder="例如: 生产机器 / 香港主节点"
               value={formData.name}
               onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              className="w-full px-3 py-1.5 bg-[var(--input-bg)] border border-[var(--border-subtle)] rounded-[8px] text-[13px] text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none focus:border-[#007AFF] focus:ring-1 focus:ring-[#007AFF]/40 transition"
+              className="w-full px-3 py-1.5 bg-[var(--input-bg)] border border-[var(--border-subtle)] rounded-[8px] text-[13px] text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none focus:border-[#007AFF] focus:ring-1 focus:ring-[#007AFF]/40"
             />
           </div>
 
@@ -100,7 +101,7 @@ export const HostModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialHos
                 placeholder="192.168.1.100"
                 value={formData.host}
                 onChange={(e) => setFormData({ ...formData, host: e.target.value })}
-                className="w-full px-3 py-1.5 bg-[var(--input-bg)] border border-[var(--border-subtle)] rounded-[8px] text-[13px] text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none focus:border-[#007AFF] focus:ring-1 focus:ring-[#007AFF]/40 transition font-mono"
+                className="w-full px-3 py-1.5 bg-[var(--input-bg)] border border-[var(--border-subtle)] rounded-[8px] text-[13px] text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none focus:border-[#007AFF] focus:ring-1 focus:ring-[#007AFF]/40 font-mono"
               />
             </div>
             <div>
@@ -111,7 +112,7 @@ export const HostModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialHos
                 type="number"
                 value={formData.port}
                 onChange={(e) => setFormData({ ...formData, port: parseInt(e.target.value) || 22 })}
-                className="w-full px-3 py-1.5 bg-[var(--input-bg)] border border-[var(--border-subtle)] rounded-[8px] text-[13px] text-[var(--text-primary)] focus:outline-none focus:border-[#007AFF] focus:ring-1 focus:ring-[#007AFF]/40 transition font-mono"
+                className="w-full px-3 py-1.5 bg-[var(--input-bg)] border border-[var(--border-subtle)] rounded-[8px] text-[13px] text-[var(--text-primary)] focus:outline-none focus:border-[#007AFF] focus:ring-1 focus:ring-[#007AFF]/40 font-mono"
               />
             </div>
           </div>
@@ -125,7 +126,7 @@ export const HostModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialHos
                 type="text"
                 value={formData.username}
                 onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-                className="w-full px-3 py-1.5 bg-[var(--input-bg)] border border-[var(--border-subtle)] rounded-[8px] text-[13px] text-[var(--text-primary)] focus:outline-none focus:border-[#007AFF] focus:ring-1 focus:ring-[#007AFF]/40 transition font-mono"
+                className="w-full px-3 py-1.5 bg-[var(--input-bg)] border border-[var(--border-subtle)] rounded-[8px] text-[13px] text-[var(--text-primary)] focus:outline-none focus:border-[#007AFF] focus:ring-1 focus:ring-[#007AFF]/40 font-mono"
               />
             </div>
             <div>
@@ -137,7 +138,7 @@ export const HostModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialHos
                 placeholder="默认分组"
                 value={formData.group || ""}
                 onChange={(e) => setFormData({ ...formData, group: e.target.value })}
-                className="w-full px-3 py-1.5 bg-[var(--input-bg)] border border-[var(--border-subtle)] rounded-[8px] text-[13px] text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none focus:border-[#007AFF] focus:ring-1 focus:ring-[#007AFF]/40 transition"
+                className="w-full px-3 py-1.5 bg-[var(--input-bg)] border border-[var(--border-subtle)] rounded-[8px] text-[13px] text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none focus:border-[#007AFF] focus:ring-1 focus:ring-[#007AFF]/40"
               />
             </div>
           </div>
@@ -151,7 +152,7 @@ export const HostModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialHos
               placeholder="~/.ssh/id_rsa"
               value={formData.identity_file || ""}
               onChange={(e) => setFormData({ ...formData, identity_file: e.target.value })}
-              className="w-full px-3 py-1.5 bg-[var(--input-bg)] border border-[var(--border-subtle)] rounded-[8px] text-[12px] text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none focus:border-[#007AFF] focus:ring-1 focus:ring-[#007AFF]/40 transition font-mono"
+              className="w-full px-3 py-1.5 bg-[var(--input-bg)] border border-[var(--border-subtle)] rounded-[8px] text-[12px] text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none focus:border-[#007AFF] focus:ring-1 focus:ring-[#007AFF]/40 font-mono"
             />
           </div>
 
@@ -164,7 +165,7 @@ export const HostModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialHos
               placeholder="可选备忘说明"
               value={formData.description || ""}
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-              className="w-full px-3 py-1.5 bg-[var(--input-bg)] border border-[var(--border-subtle)] rounded-[8px] text-[13px] text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none focus:border-[#007AFF] focus:ring-1 focus:ring-[#007AFF]/40 transition"
+              className="w-full px-3 py-1.5 bg-[var(--input-bg)] border border-[var(--border-subtle)] rounded-[8px] text-[13px] text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none focus:border-[#007AFF] focus:ring-1 focus:ring-[#007AFF]/40"
             />
           </div>
 
@@ -173,13 +174,13 @@ export const HostModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialHos
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-1.5 text-[13px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] bg-[var(--active-item)] hover:bg-[var(--hover-item)] rounded-[8px] transition active:scale-[0.97]"
+              className="px-4 py-1.5 text-[13px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] bg-[var(--active-item)] hover:bg-[var(--hover-item)] rounded-[8px] active:scale-[0.97]"
             >
               取消
             </button>
             <button
               type="submit"
-              className="px-5 py-1.5 text-[13px] font-medium text-white bg-[#007AFF] hover:bg-[#0A84FF] rounded-[8px] shadow-[0_1px_3px_rgba(0,122,255,0.4)] transition active:scale-[0.97]"
+              className="px-5 py-1.5 text-[13px] font-medium text-white bg-[#007AFF] hover:bg-[#0A84FF] rounded-[8px] shadow-[0_1px_3px_rgba(0,122,255,0.4)] active:scale-[0.97]"
             >
               保存
             </button>

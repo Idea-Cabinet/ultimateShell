@@ -53,6 +53,7 @@ export const Sidebar: React.FC<Props> = ({
 }) => {
   const [searchTerm, setSearchTerm] = useState("");
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  const [isDragging, setIsDragging] = useState(false);
 
   const toggleGroup = (group: string) => {
     setCollapsedGroups((prev) => ({ ...prev, [group]: !prev[group] }));
@@ -60,6 +61,7 @@ export const Sidebar: React.FC<Props> = ({
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault();
+    setIsDragging(true);
     const startX = e.clientX;
     const startWidth = width;
 
@@ -77,6 +79,7 @@ export const Sidebar: React.FC<Props> = ({
     };
 
     const onPointerUp = () => {
+      setIsDragging(false);
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
     };
@@ -112,7 +115,9 @@ export const Sidebar: React.FC<Props> = ({
   return (
     <aside
       style={{ width: `${width}px` }}
-      className="relative h-full apple-vibrancy-sidebar border-r border-[var(--border-subtle)] flex flex-col select-none text-[var(--text-primary)] z-20 flex-shrink-0 transition-[width] duration-75"
+      className={`relative h-full apple-vibrancy-sidebar border-r border-[var(--border-subtle)] flex flex-col select-none text-[var(--text-primary)] z-20 flex-shrink-0 ${
+        isDragging ? "" : "transition-[width] duration-150 ease-[var(--ease-drawer)]"
+      }`}
     >
       {/* macOS Unified Titlebar Drag Region & Traffic Lights clearance */}
       <div
