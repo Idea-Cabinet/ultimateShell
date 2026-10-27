@@ -55,3 +55,21 @@ export interface SystemPerfStats {
   io_write_kbs: number;
   load_1m: number;
 }
+
+export interface ProcessEntry {
+  pid: number;
+  user: string;
+  cpu: number;
+  mem: number;
+  stat: string;
+  command: string;
+}
+
+export interface DiskPartition {
+  filesystem: string;
+  mount_point: string;
+  total: string;
+  used: string;
+  avail: string;
+  use_percent: number;
+}

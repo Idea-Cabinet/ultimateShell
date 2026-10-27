@@ -32,12 +32,13 @@ import {
 
 interface FileExplorerProps {
   session: TabSession;
-  height: number;
+  height?: number;
   isOpen: boolean;
-  isMaximized: boolean;
+  isMaximized?: boolean;
   currentUser?: string;
-  onToggleMaximize: () => void;
-  onClose: () => void;
+  hideHeaderControls?: boolean;
+  onToggleMaximize?: () => void;
+  onClose?: () => void;
   onSendToTerminal: (cmd: string) => void;
 }
 
@@ -129,6 +130,7 @@ export function FileExplorer({
   isOpen,
   isMaximized,
   currentUser,
+  hideHeaderControls,
   onToggleMaximize,
   onClose,
   onSendToTerminal,
@@ -774,8 +776,10 @@ export function FileExplorer({
 
   return (
     <div
-      style={{ height: isMaximized ? "100%" : `${height}px` }}
-      className="w-full flex flex-col bg-[var(--bg-app)] border-t border-[var(--border-subtle)] select-none overflow-hidden relative z-20"
+      style={hideHeaderControls ? undefined : { height: isMaximized ? "100%" : `${height ?? 340}px` }}
+      className={`w-full flex flex-col bg-[var(--bg-app)] select-none overflow-hidden relative ${
+        hideHeaderControls ? "h-full flex-1" : "border-t border-[var(--border-subtle)] z-20"
+      }`}
     >
       {/* 1. Header Toolbar (Navigation, Breadcrumbs, Search, Toggles) */}
       <div className="h-9 px-2.5 bg-[var(--bg-card)] border-b border-[var(--border-subtle)] flex items-center justify-between space-x-2 text-[12px]">
@@ -917,22 +921,26 @@ export function FileExplorer({
           </button>
 
           {/* Maximize / Restore */}
-          <button
-            onClick={onToggleMaximize}
-            className="p-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
-            title={isMaximized ? "还原视口高度 (恢复半屏分栏)" : "最大化文件树 (全屏浏览文件系统)"}
-          >
-            {isMaximized ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
-          </button>
+          {!hideHeaderControls && onToggleMaximize && (
+            <button
+              onClick={onToggleMaximize}
+              className="p-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+              title={isMaximized ? "还原视口高度 (恢复半屏分栏)" : "最大化文件树 (全屏浏览文件系统)"}
+            >
+              {isMaximized ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+            </button>
+          )}
 
           {/* Close Explorer */}
-          <button
-            onClick={onClose}
-            className="p-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
-            title="关闭文件管理器 (可在底部状态栏随时再次展开)"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
+          {!hideHeaderControls && onClose && (
+            <button
+              onClick={onClose}
+              className="p-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+              title="关闭文件管理器 (可在底部状态栏随时再次展开)"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </div>
 

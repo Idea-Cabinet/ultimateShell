@@ -1,4 +1,5 @@
 mod hosts;
+mod ops;
 mod perf;
 mod pty;
 mod ssh_auth;
@@ -6,6 +7,7 @@ mod sftp;
 mod vault;
 
 use hosts::{import_from_finalshell, load_hosts, save_hosts, HostProfile};
+use ops::{DiskPartition, ProcessEntry};
 use perf::{PerfManager, SystemPerfStats};
 use pty::{PtyManager, SpawnOptions};
 use sftp::{DirResult, SftpPool};
@@ -220,6 +222,56 @@ async fn get_system_perf(
     .map_err(|e| format!("异步执行错误: {}", e))?
 }
 
+#[tauri::command]
+async fn get_process_list(
+    pty_mgr: State<'_, PtyManager>,
+    sftp_pool: State<'_, SftpPool>,
+    session_id: String,
+) -> Result<Vec<ProcessEntry>, String> {
+    let opts = pty_mgr
+        .get_opts(&session_id)
+        .ok_or_else(|| "会话不存在或已关闭".to_string())?;
+
+    let pool = sftp_pool.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || ops::get_processes(&pool, &opts))
+        .await
+        .map_err(|e| format!("异步执行错误: {}", e))?
+}
+
+#[tauri::command]
+async fn kill_process(
+    pty_mgr: State<'_, PtyManager>,
+    sftp_pool: State<'_, SftpPool>,
+    session_id: String,
+    pid: u32,
+    signal: i32,
+) -> Result<(), String> {
+    let opts = pty_mgr
+        .get_opts(&session_id)
+        .ok_or_else(|| "会话不存在或已关闭".to_string())?;
+
+    let pool = sftp_pool.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || ops::kill_proc(&pool, &opts, pid, signal))
+        .await
+        .map_err(|e| format!("异步执行错误: {}", e))?
+}
+
+#[tauri::command]
+async fn get_disk_partitions(
+    pty_mgr: State<'_, PtyManager>,
+    sftp_pool: State<'_, SftpPool>,
+    session_id: String,
+) -> Result<Vec<DiskPartition>, String> {
+    let opts = pty_mgr
+        .get_opts(&session_id)
+        .ok_or_else(|| "会话不存在或已关闭".to_string())?;
+
+    let pool = sftp_pool.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || ops::get_disks(&pool, &opts))
+        .await
+        .map_err(|e| format!("异步执行错误: {}", e))?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let pty_mgr = PtyManager::new();
@@ -241,6 +293,9 @@ pub fn run() {
             get_session_stats,
             get_session_user,
             get_system_perf,
+            get_process_list,
+            kill_process,
+            get_disk_partitions,
             get_hosts,
             save_host,
             update_host_access_time,

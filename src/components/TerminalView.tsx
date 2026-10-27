@@ -1,11 +1,13 @@
-import React, { useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
+import { SearchAddon } from "@xterm/addon-search";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { TabSession } from "../types";
 import { ResolvedTheme } from "../hooks/useTheme";
+import { Search, ChevronUp, ChevronDown, X } from "lucide-react";
 
 const DARK_THEME = {
   background: "#121214",
@@ -65,7 +67,17 @@ export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalInstanceRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
+  const searchAddonRef = useRef<SearchAddon | null>(null);
   const hasSwitchedInputRef = useRef(false);
+
+  // Terminal Content Search States (Requirement: 终端内容搜索、匹配高亮、上下条定位)
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [caseSensitive, setCaseSensitive] = useState(false);
+  const [wholeWord, setWholeWord] = useState(false);
+  const [useRegex, setUseRegex] = useState(false);
+  const [searchResult, setSearchResult] = useState<{ index: number; count: number } | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Switch macOS input method to English/ASCII on first cursor focus
   const switchToAscii = () => {
@@ -74,6 +86,62 @@ export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme
       invoke("switch_to_ascii_input").catch(() => {});
     }
   };
+
+  const getSearchOptions = useCallback(() => ({
+    caseSensitive,
+    wholeWord,
+    regex: useRegex,
+    incremental: true,
+    decorations: {
+      matchBackground: "rgba(255, 214, 10, 0.35)",
+      matchBorder: "rgba(255, 214, 10, 0.7)",
+      matchOverviewRuler: "#ffd60a",
+      activeMatchBackground: "#ff9f0a",
+      activeMatchBorder: "#ffffff",
+      activeMatchColorOverviewRuler: "#ff9f0a",
+    },
+  }), [caseSensitive, wholeWord, useRegex]);
+
+  const executeSearch = useCallback((term: string, forward = true) => {
+    if (!searchAddonRef.current || !term.trim()) {
+      searchAddonRef.current?.clearDecorations();
+      setSearchResult(null);
+      return;
+    }
+    const opts = getSearchOptions();
+    if (forward) {
+      searchAddonRef.current.findNext(term, opts);
+    } else {
+      searchAddonRef.current.findPrevious(term, opts);
+    }
+  }, [getSearchOptions]);
+
+  const handleNextMatch = () => executeSearch(searchTerm, true);
+  const handlePrevMatch = () => executeSearch(searchTerm, false);
+
+  const handleCloseSearch = () => {
+    setIsSearchOpen(false);
+    searchAddonRef.current?.clearDecorations();
+    setSearchResult(null);
+    terminalInstanceRef.current?.focus();
+  };
+
+  // Keyboard shortcut listener for Cmd+F / Ctrl+F
+  useEffect(() => {
+    if (!isActive) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        setIsSearchOpen(true);
+        setTimeout(() => searchInputRef.current?.select(), 40);
+      } else if (e.key === "Escape" && isSearchOpen) {
+        e.preventDefault();
+        handleCloseSearch();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isActive, isSearchOpen]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -93,8 +161,14 @@ export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme
     });
 
     const fitAddon = new FitAddon();
+    const searchAddon = new SearchAddon();
     term.loadAddon(fitAddon);
+    term.loadAddon(searchAddon);
     term.loadAddon(new WebLinksAddon());
+
+    searchAddon.onDidChangeResults((e) => {
+      setSearchResult(e ? { index: e.resultIndex, count: e.resultCount } : null);
+    });
 
     term.open(containerRef.current);
     fitAddon.fit();
@@ -116,6 +190,7 @@ export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme
 
     terminalInstanceRef.current = term;
     fitAddonRef.current = fitAddon;
+    searchAddonRef.current = searchAddon;
 
     const onDataDisposable = term.onData((data) => {
       invoke("pty_write", { sessionId: session.id, data }).catch(console.error);
@@ -219,19 +294,148 @@ export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme
   }, [isActive]);
 
   return (
-    <div
-      ref={containerRef}
-      tabIndex={0}
-      onClick={() => {
-        switchToAscii();
-        terminalInstanceRef.current?.focus();
-      }}
-      onFocus={() => {
-        switchToAscii();
-        terminalInstanceRef.current?.focus();
-      }}
-      className={`w-full h-full bg-[var(--bg-terminal)] border-none outline-none cursor-text ${isActive ? "block" : "hidden"}`}
-      style={{ outline: "none", border: "none" }}
-    />
+    <div className={`relative w-full h-full ${isActive ? "block" : "hidden"}`}>
+      {/* Floating Terminal Output Search Bar (Cmd+F / Ctrl+F) */}
+      {isSearchOpen ? (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="absolute top-3 right-5 z-40 apple-vibrancy-popover bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-xl shadow-2xl p-1.5 flex items-center space-x-1.5 text-[12px] text-[var(--text-primary)] animate-in fade-in zoom-in-95 duration-100"
+        >
+          <Search className="w-3.5 h-3.5 text-[var(--text-tertiary)] ml-1 flex-shrink-0" />
+          <input
+            ref={searchInputRef}
+            type="text"
+            value={searchTerm}
+            onChange={(e) => {
+              setSearchTerm(e.target.value);
+              executeSearch(e.target.value, true);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                if (e.shiftKey) handlePrevMatch();
+                else handleNextMatch();
+              }
+            }}
+            placeholder="搜索终端内容 (回车下一处)..."
+            className="w-48 bg-transparent text-[12px] font-mono outline-none placeholder-[var(--text-tertiary)] text-[var(--text-primary)]"
+          />
+
+          {/* Match counter badge */}
+          {searchTerm && (
+            <span className="text-[10.5px] font-mono px-1.5 py-0.5 rounded bg-[var(--hover-item)] text-[var(--text-tertiary)] flex-shrink-0 select-none">
+              {searchResult
+                ? searchResult.count === 0
+                  ? "无匹配"
+                  : `${searchResult.index + 1}/${searchResult.count}`
+                : "..."}
+            </span>
+          )}
+
+          {/* Up / Down Navigation */}
+          <div className="flex items-center space-x-0.5 border-l border-[var(--border-subtle)] pl-1">
+            <button
+              onClick={handlePrevMatch}
+              title="上一处匹配 (Shift+Enter / ↑)"
+              className="p-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition active:scale-95"
+            >
+              <ChevronUp className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={handleNextMatch}
+              title="下一处匹配 (Enter / ↓)"
+              className="p-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition active:scale-95"
+            >
+              <ChevronDown className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          {/* Toggles: Case, Whole Word, Regex */}
+          <div className="flex items-center space-x-0.5 border-l border-[var(--border-subtle)] pl-1 text-[10.5px] font-mono">
+            <button
+              onClick={() => {
+                const next = !caseSensitive;
+                setCaseSensitive(next);
+                setTimeout(() => executeSearch(searchTerm, true), 10);
+              }}
+              title="区分大小写 (Aa)"
+              className={`px-1.5 py-0.5 rounded transition ${
+                caseSensitive
+                  ? "bg-[#007AFF] text-white font-bold"
+                  : "text-[var(--text-tertiary)] hover:bg-[var(--hover-item)] hover:text-[var(--text-primary)]"
+              }`}
+            >
+              Aa
+            </button>
+            <button
+              onClick={() => {
+                const next = !wholeWord;
+                setWholeWord(next);
+                setTimeout(() => executeSearch(searchTerm, true), 10);
+              }}
+              title="全字匹配 (\b)"
+              className={`px-1.5 py-0.5 rounded transition ${
+                wholeWord
+                  ? "bg-[#007AFF] text-white font-bold"
+                  : "text-[var(--text-tertiary)] hover:bg-[var(--hover-item)] hover:text-[var(--text-primary)]"
+              }`}
+            >
+              \b
+            </button>
+            <button
+              onClick={() => {
+                const next = !useRegex;
+                setUseRegex(next);
+                setTimeout(() => executeSearch(searchTerm, true), 10);
+              }}
+              title="正则表达式 (.*)"
+              className={`px-1.5 py-0.5 rounded transition ${
+                useRegex
+                  ? "bg-[#007AFF] text-white font-bold"
+                  : "text-[var(--text-tertiary)] hover:bg-[var(--hover-item)] hover:text-[var(--text-primary)]"
+              }`}
+            >
+              .*
+            </button>
+          </div>
+
+          {/* Close */}
+          <button
+            onClick={handleCloseSearch}
+            title="关闭搜索 (Esc)"
+            className="p-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition active:scale-95 ml-1"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      ) : (
+        /* Floating Search Trigger Button */
+        <button
+          onClick={() => {
+            setIsSearchOpen(true);
+            setTimeout(() => searchInputRef.current?.focus(), 40);
+          }}
+          className="absolute top-2.5 right-4 z-20 p-1.5 rounded-lg bg-[var(--bg-card)]/75 hover:bg-[var(--bg-card)] border border-[var(--border-subtle)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] shadow-sm backdrop-blur transition active:scale-95"
+          title="在终端中搜索输出内容 (Cmd+F / Ctrl+F)"
+        >
+          <Search className="w-3.5 h-3.5" />
+        </button>
+      )}
+
+      {/* Terminal Canvas */}
+      <div
+        ref={containerRef}
+        tabIndex={0}
+        onClick={() => {
+          switchToAscii();
+          terminalInstanceRef.current?.focus();
+        }}
+        onFocus={() => {
+          switchToAscii();
+          terminalInstanceRef.current?.focus();
+        }}
+        className="w-full h-full bg-[var(--bg-terminal)] border-none outline-none cursor-text"
+        style={{ outline: "none", border: "none" }}
+      />
+    </div>
   );
 };

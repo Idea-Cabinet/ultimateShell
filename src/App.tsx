@@ -7,8 +7,9 @@ import { Sidebar } from "./components/Sidebar";
 import { TabBar } from "./components/TabBar";
 import { TerminalView } from "./components/TerminalView";
 import { HostModal } from "./components/HostModal";
-import { FileExplorer } from "./components/FileExplorer";
-import { Folder, KeyRound, ShieldCheck, Sun, Moon, Monitor } from "lucide-react";
+import { OpsDrawer, DrawerTab } from "./components/OpsDrawer";
+import { CommandAssistant } from "./components/CommandAssistant";
+import { Folder, KeyRound, ShieldCheck, Sun, Moon, Monitor, Activity, HardDrive, Terminal } from "lucide-react";
 import "./App.css";
 
 interface PasswordUpdateEvent {
@@ -35,15 +36,24 @@ export function App() {
   // Dynamic user detection (supports real-time prompt parsing, e.g. sudo -iu xxx)
   const [activeUser, setActiveUser] = useState<string>("root");
 
-  // File Explorer drawer state (default collapsed for zero lag on connection)
-  const [isFileExplorerOpen, setIsFileExplorerOpen] = useState<boolean>(() => {
-    return localStorage.getItem("ultimateshell_explorer_open") === "true";
+  // Ops Drawer state (default collapsed for zero lag on connection, tabs: files | processes | disks)
+  const [isOpsDrawerOpen, setIsOpsDrawerOpen] = useState<boolean>(() => {
+    return localStorage.getItem("ultimateshell_drawer_open") === "true" || localStorage.getItem("ultimateshell_explorer_open") === "true";
   });
-  const [explorerHeight, setExplorerHeight] = useState<number>(() => {
-    const saved = localStorage.getItem("ultimateshell_explorer_height");
-    return saved ? parseInt(saved, 10) : 280;
+  const [drawerActiveTab, setDrawerActiveTab] = useState<DrawerTab>(() => {
+    const saved = localStorage.getItem("ultimateshell_drawer_tab");
+    return (saved as DrawerTab) || "files";
   });
-  const [isExplorerMaximized, setIsExplorerMaximized] = useState<boolean>(false);
+  const [drawerHeight, setDrawerHeight] = useState<number>(() => {
+    const saved = localStorage.getItem("ultimateshell_drawer_height") || localStorage.getItem("ultimateshell_explorer_height");
+    return saved ? parseInt(saved, 10) : 300;
+  });
+  const [isDrawerMaximized, setIsDrawerMaximized] = useState<boolean>(false);
+
+  // Command Assistant strip state
+  const [isCommandAssistantOpen, setIsCommandAssistantOpen] = useState<boolean>(() => {
+    return localStorage.getItem("ultimateshell_cmd_assistant_open") === "true";
+  });
 
   // Password update confirmation prompt
   const [passwordPrompt, setPasswordPrompt] = useState<PasswordUpdateEvent | null>(null);
@@ -81,17 +91,17 @@ export function App() {
     setPasswordPrompt(null);
   };
 
-  // Vertical resize handle between terminal and explorer
-  const handleStartExplorerResize = (e: React.MouseEvent) => {
+  // Vertical resize handle between terminal and Ops Drawer
+  const handleStartDrawerResize = (e: React.MouseEvent) => {
     e.preventDefault();
     const startY = e.clientY;
-    const startH = explorerHeight;
+    const startH = drawerHeight;
 
     const onMouseMove = (ev: MouseEvent) => {
       const delta = startY - ev.clientY;
-      const newHeight = Math.min(Math.max(120, startH + delta), window.innerHeight - 140);
-      setExplorerHeight(newHeight);
-      localStorage.setItem("ultimateshell_explorer_height", newHeight.toString());
+      const newHeight = Math.min(Math.max(160, startH + delta), window.innerHeight - 140);
+      setDrawerHeight(newHeight);
+      localStorage.setItem("ultimateshell_drawer_height", newHeight.toString());
     };
 
     const onMouseUp = () => {
@@ -374,7 +384,7 @@ export function App() {
         {/* Terminals Container */}
         <div
           className={`relative overflow-hidden bg-[var(--bg-terminal)] border-none outline-none ${
-            isFileExplorerOpen && isExplorerMaximized ? "hidden" : "flex-1"
+            isOpsDrawerOpen && isDrawerMaximized ? "hidden" : "flex-1"
           }`}
         >
           {tabs.map((tab) => (
@@ -387,41 +397,58 @@ export function App() {
           ))}
         </div>
 
-        {/* Resizer Handle between Terminal and File Explorer */}
-        {isFileExplorerOpen && !isExplorerMaximized && (
+        {/* Command Assistant Bar (High priority feature: quick parameterized cmds, history, run) */}
+        {activeTab && isCommandAssistantOpen && (
+          <CommandAssistant
+            session={activeTab}
+            onSendToTerminal={handleRunQuickCommand}
+            onClose={() => {
+              setIsCommandAssistantOpen(false);
+              localStorage.setItem("ultimateshell_cmd_assistant_open", "false");
+            }}
+          />
+        )}
+
+        {/* Resizer Handle between Terminal and Ops Drawer */}
+        {isOpsDrawerOpen && !isDrawerMaximized && (
           <div
-            onMouseDown={handleStartExplorerResize}
-            onDoubleClick={() => setExplorerHeight(280)}
+            onMouseDown={handleStartDrawerResize}
+            onDoubleClick={() => setDrawerHeight(300)}
             className="h-1 bg-[var(--border-subtle)] hover:bg-[#007AFF] cursor-row-resize transition-colors flex items-center justify-center group select-none relative z-30"
-            title="双击重置高度，拖拽调整高度"
+            title="双击重置高度，拖拽调整抽屉高度"
           >
             <div className="w-8 h-0.5 rounded-full bg-[var(--text-tertiary)] group-hover:bg-[#007AFF] opacity-40 group-hover:opacity-100 transition-opacity" />
           </div>
         )}
 
-        {/* Visual File Explorer & Tree (Windows Explorer / FinalShell SFTP style) */}
+        {/* Integrated Ops Drawer: Files SFTP, Process Manager, Disk Mounts */}
         {activeTab && (
-          <FileExplorer
+          <OpsDrawer
             session={activeTab}
-            height={explorerHeight}
-            isOpen={isFileExplorerOpen}
-            isMaximized={isExplorerMaximized}
-            currentUser={activeUser}
-            onToggleMaximize={() => setIsExplorerMaximized(!isExplorerMaximized)}
-            onClose={() => {
-              setIsFileExplorerOpen(false);
-              localStorage.setItem("ultimateshell_explorer_open", "false");
+            height={drawerHeight}
+            isOpen={isOpsDrawerOpen}
+            isMaximized={isDrawerMaximized}
+            activeTab={drawerActiveTab}
+            onTabChange={(tab) => {
+              setDrawerActiveTab(tab);
+              localStorage.setItem("ultimateshell_drawer_tab", tab);
             }}
+            onToggleMaximize={() => setIsDrawerMaximized(!isDrawerMaximized)}
+            onClose={() => {
+              setIsOpsDrawerOpen(false);
+              localStorage.setItem("ultimateshell_drawer_open", "false");
+            }}
+            currentUser={activeUser}
             onSendToTerminal={handleRunQuickCommand}
           />
         )}
 
-        {/* Bottom Status Bar with Current Path & File Tree Toggle Button */}
+        {/* Bottom Status Bar with Current Path, Ops Drawer Shortcuts & Command Assistant */}
         <div className="h-6 apple-vibrancy-toolbar border-t border-[var(--border-subtle)] px-3 flex items-center justify-between text-[11px] text-[var(--text-tertiary)] select-none">
-          <div className="flex items-center space-x-3 truncate">
+          <div className="flex items-center space-x-2 truncate">
             <span
               title={activeTab?.connected ? "会话状态：已正常连接并就绪" : "会话状态：已断开或已退出"}
-              className="flex items-center space-x-1.5 flex-shrink-0 cursor-default"
+              className="flex items-center space-x-1.5 flex-shrink-0 cursor-default mr-1"
             >
               <span className={`w-1.5 h-1.5 rounded-full ${activeTab?.connected ? "bg-[#30D158]" : "bg-zinc-400"}`}></span>
               <span className="text-[var(--text-secondary)] font-medium">
@@ -431,29 +458,36 @@ export function App() {
             {activeTab?.hostProfile && (
               <span
                 title={`远程连接目标: ${activeTab.hostProfile.username}@${activeTab.hostProfile.host}:${activeTab.hostProfile.port}`}
-                className="text-[var(--text-tertiary)] font-mono text-[10.5px] truncate cursor-default"
+                className="text-[var(--text-tertiary)] font-mono text-[10.5px] truncate cursor-default pr-1 hidden sm:inline"
               >
                 {activeTab.hostProfile.username}@{activeTab.hostProfile.host}:{activeTab.hostProfile.port}
               </span>
             )}
-            {/* Toggle File Explorer Button with Current Directory & Active User */}
+
+            {/* Toggle File Explorer Tab */}
             <button
               onClick={() => {
-                const nextState = !isFileExplorerOpen;
-                setIsFileExplorerOpen(nextState);
-                localStorage.setItem("ultimateshell_explorer_open", nextState ? "true" : "false");
+                if (isOpsDrawerOpen && drawerActiveTab === "files") {
+                  setIsOpsDrawerOpen(false);
+                  localStorage.setItem("ultimateshell_drawer_open", "false");
+                } else {
+                  setIsOpsDrawerOpen(true);
+                  setDrawerActiveTab("files");
+                  localStorage.setItem("ultimateshell_drawer_open", "true");
+                  localStorage.setItem("ultimateshell_drawer_tab", "files");
+                }
               }}
               className={`flex items-center space-x-1.5 px-2 py-0.5 rounded text-[10px] font-mono border transition-all ${
-                isFileExplorerOpen
+                isOpsDrawerOpen && drawerActiveTab === "files"
                   ? "bg-[#007AFF]/15 text-[#007AFF] border-[#007AFF]/40 font-medium"
                   : "bg-[var(--hover-item)] text-[var(--text-secondary)] border-[var(--border-subtle)] hover:border-[var(--border-strong)]"
               }`}
-              title="展开/收起可视化文件树 (Windows/SFTP 风格按需懒加载)"
+              title="切换/展开可视化文件树 (Windows/SFTP 风格按需懒加载)"
             >
               <Folder className="w-3 h-3 text-[#007AFF]" />
               <span>{dirStats.path}</span>
               <span className="text-[var(--text-tertiary)]">·</span>
-              <span>{dirStats.fileCount} 项文件</span>
+              <span>{dirStats.fileCount} 项</span>
               {activeUser && (
                 <>
                   <span className="text-[var(--text-tertiary)]">·</span>
@@ -478,9 +512,72 @@ export function App() {
                   </span>
                 </>
               )}
-              <span className="text-[9px] px-1 py-0.2 rounded bg-[var(--hover-item)] ml-1">
-                {isFileExplorerOpen ? "已展开" : "展开文件树"}
-              </span>
+            </button>
+
+            {/* Toggle Process Manager Tab */}
+            <button
+              onClick={() => {
+                if (isOpsDrawerOpen && drawerActiveTab === "processes") {
+                  setIsOpsDrawerOpen(false);
+                  localStorage.setItem("ultimateshell_drawer_open", "false");
+                } else {
+                  setIsOpsDrawerOpen(true);
+                  setDrawerActiveTab("processes");
+                  localStorage.setItem("ultimateshell_drawer_open", "true");
+                  localStorage.setItem("ultimateshell_drawer_tab", "processes");
+                }
+              }}
+              className={`flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] border transition-all ${
+                isOpsDrawerOpen && drawerActiveTab === "processes"
+                  ? "bg-[#30D158]/15 text-[#30D158] border-[#30D158]/40 font-medium"
+                  : "bg-[var(--hover-item)] text-[var(--text-secondary)] border-[var(--border-subtle)] hover:border-[var(--border-strong)]"
+              }`}
+              title="查看与管理进程（支持按 CPU / 内存排序、结束进程）"
+            >
+              <Activity className="w-3 h-3 text-[#30D158]" />
+              <span>进程</span>
+            </button>
+
+            {/* Toggle Disk Partitions Tab */}
+            <button
+              onClick={() => {
+                if (isOpsDrawerOpen && drawerActiveTab === "disks") {
+                  setIsOpsDrawerOpen(false);
+                  localStorage.setItem("ultimateshell_drawer_open", "false");
+                } else {
+                  setIsOpsDrawerOpen(true);
+                  setDrawerActiveTab("disks");
+                  localStorage.setItem("ultimateshell_drawer_open", "true");
+                  localStorage.setItem("ultimateshell_drawer_tab", "disks");
+                }
+              }}
+              className={`flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] border transition-all ${
+                isOpsDrawerOpen && drawerActiveTab === "disks"
+                  ? "bg-amber-500/15 text-amber-500 border-amber-500/40 font-medium"
+                  : "bg-[var(--hover-item)] text-[var(--text-secondary)] border-[var(--border-subtle)] hover:border-[var(--border-strong)]"
+              }`}
+              title="查看各挂载点磁盘容量、可用空间及占比"
+            >
+              <HardDrive className="w-3 h-3 text-amber-500" />
+              <span>磁盘</span>
+            </button>
+
+            {/* Toggle Command Assistant Bar */}
+            <button
+              onClick={() => {
+                const next = !isCommandAssistantOpen;
+                setIsCommandAssistantOpen(next);
+                localStorage.setItem("ultimateshell_cmd_assistant_open", next ? "true" : "false");
+              }}
+              className={`flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] border transition-all ${
+                isCommandAssistantOpen
+                  ? "bg-purple-500/15 text-purple-500 border-purple-500/40 font-medium"
+                  : "bg-[var(--hover-item)] text-[var(--text-secondary)] border-[var(--border-subtle)] hover:border-[var(--border-strong)]"
+              }`}
+              title="独立命令输入辅助栏（智能模版、参数填写、历史记录）"
+            >
+              <Terminal className="w-3 h-3 text-purple-500" />
+              <span>命令辅助</span>
             </button>
           </div>
 
