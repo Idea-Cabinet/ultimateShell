@@ -11,7 +11,7 @@ use ops::{DiskPartition, ProcessEntry};
 use perf::{PerfManager, SystemPerfStats};
 use pty::{PtyManager, SpawnOptions};
 use sftp::{DirResult, SftpPool};
-use tauri::menu::{Menu, MenuItem};
+use tauri::menu::{AboutMetadata, Menu, MenuBuilder, MenuItem, MenuItemBuilder, SubmenuBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -317,6 +317,115 @@ pub fn run() {
                     })
                     .build(app)?;
             }
+
+            #[cfg(target_os = "macos")]
+            {
+                // 1. App Submenu (macOS primary app menu next to Apple logo)
+                let app_menu = SubmenuBuilder::new(app, "UltimateShell")
+                    .about(Some(AboutMetadata {
+                        name: Some("UltimateShell".into()),
+                        version: Some("0.1.0".into()),
+                        comments: Some("Next-Generation Terminal & Ops Tool".into()),
+                        ..Default::default()
+                    }))
+                    .separator()
+                    .item(&MenuItemBuilder::with_id("menu-settings", "偏好设置... / Preferences...").accelerator("CmdOrCtrl+,").build(app)?)
+                    .separator()
+                    .services()
+                    .separator()
+                    .hide_with_text("隐藏 UltimateShell / Hide UltimateShell")
+                    .hide_others_with_text("隐藏其他 / Hide Others")
+                    .show_all_with_text("显示全部 / Show All")
+                    .separator()
+                    .quit_with_text("退出 UltimateShell / Quit")
+                    .build()?;
+
+                // 2. File Submenu
+                let file_menu = SubmenuBuilder::new(app, "文件 / File")
+                    .item(&MenuItemBuilder::with_id("menu-new-local-tab", "新建本地终端 / New Local Terminal").accelerator("CmdOrCtrl+T").build(app)?)
+                    .item(&MenuItemBuilder::with_id("menu-new-host", "新建服务器连接... / New Host Connection...").accelerator("CmdOrCtrl+N").build(app)?)
+                    .separator()
+                    .item(&MenuItemBuilder::with_id("menu-close-tab", "关闭当前标签页 / Close Tab").accelerator("CmdOrCtrl+W").build(app)?)
+                    .item(&MenuItemBuilder::with_id("menu-close-other-tabs", "关闭其他标签页 / Close Other Tabs").build(app)?)
+                    .separator()
+                    .close_window_with_text("关闭窗口 / Close Window")
+                    .build()?;
+
+                // 3. Edit Submenu
+                let edit_menu = SubmenuBuilder::new(app, "编辑 / Edit")
+                    .undo_with_text("撤销 / Undo")
+                    .redo_with_text("重做 / Redo")
+                    .separator()
+                    .cut_with_text("剪切 / Cut")
+                    .copy_with_text("复制 / Copy")
+                    .paste_with_text("粘贴 / Paste")
+                    .select_all_with_text("全选 / Select All")
+                    .separator()
+                    .item(&MenuItemBuilder::with_id("menu-clear-terminal", "清屏 / Clear Terminal").accelerator("CmdOrCtrl+K").build(app)?)
+                    .build()?;
+
+                // 4. View Submenu
+                let view_menu = SubmenuBuilder::new(app, "查看 / View")
+                    .item(&MenuItemBuilder::with_id("menu-toggle-sidebar", "切换服务器列表侧边栏 / Toggle Sidebar").accelerator("CmdOrCtrl+B").build(app)?)
+                    .item(&MenuItemBuilder::with_id("menu-toggle-cmd-assistant", "切换命令库面板 / Toggle Command Library").accelerator("CmdOrCtrl+Shift+C").build(app)?)
+                    .item(&MenuItemBuilder::with_id("menu-toggle-ops-drawer", "切换文件与运维抽屉 / Toggle Ops Drawer").accelerator("CmdOrCtrl+J").build(app)?)
+                    .separator()
+                    .item(&MenuItemBuilder::with_id("menu-zoom-in", "放大字体 / Zoom In").accelerator("CmdOrCtrl+=").build(app)?)
+                    .item(&MenuItemBuilder::with_id("menu-zoom-out", "缩小字体 / Zoom Out").accelerator("CmdOrCtrl+-").build(app)?)
+                    .item(&MenuItemBuilder::with_id("menu-zoom-reset", "重置字体大小 / Reset Zoom").accelerator("CmdOrCtrl+0").build(app)?)
+                    .separator()
+                    .fullscreen_with_text("切换全屏 / Toggle Full Screen")
+                    .build()?;
+
+                // 5. Session / Terminal Submenu
+                let session_menu = SubmenuBuilder::new(app, "终端会话 / Session")
+                    .item(&MenuItemBuilder::with_id("menu-duplicate-tab", "复制当前标签页 / Duplicate Session").accelerator("CmdOrCtrl+D").build(app)?)
+                    .item(&MenuItemBuilder::with_id("menu-reconnect-session", "重新连接当前会话 / Reconnect Session").accelerator("CmdOrCtrl+R").build(app)?)
+                    .separator()
+                    .item(&MenuItemBuilder::with_id("menu-prev-tab", "上一标签页 / Previous Tab").accelerator("CmdOrCtrl+Shift+[").build(app)?)
+                    .item(&MenuItemBuilder::with_id("menu-next-tab", "下一标签页 / Next Tab").accelerator("CmdOrCtrl+Shift+]").build(app)?)
+                    .build()?;
+
+                // 6. Window Submenu
+                let window_menu = SubmenuBuilder::new(app, "窗口 / Window")
+                    .minimize_with_text("最小化 / Minimize")
+                    .maximize_with_text("缩放 / Zoom")
+                    .separator()
+                    .bring_all_to_front_with_text("前置全部窗口 / Bring All to Front")
+                    .build()?;
+
+                // 7. Help Submenu
+                let help_menu = SubmenuBuilder::new(app, "帮助 / Help")
+                    .item(&MenuItemBuilder::with_id("menu-help-shortcuts", "快捷键速查 / Keyboard Shortcuts").build(app)?)
+                    .build()?;
+
+                let menu_bar = MenuBuilder::new(app)
+                    .items(&[
+                        &app_menu,
+                        &file_menu,
+                        &edit_menu,
+                        &view_menu,
+                        &session_menu,
+                        &window_menu,
+                        &help_menu,
+                    ])
+                    .build()?;
+
+                app.set_menu(menu_bar)?;
+            }
+
+            app.on_menu_event(|app_handle, event| {
+                let id = event.id().as_ref();
+                if id.starts_with("menu-") {
+                    if let Some(window) = app_handle.get_webview_window("main") {
+                        let _ = window.show();
+                        let _ = window.unminimize();
+                        let _ = window.set_focus();
+                        let _ = window.emit("menu-action", id);
+                    }
+                }
+            });
+
             Ok(())
         })
         .on_window_event(|window, event| {

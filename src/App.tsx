@@ -320,6 +320,116 @@ export function App() {
     setActiveTabId(newId);
   };
 
+  const activeTabIdRef = useRef(activeTabId);
+  activeTabIdRef.current = activeTabId;
+  const isSidebarCollapsedRef = useRef(isSidebarCollapsed);
+  isSidebarCollapsedRef.current = isSidebarCollapsed;
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+
+  // Native macOS Application Menu Bar action dispatcher
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    let disposed = false;
+
+    listen<string>("menu-action", (event) => {
+      if (disposed) return;
+      const action = event.payload;
+      switch (action) {
+        case "menu-settings":
+          setIsSettingsOpen(true);
+          break;
+        case "menu-new-local-tab":
+          createNewLocalTab();
+          break;
+        case "menu-new-host":
+          setEditingHost(null);
+          setIsModalOpen(true);
+          break;
+        case "menu-close-tab":
+          if (activeTabIdRef.current) {
+            handleCloseTab(activeTabIdRef.current);
+          }
+          break;
+        case "menu-close-other-tabs":
+          if (activeTabIdRef.current) {
+            handleCloseOtherTabs(activeTabIdRef.current);
+          }
+          break;
+        case "menu-clear-terminal":
+          if (activeTabIdRef.current) {
+            invoke("pty_write", { sessionId: activeTabIdRef.current, data: "\x0c" }).catch(console.error);
+          }
+          break;
+        case "menu-toggle-sidebar":
+          handleCollapse(!isSidebarCollapsedRef.current);
+          break;
+        case "menu-toggle-cmd-assistant":
+          setIsCommandAssistantOpen((prev) => {
+            const next = !prev;
+            localStorage.setItem("ultimateshell_cmd_assistant_open", next ? "true" : "false");
+            return next;
+          });
+          break;
+        case "menu-toggle-ops-drawer":
+          setIsOpsDrawerOpen((prev) => {
+            const next = !prev;
+            localStorage.setItem("ultimateshell_drawer_open", next ? "true" : "false");
+            return next;
+          });
+          break;
+        case "menu-zoom-in":
+          updateSettings({ fontSize: Math.min(28, (settingsRef.current.fontSize || 13.5) + 1) });
+          break;
+        case "menu-zoom-out":
+          updateSettings({ fontSize: Math.max(9, (settingsRef.current.fontSize || 13.5) - 1) });
+          break;
+        case "menu-zoom-reset":
+          updateSettings({ fontSize: 13.5 });
+          break;
+        case "menu-duplicate-tab":
+          if (activeTabIdRef.current) {
+            handleDuplicateTab(activeTabIdRef.current);
+          }
+          break;
+        case "menu-reconnect-session":
+          if (activeTabIdRef.current) {
+            handleReconnectTab(activeTabIdRef.current);
+          }
+          break;
+        case "menu-prev-tab":
+          setTabs((currentTabs) => {
+            if (currentTabs.length <= 1) return currentTabs;
+            const curIdx = currentTabs.findIndex((t) => t.id === activeTabIdRef.current);
+            const prevIdx = (curIdx - 1 + currentTabs.length) % currentTabs.length;
+            setActiveTabId(currentTabs[prevIdx].id);
+            return currentTabs;
+          });
+          break;
+        case "menu-next-tab":
+          setTabs((currentTabs) => {
+            if (currentTabs.length <= 1) return currentTabs;
+            const curIdx = currentTabs.findIndex((t) => t.id === activeTabIdRef.current);
+            const nextIdx = (curIdx + 1) % currentTabs.length;
+            setActiveTabId(currentTabs[nextIdx].id);
+            return currentTabs;
+          });
+          break;
+        case "menu-help-shortcuts":
+          setIsSettingsOpen(true);
+          break;
+      }
+    }).then((fn) => {
+      if (disposed) fn();
+      else unlisten = fn;
+    });
+
+    return () => {
+      disposed = true;
+      if (unlisten) unlisten();
+    };
+  }, []);
+
   const handleSaveHost = async (host: HostProfile, password?: string) => {
     try {
       const normalizedHost: HostProfile = {
