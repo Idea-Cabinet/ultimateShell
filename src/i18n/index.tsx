@@ -158,9 +158,10 @@ export const translations = {
     "cmd.send": "发送至终端",
     "cmd.fillParams": "填写参数并执行",
     "cmd.smartReplace": "智能参数化指令替换",
-    "cmd.preview": "指令预览",
-    "cmd.executeAndSend": "执行并发送",
-    "cmd.searchTemplates": "搜索模板或分类...",
+    "cmd.paramPrompt": "填写参数以自动构建并执行命令",
+    "cmd.preview": "最终生成命令预览",
+    "cmd.executeAndSend": "填入并立即执行",
+    "cmd.searchTemplates": "搜索模板、分类或命令...",
     "cmd.allCategories": "全部分类",
 
     // Process Manager
@@ -385,9 +386,10 @@ export const translations = {
     "cmd.send": "Send to Terminal",
     "cmd.fillParams": "Configure Parameters",
     "cmd.smartReplace": "Smart Parameterized Command Substitution",
-    "cmd.preview": "Command Preview",
-    "cmd.executeAndSend": "Execute & Send",
-    "cmd.searchTemplates": "Search templates or categories...",
+    "cmd.paramPrompt": "Fill in parameters to construct and execute command",
+    "cmd.preview": "Resolved Command Preview",
+    "cmd.executeAndSend": "Apply & Execute Now",
+    "cmd.searchTemplates": "Search templates, categories, or commands...",
     "cmd.allCategories": "All Categories",
 
     // Process Manager

@@ -9,95 +9,132 @@ import {
   X,
   Play,
   ChevronDown,
+  Search,
 } from "lucide-react";
 import { TabSession } from "../types";
 import { useI18n } from "../i18n";
 
 export interface ParametricCommand {
   id: string;
-  category: string;
-  name: string;
-  template: string; // e.g. "docker logs -f --tail {lines:100} {container:web}"
-  description: string;
+  category_zh: string;
+  category_en: string;
+  name_zh: string;
+  name_en: string;
+  template: string;
+  desc_zh: string;
+  desc_en: string;
 }
 
 const DEFAULT_TEMPLATES: ParametricCommand[] = [
   {
     id: "docker-logs",
-    category: "Docker",
-    name: "容器实时日志",
+    category_zh: "Docker 容器",
+    category_en: "Docker",
+    name_zh: "容器实时日志",
+    name_en: "Container Live Logs",
     template: "docker logs -f --tail {lines:100} {container:app}",
-    description: "跟踪查看容器最新的输出日志",
+    desc_zh: "持续跟踪查看容器最新输出日志",
+    desc_en: "Follow and stream recent container logs",
   },
   {
     id: "docker-exec",
-    category: "Docker",
-    name: "进入容器终端",
+    category_zh: "Docker 容器",
+    category_en: "Docker",
+    name_zh: "进入容器终端",
+    name_en: "Enter Container Shell",
     template: "docker exec -it {container:app} /bin/sh",
-    description: "在运行的容器内启动交互式终端",
+    desc_zh: "在运行中的容器内启动交互式终端",
+    desc_en: "Open an interactive shell inside a running container",
   },
   {
     id: "docker-restart",
-    category: "Docker",
-    name: "重启指定容器",
+    category_zh: "Docker 容器",
+    category_en: "Docker",
+    name_zh: "重启指定容器",
+    name_en: "Restart Container",
     template: "docker restart {container:app}",
-    description: "重新启动服务容器",
+    desc_zh: "重新启动服务容器实例",
+    desc_en: "Restart a running container instance",
   },
   {
     id: "find-file",
-    category: "文件检索",
-    name: "文件名深度查找",
+    category_zh: "文件检索",
+    category_en: "Files & Search",
+    name_zh: "文件名深度查找",
+    name_en: "Find Files by Name",
     template: 'find {path:/} -name "{pattern:*.log}" 2>/dev/null',
-    description: "在指定目录树下查找匹配文件",
+    desc_zh: "在指定目录树下递归查找匹配文件",
+    desc_en: "Recursively find files matching pattern under path",
   },
   {
     id: "grep-text",
-    category: "文件检索",
-    name: "全文关键词搜索",
+    category_zh: "文件检索",
+    category_en: "Files & Search",
+    name_zh: "全文关键词搜索",
+    name_en: "Grep Text in Files",
     template: 'grep -rn "{keyword:error}" {path:./} --color=auto',
-    description: "递归搜索包含特定字符串的文件与行号",
+    desc_zh: "递归搜索包含特定字符串的文件与行号",
+    desc_en: "Search recursively for keyword with line numbers",
   },
   {
     id: "tar-pack",
-    category: "压缩解压",
-    name: "打包压缩目录",
+    category_zh: "压缩解压",
+    category_en: "Archive & Zip",
+    name_zh: "打包压缩目录",
+    name_en: "Compress Tar Archive",
     template: "tar -czvf {archive:backup.tar.gz} {target:./data}",
-    description: "使用 gzip 算法创建压缩包",
+    desc_zh: "使用 gzip 算法创建归档压缩包",
+    desc_en: "Create gzip-compressed tar archive from target",
   },
   {
     id: "tar-unpack",
-    category: "压缩解压",
-    name: "解压 tar.gz 压缩包",
+    category_zh: "压缩解压",
+    category_en: "Archive & Zip",
+    name_zh: "解压 tar.gz 压缩包",
+    name_en: "Extract Tar Archive",
     template: "tar -xzvf {archive:backup.tar.gz} -C {dest:./}",
-    description: "解压缩归档文件至目标目录",
+    desc_zh: "解压缩归档文件至目标目录",
+    desc_en: "Extract tar.gz archive to destination directory",
   },
   {
     id: "net-port",
-    category: "网络端口",
-    name: "端口占用过滤",
+    category_zh: "网络端口",
+    category_en: "Networking",
+    name_zh: "端口占用过滤",
+    name_en: "Check Port Listeners",
     template: "ss -tulnp | grep {port:8080}",
-    description: "查询指定端口由哪个服务监听",
+    desc_zh: "查询指定端口由哪个服务监听",
+    desc_en: "Check which process is listening on the given port",
   },
   {
     id: "curl-inspect",
-    category: "网络诊断",
-    name: "HTTP 响应头检测",
+    category_zh: "网络诊断",
+    category_en: "Networking",
+    name_zh: "HTTP 响应头检测",
+    name_en: "Inspect HTTP Headers",
     template: "curl -IL {url:https://google.com} --connect-timeout 5",
-    description: "检查网站 HTTP 重定向及响应头状态",
+    desc_zh: "检查网站 HTTP 重定向及响应头状态",
+    desc_en: "Inspect HTTP response headers and redirects",
   },
   {
     id: "service-log",
-    category: "系统运维",
-    name: "Systemd 服务日志",
+    category_zh: "系统运维",
+    category_en: "System Ops",
+    name_zh: "Systemd 服务日志",
+    name_en: "Systemd Service Logs",
     template: "journalctl -u {service:nginx} -n {lines:50} -f",
-    description: "追踪系统守护服务日志输出",
+    desc_zh: "追踪系统守护服务日志输出",
+    desc_en: "Stream systemd unit journal logs in real-time",
   },
   {
     id: "dir-size",
-    category: "系统运维",
-    name: "目录大小排行",
+    category_zh: "系统运维",
+    category_en: "System Ops",
+    name_zh: "目录大小排行",
+    name_en: "Top Directory Sizes",
     template: "du -sh {path:./}* | sort -hr | head -n {count:10}",
-    description: "统计当前目录下占用最大的文件夹",
+    desc_zh: "统计当前目录下占用最大的文件夹",
+    desc_en: "List largest directories sorted by disk usage",
   },
 ];
 
@@ -109,7 +146,13 @@ interface Props {
 }
 
 export const CommandAssistant: React.FC<Props> = ({ session: _session, isOpen = true, onClose, onSendToTerminal }) => {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
+  const isZh = lang === "zh-CN";
+
+  const getTemplateName = (item: ParametricCommand) => (isZh ? item.name_zh : item.name_en);
+  const getTemplateCategory = (item: ParametricCommand) => (isZh ? item.category_zh : item.category_en);
+  const getTemplateDesc = (item: ParametricCommand) => (isZh ? item.desc_zh : item.desc_en);
+
   const [inputCmd, setInputCmd] = useState("");
   const [history, setHistory] = useState<string[]>(() => {
     try {
@@ -123,6 +166,8 @@ export const CommandAssistant: React.FC<Props> = ({ session: _session, isOpen = 
   const [historyIdx, setHistoryIdx] = useState<number>(-1);
   const [showHistoryDropdown, setShowHistoryDropdown] = useState(false);
   const [showTemplatesModal, setShowTemplatesModal] = useState(false);
+  const [modalFilter, setModalFilter] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState<string>("ALL");
 
   // Parameter Fill Modal State
   const [activeParamCmd, setActiveParamCmd] = useState<ParametricCommand | null>(null);
@@ -150,10 +195,9 @@ export const CommandAssistant: React.FC<Props> = ({ session: _session, isOpen = 
       return updated;
     });
 
-    onSendToTerminal(`${trimmed}\n`);
+    onSendToTerminal(trimmed.endsWith("\n") ? trimmed : `${trimmed}\n`);
     setInputCmd("");
     setHistoryIdx(-1);
-    setShowHistoryDropdown(false);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -163,39 +207,39 @@ export const CommandAssistant: React.FC<Props> = ({ session: _session, isOpen = 
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       if (history.length === 0) return;
-      const nextIdx = Math.min(historyIdx + 1, history.length - 1);
-      setHistoryIdx(nextIdx);
-      setInputCmd(history[nextIdx]);
-    } else if (e.key === "ArrowDown") {
-      e.preventDefault();
-      if (historyIdx > 0) {
-        const nextIdx = historyIdx - 1;
+      const nextIdx = historyIdx + 1;
+      if (nextIdx < history.length) {
         setHistoryIdx(nextIdx);
         setInputCmd(history[nextIdx]);
-      } else if (historyIdx === 0) {
+      }
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      const nextIdx = historyIdx - 1;
+      if (nextIdx >= 0) {
+        setHistoryIdx(nextIdx);
+        setInputCmd(history[nextIdx]);
+      } else if (nextIdx === -1) {
         setHistoryIdx(-1);
         setInputCmd("");
       }
-    } else if (e.key === "Escape") {
-      onClose();
     }
   };
 
-  // Parse parameters from template string: "{name:default}"
-  const openParamDialog = (item: ParametricCommand) => {
-    const regex = /\{([a-zA-Z0-9_-]+)(?::([^}]+))?\}/g;
-    const initialVals: Record<string, string> = {};
+  // Open parameter config modal for a command template
+  const openParamDialog = (cmd: ParametricCommand) => {
+    const params: Record<string, string> = {};
+    const regex = /\{([^:}]+)(?::([^}]+))?\}/g;
     let match;
-    while ((match = regex.exec(item.template)) !== null) {
-      const key = match[1];
+    while ((match = regex.exec(cmd.template)) !== null) {
+      const paramName = match[1];
       const defaultVal = match[2] || "";
-      initialVals[key] = defaultVal;
+      params[paramName] = defaultVal;
     }
-    setActiveParamCmd(item);
-    setParamValues(initialVals);
+    setParamValues(params);
+    setActiveParamCmd(cmd);
   };
 
-  // Generate resolved command with parameters substituted
+  // Generate resolved command with replaced parameters
   const getResolvedCommand = () => {
     if (!activeParamCmd) return "";
     let resolved = activeParamCmd.template;
@@ -215,13 +259,29 @@ export const CommandAssistant: React.FC<Props> = ({ session: _session, isOpen = 
   };
 
   // Smart template suggestions matching current input
-  const suggestions = DEFAULT_TEMPLATES.filter(
-    (t) =>
-      inputCmd.trim() &&
-      (t.name.toLowerCase().includes(inputCmd.toLowerCase()) ||
-        t.template.toLowerCase().includes(inputCmd.toLowerCase()) ||
-        t.category.toLowerCase().includes(inputCmd.toLowerCase()))
-  ).slice(0, 4);
+  const suggestions = DEFAULT_TEMPLATES.filter((t) => {
+    if (!inputCmd.trim()) return false;
+    const q = inputCmd.toLowerCase();
+    const name = getTemplateName(t).toLowerCase();
+    const cat = getTemplateCategory(t).toLowerCase();
+    return name.includes(q) || t.template.toLowerCase().includes(q) || cat.includes(q);
+  }).slice(0, 4);
+
+  // Filtered templates inside the library modal
+  const categories = Array.from(new Set(DEFAULT_TEMPLATES.map((t) => getTemplateCategory(t))));
+
+  const filteredModalTemplates = DEFAULT_TEMPLATES.filter((t) => {
+    const catMatch = selectedCategory === "ALL" || getTemplateCategory(t) === selectedCategory;
+    if (!catMatch) return false;
+    if (!modalFilter.trim()) return true;
+    const q = modalFilter.toLowerCase();
+    return (
+      getTemplateName(t).toLowerCase().includes(q) ||
+      getTemplateDesc(t).toLowerCase().includes(q) ||
+      t.template.toLowerCase().includes(q) ||
+      getTemplateCategory(t).toLowerCase().includes(q)
+    );
+  });
 
   if (!isOpen) return null;
 
@@ -240,7 +300,7 @@ export const CommandAssistant: React.FC<Props> = ({ session: _session, isOpen = 
               onClick={() => openParamDialog(item)}
               className="px-2 py-0.5 rounded bg-[var(--hover-item)] hover:bg-[#007AFF]/15 hover:text-[#007AFF] text-[var(--text-secondary)] border border-[var(--border-subtle)] flex items-center space-x-1 flex-shrink-0 font-mono transition active:scale-95"
             >
-              <span className="font-sans font-medium">{item.name}</span>
+              <span className="font-sans font-medium">{getTemplateName(item)}</span>
               <span className="text-[10px] text-[var(--text-tertiary)]">·</span>
               <span className="text-[10.5px] truncate max-w-[140px]">{item.template}</span>
             </button>
@@ -343,7 +403,11 @@ export const CommandAssistant: React.FC<Props> = ({ session: _session, isOpen = 
 
         {/* Templates Library Button */}
         <button
-          onClick={() => setShowTemplatesModal(true)}
+          onClick={() => {
+            setShowTemplatesModal(true);
+            setModalFilter("");
+            setSelectedCategory("ALL");
+          }}
           className="px-2.5 py-1.5 rounded-lg bg-[var(--hover-item)] hover:bg-[#007AFF]/15 hover:text-[#007AFF] border border-[var(--border-subtle)] text-[var(--text-secondary)] text-[11.5px] font-medium flex items-center space-x-1.5 transition active:scale-95 flex-shrink-0"
           title={t("cmd.library")}
         >
@@ -366,7 +430,7 @@ export const CommandAssistant: React.FC<Props> = ({ session: _session, isOpen = 
         <button
           onClick={onClose}
           className="p-1 rounded text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--hover-item)] transition active:scale-95"
-          title="关闭命令辅助栏"
+          title={t("common.close")}
         >
           <X className="w-3.5 h-3.5" />
         </button>
@@ -375,8 +439,9 @@ export const CommandAssistant: React.FC<Props> = ({ session: _session, isOpen = 
       {/* Templates Library Modal (Rendered to document.body to avoid being covered by sidebar) */}
       {showTemplatesModal &&
         createPortal(
-          <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/45 backdrop-blur-sm animate-in fade-in duration-100">
-            <div className="apple-card rounded-2xl w-[640px] max-h-[500px] flex flex-col p-5 shadow-2xl border border-[var(--border-subtle)] text-[var(--text-primary)]">
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/45 backdrop-blur-sm animate-in fade-in duration-100 select-none">
+            <div className="apple-card rounded-2xl w-[680px] max-h-[540px] flex flex-col p-5 shadow-2xl border border-[var(--border-subtle)] text-[var(--text-primary)]">
+              {/* Modal Header */}
               <div className="flex items-center justify-between pb-3 border-b border-[var(--border-subtle)]">
                 <div className="flex items-center space-x-2">
                   <BookOpen className="w-4 h-4 text-amber-500" />
@@ -390,35 +455,91 @@ export const CommandAssistant: React.FC<Props> = ({ session: _session, isOpen = 
                 </button>
               </div>
 
-              <div className="flex-1 overflow-y-auto py-3 space-y-2 no-scrollbar">
-                {DEFAULT_TEMPLATES.map((item) => (
-                  <div
-                    key={item.id}
-                    onClick={() => openParamDialog(item)}
-                    className="p-3 rounded-xl bg-[var(--hover-item)]/60 hover:bg-[var(--hover-item)] border border-[var(--border-subtle)] cursor-pointer transition flex items-center justify-between group"
-                  >
-                    <div className="min-w-0 flex-1 pr-3">
-                      <div className="flex items-center space-x-2">
-                        <span className="font-semibold text-[12.5px] text-[var(--text-primary)]">
-                          {item.name}
-                        </span>
-                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-[#007AFF]/15 text-[#007AFF] font-medium">
-                          {item.category}
-                        </span>
-                      </div>
-                      <div className="text-[11px] font-mono text-[var(--text-secondary)] mt-1 truncate">
-                        {item.template}
-                      </div>
-                      <div className="text-[10.5px] text-[var(--text-tertiary)] mt-0.5">
-                        {item.description}
-                      </div>
-                    </div>
-                    <button className="px-2.5 py-1 rounded-lg bg-[#007AFF] text-white text-[11px] font-medium opacity-0 group-hover:opacity-100 transition active:scale-95 flex items-center space-x-1 flex-shrink-0">
-                      <Sparkles className="w-3 h-3" />
-                      <span>{t("cmd.fillParams")}</span>
+              {/* Search & Categories Bar */}
+              <div className="pt-3 pb-2 space-y-2">
+                <div className="relative flex items-center">
+                  <Search className="w-3.5 h-3.5 text-[var(--text-tertiary)] absolute left-2.5 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={modalFilter}
+                    onChange={(e) => setModalFilter(e.target.value)}
+                    placeholder={t("cmd.searchTemplates")}
+                    className="w-full pl-8 pr-3 py-1.5 bg-[var(--input-bg)] border border-[var(--border-subtle)] focus:border-[#007AFF] rounded-lg text-[12px] text-[var(--text-primary)] placeholder-[var(--text-tertiary)] outline-none"
+                  />
+                  {modalFilter && (
+                    <button
+                      onClick={() => setModalFilter("")}
+                      className="absolute right-2 p-0.5 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
+                    >
+                      <X className="w-3 h-3" />
                     </button>
+                  )}
+                </div>
+
+                {/* Category Pills */}
+                <div className="flex items-center space-x-1.5 overflow-x-auto no-scrollbar py-0.5 text-[11px]">
+                  <button
+                    onClick={() => setSelectedCategory("ALL")}
+                    className={`px-2.5 py-0.5 rounded-full transition ${
+                      selectedCategory === "ALL"
+                        ? "bg-[#007AFF] text-white font-medium shadow-sm"
+                        : "bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                    }`}
+                  >
+                    {t("cmd.allCategories")}
+                  </button>
+                  {categories.map((cat) => (
+                    <button
+                      key={cat}
+                      onClick={() => setSelectedCategory(cat)}
+                      className={`px-2.5 py-0.5 rounded-full transition ${
+                        selectedCategory === cat
+                          ? "bg-[#007AFF] text-white font-medium shadow-sm"
+                          : "bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                      }`}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Template Items List */}
+              <div className="flex-1 overflow-y-auto py-2 space-y-2 no-scrollbar">
+                {filteredModalTemplates.length === 0 ? (
+                  <div className="py-12 text-center text-[var(--text-tertiary)] text-[12px]">
+                    {t("files.noMatch")}
                   </div>
-                ))}
+                ) : (
+                  filteredModalTemplates.map((item) => (
+                    <div
+                      key={item.id}
+                      onClick={() => openParamDialog(item)}
+                      className="p-3 rounded-xl bg-[var(--hover-item)]/60 hover:bg-[var(--hover-item)] border border-[var(--border-subtle)] cursor-pointer transition flex items-center justify-between group"
+                    >
+                      <div className="min-w-0 flex-1 pr-3">
+                        <div className="flex items-center space-x-2">
+                          <span className="font-semibold text-[12.5px] text-[var(--text-primary)]">
+                            {getTemplateName(item)}
+                          </span>
+                          <span className="text-[10px] px-1.5 py-0.2 rounded bg-[#007AFF]/15 text-[#007AFF] font-medium">
+                            {getTemplateCategory(item)}
+                          </span>
+                        </div>
+                        <div className="text-[11px] font-mono text-[var(--text-secondary)] mt-1 truncate">
+                          {item.template}
+                        </div>
+                        <div className="text-[10.5px] text-[var(--text-tertiary)] mt-0.5">
+                          {getTemplateDesc(item)}
+                        </div>
+                      </div>
+                      <button className="px-2.5 py-1 rounded-lg bg-[#007AFF] text-white text-[11px] font-medium opacity-0 group-hover:opacity-100 transition active:scale-95 flex items-center space-x-1 flex-shrink-0">
+                        <Sparkles className="w-3 h-3" />
+                        <span>{t("cmd.fillParams")}</span>
+                      </button>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           </div>,
@@ -428,13 +549,13 @@ export const CommandAssistant: React.FC<Props> = ({ session: _session, isOpen = 
       {/* Parameter Filling Modal (Rendered to document.body to avoid being covered by sidebar) */}
       {activeParamCmd &&
         createPortal(
-          <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/45 backdrop-blur-sm animate-in fade-in duration-100">
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/45 backdrop-blur-sm animate-in fade-in duration-100 select-none">
             <div className="apple-card rounded-2xl w-[480px] p-5 shadow-2xl border border-[var(--border-subtle)] text-[var(--text-primary)]">
               <div className="flex items-center justify-between pb-3 border-b border-[var(--border-subtle)]">
                 <div>
-                  <h3 className="font-semibold text-[14px]">{activeParamCmd.name}</h3>
+                  <h3 className="font-semibold text-[14px]">{getTemplateName(activeParamCmd)}</h3>
                   <p className="text-[11px] text-[var(--text-secondary)] mt-0.5">
-                    {t("cmd.smartReplace")}
+                    {t("cmd.paramPrompt")}
                   </p>
                 </div>
                 <button
