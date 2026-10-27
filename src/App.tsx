@@ -352,6 +352,7 @@ export function App() {
         }}
         onImportFinalShell={handleImportFinalShell}
         onRunQuickCommand={handleRunQuickCommand}
+        activeSession={activeTab}
       />
 
       {/* Main Terminal Viewport */}

@@ -43,3 +43,15 @@ export interface DirResult {
   total_dirs: number;
   total_files: number;
 }
+
+export interface SystemPerfStats {
+  cpu_usage: number;
+  mem_percent: number;
+  mem_used_gb: number;
+  mem_total_gb: number;
+  net_rx_kbs: number;
+  net_tx_kbs: number;
+  io_read_kbs: number;
+  io_write_kbs: number;
+  load_1m: number;
+}

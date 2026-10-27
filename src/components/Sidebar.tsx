@@ -1,7 +1,8 @@
 import React, { useState } from "react";
-import { HostProfile } from "../types";
+import { HostProfile, TabSession } from "../types";
 import { ThemeMode } from "../hooks/useTheme";
 import { ThemeSelector } from "./ThemeSelector";
+import { ServerPerfMonitor } from "./ServerPerfMonitor";
 import {
   Server,
   Plus,
@@ -12,11 +13,6 @@ import {
   Trash2,
   SlidersHorizontal,
   Folder,
-  Activity,
-  HardDrive,
-  Cpu,
-  Layers,
-  Network,
   PanelLeftClose,
   ArrowUpDown,
   Lock,
@@ -31,6 +27,7 @@ interface Props {
   width: number;
   isCollapsed: boolean;
   themeMode: ThemeMode;
+  activeSession?: TabSession;
   onWidthChange: (w: number) => void;
   onCollapse: (collapsed: boolean) => void;
   onThemeChange: (mode: ThemeMode) => void;
@@ -39,7 +36,7 @@ interface Props {
   onDelete: (id: string) => void;
   onNewHost: () => void;
   onImportFinalShell: () => void;
-  onRunQuickCommand: (cmd: string) => void;
+  onRunQuickCommand?: (cmd: string) => void;
 }
 
 export const Sidebar: React.FC<Props> = ({
@@ -48,6 +45,7 @@ export const Sidebar: React.FC<Props> = ({
   width,
   isCollapsed,
   themeMode,
+  activeSession,
   onWidthChange,
   onCollapse,
   onThemeChange,
@@ -56,7 +54,6 @@ export const Sidebar: React.FC<Props> = ({
   onDelete,
   onNewHost,
   onImportFinalShell,
-  onRunQuickCommand,
 }) => {
   const [searchTerm, setSearchTerm] = useState("");
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
@@ -65,6 +62,12 @@ export const Sidebar: React.FC<Props> = ({
     return (localStorage.getItem("ultimateshell_sort_mode") as SortMode) || "recent";
   });
   const [showSortMenu, setShowSortMenu] = useState(false);
+
+  // Resizable Performance Monitor Height
+  const [perfHeight, setPerfHeight] = useState<number>(() => {
+    const saved = localStorage.getItem("ultimateshell_sidebar_perf_height");
+    return saved ? parseInt(saved, 10) : 210;
+  });
 
   const handleSortChange = (mode: SortMode) => {
     setSortMode(mode);
@@ -132,14 +135,6 @@ export const Sidebar: React.FC<Props> = ({
     if (!groups[g]) groups[g] = [];
     groups[g].push(h);
   });
-
-  const quickCommands = [
-    { label: "性能", icon: Activity, cmd: "htop\n", desc: "性能监测 (htop: 查看 CPU/内存/进程占用)" },
-    { label: "磁盘", icon: HardDrive, cmd: "df -h\n", desc: "磁盘空间 (df -h: 查看各分区剩余容量)" },
-    { label: "内存", icon: Cpu, cmd: "free -m\n", desc: "内存状态 (free -m: 查看物理及交换内存)" },
-    { label: "容器", icon: Layers, cmd: "docker ps\n", desc: "容器列表 (docker ps: 查看活跃容器状态)" },
-    { label: "端口", icon: Network, cmd: "ss -tuln\n", desc: "网络端口 (ss -tuln: 查看系统监听服务端口)" },
-  ];
 
   if (isCollapsed) return null;
 
@@ -363,32 +358,16 @@ export const Sidebar: React.FC<Props> = ({
         )}
       </div>
 
-      {/* Quick Commands Strip */}
-      <div className="p-2.5 border-t border-[var(--border-subtle)] bg-[var(--input-bg)] flex-shrink-0 space-y-2">
-        <div className="text-[10px] font-medium tracking-wider uppercase text-[var(--text-tertiary)] px-0.5">
-          快捷指令
-        </div>
-        <div className="grid grid-cols-2 gap-1">
-          {quickCommands.map((qc) => {
-            const Icon = qc.icon;
-            return (
-              <button
-                key={qc.label}
-                onClick={() => onRunQuickCommand(qc.cmd)}
-                title={qc.desc}
-                className="flex items-center space-x-1.5 px-2 py-1 bg-[var(--active-tab-bg)] hover:bg-[var(--hover-item)] border border-[var(--border-subtle)] rounded-[6px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] text-[11px] font-medium transition active:scale-[0.96]"
-              >
-                <Icon className="w-3 h-3 text-[var(--text-tertiary)]" strokeWidth={1.75} />
-                <span>{qc.label}</span>
-              </button>
-            );
-          })}
-        </div>
+      {/* Real-time Server Performance Monitor with Resizable Height */}
+      <ServerPerfMonitor
+        activeSession={activeSession}
+        height={perfHeight}
+        onHeightChange={setPerfHeight}
+      />
 
-        {/* Theme Selector */}
-        <div className="pt-1.5 border-t border-[var(--border-subtle)]">
-          <ThemeSelector themeMode={themeMode} onChange={onThemeChange} />
-        </div>
+      {/* Sidebar Footer: Theme Selector */}
+      <div className="p-2 border-t border-[var(--border-subtle)] bg-[var(--bg-sidebar)] flex-shrink-0">
+        <ThemeSelector themeMode={themeMode} onChange={onThemeChange} />
       </div>
 
       {/* Resizer Divider Handle */}

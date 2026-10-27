@@ -167,6 +167,8 @@ export function FileExplorer({
     return saved ? parseInt(saved, 10) : 210;
   });
   const [rootNodes, setRootNodes] = useState<LazyTreeNode[]>([]);
+  const [isTreeLoading, setIsTreeLoading] = useState<boolean>(false);
+  const rootNodesCache = useRef<Record<string, LazyTreeNode[]>>({});
 
   // Resizable & Reorderable Table Columns
   const [columns, setColumns] = useState<ColumnDef[]>(() => {
@@ -363,19 +365,27 @@ export function FileExplorer({
     }
   };
 
-  // 100% Lazy Root Initialization: Only load the outermost root items!
-  const initLazyRoot = async () => {
-    if (!session.id || !isOpen) return;
+  // Automatically load the outermost root items with caching and auto-retry
+  const autoLoadOutermostTree = async (targetSessionId: string, retryCount = 0) => {
+    if (!targetSessionId || !isOpen) return;
+
+    // Check memory cache first
+    const cached = rootNodesCache.current[targetSessionId];
+    if (cached && cached.length > 0) {
+      setRootNodes(cached);
+      setIsTreeLoading(false);
+      return;
+    }
+
+    setIsTreeLoading(true);
 
     try {
-      // Fetch only the outermost items of the home or root path
       const res = await invoke<DirResult>("fs_list_dir", {
-        sessionId: session.id,
+        sessionId: targetSessionId,
         path: "/",
         showHidden: false,
       });
 
-      // Construct outermost tree nodes with children: null (pure lazy loading!)
       const topFolders: LazyTreeNode[] = res.entries
         .filter((e) => e.is_dir)
         .map((e) => ({
@@ -387,11 +397,32 @@ export function FileExplorer({
           children: null, // Subfolders NOT loaded until clicked!
         }));
 
-      setRootNodes(topFolders);
+      rootNodesCache.current[targetSessionId] = topFolders;
+      if (session.id === targetSessionId) {
+        setRootNodes(topFolders);
+        setIsTreeLoading(false);
+      }
     } catch (err) {
-      console.error("初始化根目录树失败:", err);
-      setRootNodes([]);
+      console.warn(`[AutoLoadTree] 尝试第 ${retryCount + 1} 次自动载入外层目录:`, err);
+      // Auto-retry up to 3 times with exponential backoff if SSH is still negotiating
+      if (retryCount < 3 && isOpen && session.id === targetSessionId) {
+        setTimeout(() => {
+          autoLoadOutermostTree(targetSessionId, retryCount + 1);
+        }, 700 * (retryCount + 1));
+      } else {
+        if (session.id === targetSessionId) {
+          setIsTreeLoading(false);
+        }
+      }
     }
+  };
+
+  const initLazyRoot = async (forceRefresh = false) => {
+    if (!session.id || !isOpen) return;
+    if (forceRefresh) {
+      delete rootNodesCache.current[session.id];
+    }
+    await autoLoadOutermostTree(session.id);
   };
 
   // Lazy load sub-folder only when the user clicks that specific folder
@@ -447,7 +478,7 @@ export function FileExplorer({
     }
   };
 
-  // Reset to root directory "/" whenever session changes or explorer opens
+  // Reset to root directory "/" and auto-load outermost directory tree whenever session changes or explorer opens
   useEffect(() => {
     if (isOpen && session.id) {
       setCurrentPath("/");
@@ -455,7 +486,16 @@ export function FileExplorer({
       setHistoryIdx(0);
       setSelectedEntry(null);
       loadDirectory("/", false);
-      initLazyRoot();
+
+      // Requirement 1: If outermost directory tree has not been loaded yet, auto-load it!
+      const cached = rootNodesCache.current[session.id];
+      if (cached && cached.length > 0) {
+        setRootNodes(cached);
+        setIsTreeLoading(false);
+      } else {
+        setRootNodes([]);
+        autoLoadOutermostTree(session.id);
+      }
     }
   }, [isOpen, session.id]);
 
@@ -908,17 +948,33 @@ export function FileExplorer({
               <div className="p-2 text-[10.5px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider flex items-center justify-between">
                 <span>目录树 (最外层懒加载)</span>
                 <button
-                  onClick={initLazyRoot}
+                  onClick={() => initLazyRoot(true)}
                   className="hover:text-[var(--text-primary)]"
                   title="重新载入外层目录"
                 >
-                  <RotateCw className="w-2.5 h-2.5" />
+                  <RotateCw className={`w-2.5 h-2.5 ${isTreeLoading ? "animate-spin text-[#007AFF]" : ""}`} />
                 </button>
               </div>
               <div className="flex-1 overflow-y-auto px-1 pb-4">
-                {rootNodes.length === 0 ? (
-                  <div className="p-3 text-[11px] text-[var(--text-tertiary)] text-center">
-                    点击刷新载入外层目录
+                {isTreeLoading ? (
+                  <div className="py-8 px-2 flex flex-col items-center justify-center text-center space-y-2 text-[var(--text-tertiary)]">
+                    <RotateCw className="w-4 h-4 animate-spin text-[#007AFF]" />
+                    <span className="text-[11px] font-medium text-[var(--text-secondary)]">
+                      正在自动载入外层目录...
+                    </span>
+                    <span className="text-[10px] text-[var(--text-tertiary)]">
+                      按需智能懒加载
+                    </span>
+                  </div>
+                ) : rootNodes.length === 0 ? (
+                  <div className="py-6 px-3 text-center space-y-2">
+                    <div className="text-[11px] text-[var(--text-tertiary)]">未获取到外层目录</div>
+                    <button
+                      onClick={() => initLazyRoot(true)}
+                      className="px-2.5 py-1 text-[11px] rounded bg-[var(--hover-item)] hover:bg-[#007AFF] hover:text-white transition active:scale-95 text-[var(--text-secondary)] border border-[var(--border-subtle)]"
+                    >
+                      重新载入
+                    </button>
                   </div>
                 ) : (
                   rootNodes.map((node) => renderLazyTreeNode(node))

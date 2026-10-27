@@ -1,10 +1,12 @@
 mod hosts;
+mod perf;
 mod pty;
 mod ssh_auth;
 mod sftp;
 mod vault;
 
 use hosts::{import_from_finalshell, load_hosts, save_hosts, HostProfile};
+use perf::{PerfManager, SystemPerfStats};
 use pty::{PtyManager, SpawnOptions};
 use sftp::{DirResult, SftpPool};
 use tauri::{AppHandle, State};
@@ -198,14 +200,36 @@ fn get_host_password(host_id: String) -> Option<String> {
     vault::get_password(&host_id)
 }
 
+#[tauri::command]
+async fn get_system_perf(
+    pty_mgr: State<'_, PtyManager>,
+    sftp_pool: State<'_, SftpPool>,
+    perf_mgr: State<'_, PerfManager>,
+    session_id: String,
+) -> Result<SystemPerfStats, String> {
+    let opts = pty_mgr
+        .get_opts(&session_id)
+        .ok_or_else(|| "会话不存在或已关闭".to_string())?;
+
+    let pool = sftp_pool.inner().clone();
+    let mgr = perf_mgr.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        mgr.get_perf(&pool, &opts)
+    })
+    .await
+    .map_err(|e| format!("异步执行错误: {}", e))?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let pty_mgr = PtyManager::new();
     let sftp_pool = SftpPool::new();
+    let perf_mgr = PerfManager::new();
 
     tauri::Builder::default()
         .manage(pty_mgr)
         .manage(sftp_pool)
+        .manage(perf_mgr)
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
@@ -216,6 +240,7 @@ pub fn run() {
             switch_to_ascii_input,
             get_session_stats,
             get_session_user,
+            get_system_perf,
             get_hosts,
             save_host,
             update_host_access_time,
