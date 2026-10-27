@@ -15,6 +15,7 @@ pub struct PtySession {
     pub child: Box<dyn Child + Send>,
     pub is_local: bool,
     pub pid: Option<u32>,
+    pub opts: SpawnOptions,
 }
 
 #[derive(Clone, Default)]
@@ -22,7 +23,7 @@ pub struct PtyManager {
     pub sessions: Arc<Mutex<HashMap<String, PtySession>>>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct SpawnOptions {
     pub session_id: String,
     pub is_local: bool,
@@ -67,9 +68,9 @@ impl PtyManager {
             }
             c
         } else {
-            let host = opts.host.ok_or_else(|| "Host is required for SSH".to_string())?;
+            let host = opts.host.as_deref().ok_or_else(|| "Host is required for SSH".to_string())?;
             let port = opts.port.unwrap_or(22);
-            let user = opts.username.unwrap_or_else(|| "root".to_string());
+            let user = opts.username.as_deref().unwrap_or("root");
 
             let mut c = CommandBuilder::new("ssh");
             c.arg("-o");
@@ -156,10 +157,16 @@ impl PtyManager {
                 child,
                 is_local: opts.is_local,
                 pid,
+                opts: opts.clone(),
             },
         );
 
         Ok(())
+    }
+
+    pub fn get_opts(&self, session_id: &str) -> Option<SpawnOptions> {
+        let sessions = self.sessions.lock().unwrap();
+        sessions.get(session_id).map(|s| s.opts.clone())
     }
 
     pub fn write(&self, session_id: &str, data: &str) -> Result<(), String> {

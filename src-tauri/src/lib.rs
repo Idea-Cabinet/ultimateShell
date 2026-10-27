@@ -1,9 +1,11 @@
 mod hosts;
 mod pty;
+mod sftp;
 mod vault;
 
 use hosts::{import_from_finalshell, load_hosts, save_hosts, HostProfile};
 use pty::{PtyManager, SpawnOptions};
+use sftp::{DirResult, SftpPool};
 use tauri::{AppHandle, State};
 
 #[tauri::command]
@@ -35,8 +37,46 @@ fn pty_resize(
 }
 
 #[tauri::command]
-fn pty_close(pty_mgr: State<PtyManager>, session_id: String) -> Result<(), String> {
+fn pty_close(
+    pty_mgr: State<PtyManager>,
+    sftp_pool: State<SftpPool>,
+    session_id: String,
+) -> Result<(), String> {
+    sftp_pool.close(&session_id);
     pty_mgr.close(&session_id)
+}
+
+#[tauri::command]
+fn fs_list_dir(
+    pty_mgr: State<PtyManager>,
+    sftp_pool: State<SftpPool>,
+    session_id: String,
+    path: String,
+    show_hidden: bool,
+) -> Result<DirResult, String> {
+    let opts = pty_mgr
+        .get_opts(&session_id)
+        .ok_or_else(|| "会话不存在或已关闭".to_string())?;
+
+    if opts.is_local {
+        sftp::list_local_dir(&path, show_hidden)
+    } else {
+        sftp::list_remote_dir(&sftp_pool, &opts, &path, show_hidden)
+    }
+}
+
+#[tauri::command]
+fn fs_read_preview(
+    pty_mgr: State<PtyManager>,
+    sftp_pool: State<SftpPool>,
+    session_id: String,
+    path: String,
+) -> Result<String, String> {
+    let opts = pty_mgr
+        .get_opts(&session_id)
+        .ok_or_else(|| "会话不存在或已关闭".to_string())?;
+
+    sftp::read_file_preview_content(&sftp_pool, &opts, &path, 64 * 1024)
 }
 
 #[tauri::command]
@@ -116,9 +156,11 @@ fn get_host_password(host_id: String) -> Option<String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let pty_mgr = PtyManager::new();
+    let sftp_pool = SftpPool::new();
 
     tauri::Builder::default()
         .manage(pty_mgr)
+        .manage(sftp_pool)
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             pty_spawn,
@@ -133,6 +175,8 @@ pub fn run() {
             import_finalshell,
             save_host_password,
             get_host_password,
+            fs_list_dir,
+            fs_read_preview,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

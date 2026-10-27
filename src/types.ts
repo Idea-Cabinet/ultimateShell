@@ -19,3 +19,27 @@ export interface TabSession {
   hostProfile?: HostProfile;
   connected: boolean;
 }
+
+export interface FileEntry {
+  name: string;
+  path: string;
+  is_dir: boolean;
+  is_symlink: boolean;
+  size: number;
+  size_formatted: string;
+  mtime: number;
+  mtime_formatted: string;
+  permissions: string;
+  owner: string;
+  file_type: string;
+  ext: string;
+}
+
+export interface DirResult {
+  current_path: string;
+  parent_path?: string;
+  entries: FileEntry[];
+  total_count: number;
+  total_dirs: number;
+  total_files: number;
+}

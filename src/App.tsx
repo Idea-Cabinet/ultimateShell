@@ -6,6 +6,7 @@ import { Sidebar } from "./components/Sidebar";
 import { TabBar } from "./components/TabBar";
 import { TerminalView } from "./components/TerminalView";
 import { HostModal } from "./components/HostModal";
+import { FileExplorer } from "./components/FileExplorer";
 import { Folder } from "lucide-react";
 import "./App.css";
 
@@ -23,6 +24,38 @@ export function App() {
     path: "~",
     fileCount: 0,
   });
+
+  // File Explorer drawer state
+  const [isFileExplorerOpen, setIsFileExplorerOpen] = useState<boolean>(() => {
+    return localStorage.getItem("ultimateshell_explorer_open") !== "false";
+  });
+  const [explorerHeight, setExplorerHeight] = useState<number>(() => {
+    const saved = localStorage.getItem("ultimateshell_explorer_height");
+    return saved ? parseInt(saved, 10) : 280;
+  });
+  const [isExplorerMaximized, setIsExplorerMaximized] = useState<boolean>(false);
+
+  // Vertical resize handle between terminal and explorer
+  const handleStartExplorerResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startH = explorerHeight;
+
+    const onMouseMove = (ev: MouseEvent) => {
+      const delta = startY - ev.clientY;
+      const newHeight = Math.min(Math.max(120, startH + delta), window.innerHeight - 140);
+      setExplorerHeight(newHeight);
+      localStorage.setItem("ultimateshell_explorer_height", newHeight.toString());
+    };
+
+    const onMouseUp = () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  };
 
   // Sidebar width & collapse state
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
@@ -268,7 +301,11 @@ export function App() {
         />
 
         {/* Terminals Container */}
-        <div className="flex-1 relative overflow-hidden bg-[var(--bg-terminal)] border-none outline-none">
+        <div
+          className={`relative overflow-hidden bg-[var(--bg-terminal)] border-none outline-none ${
+            isFileExplorerOpen && isExplorerMaximized ? "hidden" : "flex-1"
+          }`}
+        >
           {tabs.map((tab) => (
             <TerminalView
               key={tab.id}
@@ -279,7 +316,35 @@ export function App() {
           ))}
         </div>
 
-        {/* Bottom Status Bar with Current Path & File Count (Requirement 5) */}
+        {/* Resizer Handle between Terminal and File Explorer */}
+        {isFileExplorerOpen && !isExplorerMaximized && (
+          <div
+            onMouseDown={handleStartExplorerResize}
+            onDoubleClick={() => setExplorerHeight(280)}
+            className="h-1 bg-[var(--border-subtle)] hover:bg-[#007AFF] cursor-row-resize transition-colors flex items-center justify-center group select-none relative z-30"
+            title="双击重置高度，拖拽调整高度"
+          >
+            <div className="w-8 h-0.5 rounded-full bg-[var(--text-tertiary)] group-hover:bg-[#007AFF] opacity-40 group-hover:opacity-100 transition-opacity" />
+          </div>
+        )}
+
+        {/* Visual File Explorer & Tree (Windows Explorer / FinalShell SFTP style) */}
+        {activeTab && (
+          <FileExplorer
+            session={activeTab}
+            height={explorerHeight}
+            isOpen={isFileExplorerOpen}
+            isMaximized={isExplorerMaximized}
+            onToggleMaximize={() => setIsExplorerMaximized(!isExplorerMaximized)}
+            onClose={() => {
+              setIsFileExplorerOpen(false);
+              localStorage.setItem("ultimateshell_explorer_open", "false");
+            }}
+            onSendToTerminal={handleRunQuickCommand}
+          />
+        )}
+
+        {/* Bottom Status Bar with Current Path & File Tree Toggle Button */}
         <div className="h-6 apple-vibrancy-toolbar border-t border-[var(--border-subtle)] px-3 flex items-center justify-between text-[11px] text-[var(--text-tertiary)] select-none">
           <div className="flex items-center space-x-3 truncate">
             <span className="flex items-center space-x-1.5 flex-shrink-0">
@@ -293,13 +358,28 @@ export function App() {
                 {activeTab.hostProfile.username}@{activeTab.hostProfile.host}:{activeTab.hostProfile.port}
               </span>
             )}
-            {/* Requirement 5: Current Directory & File Count indicator */}
-            <span className="flex items-center space-x-1 text-[var(--text-secondary)] bg-[var(--hover-item)] px-2 py-0.5 rounded text-[10px] font-mono border border-[var(--border-subtle)]">
+            {/* Toggle File Explorer Button with Current Directory */}
+            <button
+              onClick={() => {
+                const nextState = !isFileExplorerOpen;
+                setIsFileExplorerOpen(nextState);
+                localStorage.setItem("ultimateshell_explorer_open", nextState ? "true" : "false");
+              }}
+              className={`flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] font-mono border transition-all ${
+                isFileExplorerOpen
+                  ? "bg-[#007AFF]/15 text-[#007AFF] border-[#007AFF]/40 font-medium"
+                  : "bg-[var(--hover-item)] text-[var(--text-secondary)] border-[var(--border-subtle)] hover:border-[var(--border-strong)]"
+              }`}
+              title="点击展开/收起可视化文件树与资源管理器"
+            >
               <Folder className="w-3 h-3 text-[#007AFF]" />
               <span>{dirStats.path}</span>
               <span className="text-[var(--text-tertiary)]">·</span>
               <span>{dirStats.fileCount} 项文件</span>
-            </span>
+              <span className="text-[9px] px-1 py-0.2 rounded bg-[var(--hover-item)] ml-1">
+                {isFileExplorerOpen ? "已展开" : "展开文件树"}
+              </span>
+            </button>
           </div>
 
           <div className="flex items-center space-x-3 text-[10.5px] flex-shrink-0">
