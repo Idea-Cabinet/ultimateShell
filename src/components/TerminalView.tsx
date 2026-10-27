@@ -149,6 +149,7 @@ export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme
     const currentTheme = resolvedTheme === "dark" ? DARK_THEME : LIGHT_THEME;
 
     const term = new Terminal({
+      scrollback: 5000,
       cursorBlink: false,
       cursorStyle: "block",
       cursorInactiveStyle: "outline",
@@ -201,10 +202,62 @@ export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme
     let unlistenData: (() => void) | null = null;
     let unlistenExit: (() => void) | null = null;
 
+    // High-performance write queue with backpressure & flood protection
+    let writeQueue: string[] = [];
+    let queuedBytes = 0;
+    let isWriting = false;
+    let rafHandle: number | null = null;
+
+    const processWriteQueue = () => {
+      if (disposed || writeQueue.length === 0) {
+        isWriting = false;
+        return;
+      }
+
+      // Flood protection: if accumulated data exceeds 1.5MB (massive flood like `find /`),
+      // keep latest 256KB and drop intermediate lines to prevent memory explosion
+      if (queuedBytes > 1536 * 1024) {
+        const warning = "\r\n\x1b[33m[输出速率过高，已启动智能流控以保护内存]\x1b[0m\r\n";
+        let kept: string[] = [];
+        let keptBytes = 0;
+        for (let i = writeQueue.length - 1; i >= 0; i--) {
+          kept.unshift(writeQueue[i]);
+          keptBytes += writeQueue[i].length;
+          if (keptBytes >= 256 * 1024) break;
+        }
+        writeQueue = [warning, ...kept];
+        queuedBytes = keptBytes + warning.length;
+      }
+
+      const chunk = writeQueue.join("");
+      writeQueue = [];
+      queuedBytes = 0;
+      isWriting = true;
+
+      term.write(chunk, () => {
+        isWriting = false;
+        if (writeQueue.length > 0 && !disposed) {
+          rafHandle = requestAnimationFrame(processWriteQueue);
+        }
+      });
+    };
+
     const startSession = async () => {
       try {
         const offData = await listen<string>(`pty-data-${session.id}`, (event) => {
-          if (!disposed) term.write(event.payload);
+          if (!disposed) {
+            writeQueue.push(event.payload);
+            queuedBytes += event.payload.length;
+
+            if (!isWriting) {
+              isWriting = true;
+              if (queuedBytes < 32 * 1024) {
+                processWriteQueue();
+              } else if (rafHandle === null) {
+                rafHandle = requestAnimationFrame(processWriteQueue);
+              }
+            }
+          }
         });
         if (disposed) { offData(); return; }
         unlistenData = offData;
@@ -261,15 +314,25 @@ export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme
 
     return () => {
       disposed = true;
+      if (rafHandle !== null) {
+        cancelAnimationFrame(rafHandle);
+        rafHandle = null;
+      }
+      writeQueue = [];
+      queuedBytes = 0;
       resizeObserver.disconnect();
       window.removeEventListener("resize", handleResize);
       onDataDisposable.dispose();
       if (unlistenData) unlistenData();
       if (unlistenExit) unlistenExit();
       if (spawned) invoke("pty_close", { sessionId: session.id }).catch(() => {});
+      term.clear();
+      searchAddon.dispose();
+      fitAddon.dispose();
+      term.dispose();
       terminalInstanceRef.current = null;
       fitAddonRef.current = null;
-      term.dispose();
+      searchAddonRef.current = null;
     };
   }, [session.id]);
 

@@ -175,13 +175,41 @@ impl PtyManager {
 
         let writer_clone = Arc::clone(&writer);
 
+        // Bounded channel creates native backpressure on high-throughput commands (e.g. while true; do find /; done)
+        let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(64);
+
+        // Thread 1: Fast Raw PTY Reader with OS Pipe Backpressure
         thread::spawn(move || {
-            let mut buf = [0u8; 4096];
+            let mut buf = [0u8; 16384]; // 16KB read buffer
             while let Ok(n) = reader.read(&mut buf) {
                 if n == 0 {
                     break;
                 }
-                let mut chunk = String::from_utf8_lossy(&buf[..n]).to_string();
+                if tx.send(buf[..n].to_vec()).is_err() {
+                    break;
+                }
+            }
+        });
+
+        // Thread 2: Adaptive Frame Micro-Batcher (Aggregates high-frequency bursts, zero-latency on human typing)
+        thread::spawn(move || {
+            let max_batch_bytes = 48 * 1024; // 48KB max IPC chunk
+            let max_batch_duration = std::time::Duration::from_millis(10); // ~100fps max
+
+            while let Ok(first_chunk) = rx.recv() {
+                let mut raw_batch = first_chunk;
+                let start_time = std::time::Instant::now();
+
+                // If more data is actively available, accumulate up to max_batch_bytes or 10ms
+                while raw_batch.len() < max_batch_bytes && start_time.elapsed() < max_batch_duration {
+                    match rx.try_recv() {
+                        Ok(more) => raw_batch.extend(more),
+                        Err(std::sync::mpsc::TryRecvError::Empty) => break, // Nothing waiting, send immediately!
+                        Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
+                    }
+                }
+
+                let mut chunk = String::from_utf8_lossy(&raw_batch).to_string();
                 let mut is_login_success = false;
 
                 if let Some(user) = extract_prompt_username(&chunk) {
@@ -235,11 +263,14 @@ impl PtyManager {
                     }
                 }
 
-                let event_name = format!("pty-data-{}", sid_clone);
-                if app_clone.emit(&event_name, chunk).is_err() {
-                    break;
+                if !chunk.is_empty() {
+                    let event_name = format!("pty-data-{}", sid_clone);
+                    if app_clone.emit(&event_name, chunk).is_err() {
+                        break;
+                    }
                 }
             }
+
             let exit_event = format!("pty-exit-{}", sid_clone);
             let _ = app_clone.emit(&exit_event, ());
         });
