@@ -209,7 +209,7 @@ export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme
         if (disposed) { offData(); return; }
         unlistenData = offData;
         const offExit = await listen(`pty-exit-${session.id}`, () => {
-          if (!disposed) term.write("\r\n\x1b[90m[会话已结束]\x1b[0m\r\n");
+          if (!disposed) term.write("\r\n\x1b[90m[会话已结束 - 可在标签右键点击「重新连接」或双击主机快速恢复]\x1b[0m\r\n");
         });
         if (disposed) { offExit(); return; }
         unlistenExit = offExit;

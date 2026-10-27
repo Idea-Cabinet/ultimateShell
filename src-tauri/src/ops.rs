@@ -44,14 +44,23 @@ pub fn get_processes(pool: &SftpPool, opts: &SpawnOptions) -> Result<Vec<Process
             String::new()
         }
     } else {
-        let sess = pool.get_or_connect(opts)?;
-        let mut channel = sess
-            .channel_session()
-            .map_err(|e| format!("无法创建 SSH 通道: {}", e))?;
+        let sess_arc = pool.get_or_connect(opts)?;
+        let sess = sess_arc.lock().map_err(|e| e.to_string())?;
+        let mut channel = match sess.channel_session() {
+            Ok(c) => c,
+            Err(e) => {
+                drop(sess);
+                pool.invalidate(&opts.session_id);
+                return Err(format!("无法创建 SSH 通道: {}", e));
+            }
+        };
 
-        channel
-            .exec("ps -eo pid,user,pcpu,pmem,stat,args --sort=-pcpu 2>/dev/null || ps -axo pid,user,%cpu,%mem,state,command")
-            .map_err(|e| format!("无法在远程执行 ps 命令: {}", e))?;
+        if let Err(e) = channel.exec("ps -eo pid,user,pcpu,pmem,stat,args --sort=-pcpu 2>/dev/null || ps -axo pid,user,%cpu,%mem,state,command") {
+            drop(channel);
+            drop(sess);
+            pool.invalidate(&opts.session_id);
+            return Err(format!("无法在远程执行 ps 命令: {}", e));
+        }
 
         let mut s = String::new();
         channel.read_to_string(&mut s).ok();
@@ -122,15 +131,24 @@ pub fn kill_proc(
             Err(format!("终止进程 PID {} 失败 (权限不足或进程已不存在)", pid))
         }
     } else {
-        let sess = pool.get_or_connect(opts)?;
-        let mut channel = sess
-            .channel_session()
-            .map_err(|e| format!("无法创建 SSH 通道: {}", e))?;
+        let sess_arc = pool.get_or_connect(opts)?;
+        let sess = sess_arc.lock().map_err(|e| e.to_string())?;
+        let mut channel = match sess.channel_session() {
+            Ok(c) => c,
+            Err(e) => {
+                drop(sess);
+                pool.invalidate(&opts.session_id);
+                return Err(format!("无法创建 SSH 通道: {}", e));
+            }
+        };
 
         let cmd = format!("kill -{} {} 2>&1", sig, pid);
-        channel
-            .exec(&cmd)
-            .map_err(|e| format!("远程 kill 失败: {}", e))?;
+        if let Err(e) = channel.exec(&cmd) {
+            drop(channel);
+            drop(sess);
+            pool.invalidate(&opts.session_id);
+            return Err(format!("远程 kill 失败: {}", e));
+        }
 
         let mut out = String::new();
         channel.read_to_string(&mut out).ok();
@@ -158,14 +176,23 @@ pub fn get_disks(pool: &SftpPool, opts: &SpawnOptions) -> Result<Vec<DiskPartiti
             .map_err(|e| format!("无法执行本地 df: {}", e))?;
         String::from_utf8_lossy(&res.stdout).to_string()
     } else {
-        let sess = pool.get_or_connect(opts)?;
-        let mut channel = sess
-            .channel_session()
-            .map_err(|e| format!("无法创建 SSH 通道: {}", e))?;
+        let sess_arc = pool.get_or_connect(opts)?;
+        let sess = sess_arc.lock().map_err(|e| e.to_string())?;
+        let mut channel = match sess.channel_session() {
+            Ok(c) => c,
+            Err(e) => {
+                drop(sess);
+                pool.invalidate(&opts.session_id);
+                return Err(format!("无法创建 SSH 通道: {}", e));
+            }
+        };
 
-        channel
-            .exec("df -h -P 2>/dev/null || df -h")
-            .map_err(|e| format!("无法执行远程 df 命令: {}", e))?;
+        if let Err(e) = channel.exec("df -h -P 2>/dev/null || df -h") {
+            drop(channel);
+            drop(sess);
+            pool.invalidate(&opts.session_id);
+            return Err(format!("无法执行远程 df 命令: {}", e));
+        }
 
         let mut s = String::new();
         channel.read_to_string(&mut s).ok();

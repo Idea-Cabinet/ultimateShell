@@ -106,6 +106,14 @@ impl PtyManager {
             c.arg("-o");
             c.arg("StrictHostKeyChecking=accept-new");
             c.arg("-o");
+            c.arg("ServerAliveInterval=15");
+            c.arg("-o");
+            c.arg("ServerAliveCountMax=3");
+            c.arg("-o");
+            c.arg("TCPKeepAlive=yes");
+            c.arg("-o");
+            c.arg("ConnectTimeout=10");
+            c.arg("-o");
             c.arg("PermitLocalCommand=yes");
             c.arg("-o");
             c.arg(format!("LocalCommand=printf '\\033]777;ultimateshell-auth-{}\\007'", auth_token));

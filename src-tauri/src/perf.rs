@@ -64,14 +64,23 @@ impl PerfManager {
             return Ok(self.get_local_perf(&opts.session_id));
         }
 
-        let sess = pool.get_or_connect(opts)?;
-        let mut channel = sess
-            .channel_session()
-            .map_err(|e| format!("无法创建 SSH 会话通道: {}", e))?;
+        let sess_arc = pool.get_or_connect(opts)?;
+        let sess = sess_arc.lock().map_err(|e| e.to_string())?;
+        let mut channel = match sess.channel_session() {
+            Ok(c) => c,
+            Err(e) => {
+                drop(sess);
+                pool.invalidate(&opts.session_id);
+                return Err(format!("无法创建 SSH 会话通道: {}", e));
+            }
+        };
 
-        channel
-            .exec("cat /proc/loadavg /proc/stat /proc/meminfo /proc/net/dev /proc/diskstats 2>/dev/null")
-            .map_err(|e| format!("执行状态采集失败: {}", e))?;
+        if let Err(e) = channel.exec("cat /proc/loadavg /proc/stat /proc/meminfo /proc/net/dev /proc/diskstats 2>/dev/null") {
+            drop(channel);
+            drop(sess);
+            pool.invalidate(&opts.session_id);
+            return Err(format!("执行状态采集失败: {}", e));
+        }
 
         let mut output = String::new();
         channel.read_to_string(&mut output).ok();

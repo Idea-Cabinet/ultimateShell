@@ -38,8 +38,8 @@ pub struct DirResult {
 
 #[derive(Clone)]
 pub struct SftpPool {
-    // Cache active ssh2 sessions by session_id to make file operations instantaneous
-    sessions: Arc<Mutex<HashMap<String, Arc<ssh2::Session>>>>,
+    // Cache active ssh2 sessions by session_id with per-session Mutex to prevent race conditions on libssh2 socket
+    sessions: Arc<Mutex<HashMap<String, Arc<Mutex<ssh2::Session>>>>>,
 }
 
 impl SftpPool {
@@ -49,13 +49,16 @@ impl SftpPool {
         }
     }
 
-    pub fn get_or_connect(&self, opts: &SpawnOptions) -> Result<Arc<ssh2::Session>, String> {
+    pub fn get_or_connect(&self, opts: &SpawnOptions) -> Result<Arc<Mutex<ssh2::Session>>, String> {
         let mut map = self.sessions.lock().unwrap();
-        if let Some(sess) = map.get(&opts.session_id) {
+        if let Some(sess_arc) = map.get(&opts.session_id) {
             // Check if still connected / alive
-            if sess.authenticated() {
-                return Ok(sess.clone());
+            if let Ok(sess) = sess_arc.lock() {
+                if sess.authenticated() {
+                    return Ok(sess_arc.clone());
+                }
             }
+            map.remove(&opts.session_id);
         }
 
         let host = opts.host.as_deref().unwrap_or("127.0.0.1");
@@ -68,13 +71,14 @@ impl SftpPool {
             .next()
             .ok_or_else(|| format!("无法解析主机地址: {}", host))?;
 
-        let tcp = TcpStream::connect_timeout(&addr, Duration::from_secs(3))
-            .map_err(|e| format!("连接超时 (3s) {}:{}: {}", host, port, e))?;
-        tcp.set_read_timeout(Some(Duration::from_secs(4))).ok();
-        tcp.set_write_timeout(Some(Duration::from_secs(4))).ok();
+        let tcp = TcpStream::connect_timeout(&addr, Duration::from_secs(5))
+            .map_err(|e| format!("连接超时 (5s) {}:{}: {}", host, port, e))?;
+        tcp.set_nodelay(true).ok();
+        tcp.set_read_timeout(Some(Duration::from_secs(8))).ok();
+        tcp.set_write_timeout(Some(Duration::from_secs(8))).ok();
 
         let mut sess = ssh2::Session::new().map_err(|e| e.to_string())?;
-        sess.set_timeout(4000); // 4s timeout for SSH operations
+        sess.set_timeout(8000); // 8s timeout for SSH operations
         sess.set_tcp_stream(tcp);
         sess.handshake().map_err(|e| format!("SSH 握手失败: {}", e))?;
 
@@ -110,12 +114,17 @@ impl SftpPool {
             return Err("SFTP 认证失败：无有效密码或私钥".to_string());
         }
 
-        let arc_sess = Arc::new(sess);
+        let arc_sess = Arc::new(Mutex::new(sess));
         map.insert(opts.session_id.clone(), arc_sess.clone());
         Ok(arc_sess)
     }
 
     pub fn close(&self, session_id: &str) {
+        let mut map = self.sessions.lock().unwrap();
+        map.remove(session_id);
+    }
+
+    pub fn invalidate(&self, session_id: &str) {
         let mut map = self.sessions.lock().unwrap();
         map.remove(session_id);
     }
@@ -307,8 +316,19 @@ pub fn list_remote_dir(
     req_path: &str,
     show_hidden: bool,
 ) -> Result<DirResult, String> {
-    let sess = pool.get_or_connect(opts)?;
-    let sftp = sess.sftp().map_err(|e| format!("启动 SFTP 子系统失败: {}", e))?;
+    let sess_arc = match pool.get_or_connect(opts) {
+        Ok(s) => s,
+        Err(e) => return Err(e),
+    };
+    let sess = sess_arc.lock().map_err(|e| e.to_string())?;
+    let sftp = match sess.sftp() {
+        Ok(s) => s,
+        Err(e) => {
+            drop(sess);
+            pool.invalidate(&opts.session_id);
+            return Err(format!("启动 SFTP 子系统失败: {}", e));
+        }
+    };
 
     let target_path = if req_path.is_empty() || req_path == "~" || req_path == "." {
         // Resolve remote home path
@@ -326,7 +346,15 @@ pub fn list_remote_dir(
         if s.is_empty() { "/".to_string() } else { s }
     });
 
-    let raw_entries = sftp.readdir(p).map_err(|e| format!("SFTP 目录读取失败 {}: {}", target_path, e))?;
+    let raw_entries = match sftp.readdir(p) {
+        Ok(entries) => entries,
+        Err(e) => {
+            drop(sftp);
+            drop(sess);
+            pool.invalidate(&opts.session_id);
+            return Err(format!("SFTP 目录读取失败 {}: {}", target_path, e));
+        }
+    };
 
     let mut entries = Vec::new();
     for (entry_path, stat) in raw_entries {
@@ -400,9 +428,25 @@ pub fn read_file_preview_content(
         buf.truncate(n);
         String::from_utf8(buf).map_err(|_| "非文本文件或 UTF-8 解码失败".to_string())
     } else {
-        let sess = pool.get_or_connect(opts)?;
-        let sftp = sess.sftp().map_err(|e| format!("启动 SFTP 失败: {}", e))?;
-        let mut file = sftp.open(Path::new(file_path)).map_err(|e| format!("打开远程文件失败: {}", e))?;
+        let sess_arc = pool.get_or_connect(opts)?;
+        let sess = sess_arc.lock().map_err(|e| e.to_string())?;
+        let sftp = match sess.sftp() {
+            Ok(s) => s,
+            Err(e) => {
+                drop(sess);
+                pool.invalidate(&opts.session_id);
+                return Err(format!("启动 SFTP 失败: {}", e));
+            }
+        };
+        let mut file = match sftp.open(Path::new(file_path)) {
+            Ok(f) => f,
+            Err(e) => {
+                drop(sftp);
+                drop(sess);
+                pool.invalidate(&opts.session_id);
+                return Err(format!("打开远程文件失败: {}", e));
+            }
+        };
         use std::io::Read;
         let mut buf = vec![0u8; max_bytes];
         let n = file.read(&mut buf).map_err(|e| format!("读取远程文件失败: {}", e))?;
