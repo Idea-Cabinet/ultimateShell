@@ -349,6 +349,23 @@ export function FileExplorer({
       setTotalFiles(res.total_files);
       setInputPath(res.current_path);
 
+      // Populate outermost tree cache if not already populated
+      if (res.current_path === "/" && !rootNodesCache.current[session.id]?.length) {
+        const topFolders: LazyTreeNode[] = res.entries
+          .filter((e) => e.is_dir)
+          .map((e) => ({
+            path: e.path,
+            name: e.name,
+            isDir: true,
+            isExpanded: false,
+            isLoading: false,
+            children: null,
+          }));
+        rootNodesCache.current[session.id] = topFolders;
+        setRootNodes(topFolders);
+        setIsTreeLoading(false);
+      }
+
       if (pushHistory) {
         setHistory((prev) => {
           const updated = [...prev.slice(0, historyIdx + 1), res.current_path];
@@ -1001,18 +1018,34 @@ export function FileExplorer({
         {/* Right Details Explorer Table */}
         <div className="flex-1 flex flex-col bg-[var(--bg-app)] overflow-hidden">
           {errorMsg ? (
-            <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
-              <div className="w-10 h-10 rounded-full bg-amber-500/10 text-amber-500 flex items-center justify-center mb-2">
-                <X className="w-5 h-5" />
+            <div className="flex-1 flex flex-col items-center justify-center py-16 px-6 text-center select-none">
+              <FolderOpen className="w-10 h-10 text-[var(--text-tertiary)] opacity-35 mb-3 stroke-1" />
+              <div className="text-[13px] font-medium text-[var(--text-secondary)]">此目录暂无可显示项</div>
+              <div className="text-[11.5px] text-[var(--text-tertiary)] mt-1 max-w-xs leading-relaxed">
+                当前目录为空或暂无读取权限
               </div>
-              <div className="text-[13px] font-medium text-[var(--text-primary)]">无法加载此目录</div>
-              <div className="text-[11.5px] text-[var(--text-tertiary)] mt-1 max-w-md">{errorMsg}</div>
-              <button
-                onClick={() => loadDirectory("/")}
-                className="mt-3 px-3 py-1 bg-[#007AFF] text-white rounded text-[11.5px] hover:bg-[#0062CC] transition-colors"
-              >
-                返回根目录 (/)
-              </button>
+              <div className="flex items-center space-x-2 mt-4">
+                {parentPath && parentPath !== currentPath && (
+                  <button
+                    onClick={() => {
+                      setErrorMsg(null);
+                      loadDirectory(parentPath);
+                    }}
+                    className="px-3 py-1 bg-[var(--hover-item)] hover:bg-[var(--border-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] rounded text-[11.5px] transition-colors"
+                  >
+                    返回上一级
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    setErrorMsg(null);
+                    loadDirectory("/");
+                  }}
+                  className="px-3 py-1 bg-[#007AFF] text-white hover:bg-[#0062CC] rounded text-[11.5px] transition-colors"
+                >
+                  返回根目录 (/)
+                </button>
+              </div>
             </div>
           ) : (
             <div className="flex-1 flex flex-col overflow-hidden">

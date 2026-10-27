@@ -102,19 +102,34 @@ unsafe extern "C" {
     fn CFRelease(cf: *mut std::ffi::c_void);
 }
 
+#[cfg(target_os = "macos")]
+static ASCII_INPUT_SWITCHED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 #[tauri::command]
-fn switch_to_ascii_input() -> Result<(), String> {
+async fn switch_to_ascii_input() -> Result<(), String> {
     #[cfg(target_os = "macos")]
-    unsafe {
-        let source = TISCopyCurrentASCIICapableKeyboardInputSource();
-        if !source.is_null() {
-            let res = TISSelectInputSource(source);
-            CFRelease(source);
-            if res != 0 {
-                return Err(format!("TISSelectInputSource failed with code {}", res));
-            }
+    {
+        if ASCII_INPUT_SWITCHED.load(std::sync::atomic::Ordering::Relaxed) {
+            return Ok(());
         }
+        tauri::async_runtime::spawn_blocking(|| {
+            unsafe {
+                let source = TISCopyCurrentASCIICapableKeyboardInputSource();
+                if !source.is_null() {
+                    let res = TISSelectInputSource(source);
+                    CFRelease(source);
+                    if res != 0 {
+                        return Err(format!("TISSelectInputSource failed with code {}", res));
+                    }
+                    ASCII_INPUT_SWITCHED.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+            }
+            Ok(())
+        })
+        .await
+        .map_err(|e| e.to_string())?
     }
+    #[cfg(not(target_os = "macos"))]
     Ok(())
 }
 

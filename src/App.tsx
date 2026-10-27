@@ -171,9 +171,12 @@ export function App() {
         .catch(() => {});
     };
 
-    fetchStats();
+    const timer = setTimeout(fetchStats, 150);
     const interval = setInterval(fetchStats, 10000);
-    return () => clearInterval(interval);
+    return () => {
+      clearTimeout(timer);
+      clearInterval(interval);
+    };
   }, [activeTabId]);
 
   // Dynamically track username for the active tab (sudo -iu xxx or su - detection)

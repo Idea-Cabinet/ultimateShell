@@ -63,12 +63,14 @@ interface Props {
   resolvedTheme: ResolvedTheme;
 }
 
+// Global flag ensuring ASCII input method switch is triggered at most once across all tabs
+let hasGlobalAsciiSwitched = false;
+
 export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalInstanceRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const searchAddonRef = useRef<SearchAddon | null>(null);
-  const hasSwitchedInputRef = useRef(false);
 
   // Terminal Content Search States (Requirement: 终端内容搜索、匹配高亮、上下条定位)
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -80,12 +82,12 @@ export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Switch macOS input method to English/ASCII on first cursor focus
-  const switchToAscii = () => {
-    if (!hasSwitchedInputRef.current) {
-      hasSwitchedInputRef.current = true;
+  const switchToAscii = useCallback(() => {
+    if (!hasGlobalAsciiSwitched) {
+      hasGlobalAsciiSwitched = true;
       invoke("switch_to_ascii_input").catch(() => {});
     }
-  };
+  }, []);
 
   const getSearchOptions = useCallback(() => ({
     caseSensitive,
@@ -186,7 +188,6 @@ export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme
 
     if (isActive) {
       term.focus();
-      switchToAscii();
     }
 
     terminalInstanceRef.current = term;
@@ -334,14 +335,13 @@ export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme
 
   useEffect(() => {
     if (isActive && fitAddonRef.current && terminalInstanceRef.current) {
-      switchToAscii();
-      const timer = setTimeout(() => {
+      const raf = requestAnimationFrame(() => {
         try {
           fitAddonRef.current?.fit();
           terminalInstanceRef.current?.focus();
         } catch (_) {}
-      }, 30);
-      return () => clearTimeout(timer);
+      });
+      return () => cancelAnimationFrame(raf);
     }
   }, [isActive]);
 
