@@ -176,7 +176,11 @@ button:active, [role="button"]:active, .apple-clickable:active {
 
 .xterm {
   padding: 8px 12px;
+  background-color: var(--bg-terminal);
 }
-.xterm-viewport {
+
+/* xterm's viewport defaults to black outside the rendered terminal cells. */
+.xterm .xterm-viewport {
+  background-color: var(--bg-terminal);
   border-radius: 6px;
 }
