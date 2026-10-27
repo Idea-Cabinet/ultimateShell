@@ -51,129 +51,137 @@ export const HostModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialHos
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="bg-[#161b22] border border-[#30363d] rounded-xl shadow-2xl w-[480px] overflow-hidden text-sm">
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-[#30363d] bg-[#1c2128]">
-          <div className="flex items-center space-x-2">
-            <Server className="w-4 h-4 text-blue-400" />
-            <span className="font-semibold text-gray-100">
-              {initialHost ? "编辑服务器连接" : "新建 SSH 连接"}
-            </span>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-md transition-all">
+      <div className="apple-card rounded-2xl w-[450px] overflow-hidden text-sm animate-in fade-in zoom-in-95 duration-150">
+        {/* Sheet Header */}
+        <div className="flex items-center justify-between px-6 pt-5 pb-3">
+          <div className="flex items-center space-x-2.5">
+            <div className="p-1.5 rounded-lg bg-[#007AFF]/15 text-[#0A84FF]">
+              <Server className="w-4 h-4" strokeWidth={2} />
+            </div>
+            <div>
+              <h2 className="text-[15px] font-semibold tracking-[-0.015em] text-white">
+                {initialHost ? "编辑服务器" : "添加服务器"}
+              </h2>
+              <p className="text-[11px] text-white/40">配置 SSH 远程主机连接凭证</p>
+            </div>
           </div>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-200 transition p-1 hover:bg-[#30363d] rounded"
+            className="text-white/40 hover:text-white/80 p-1.5 hover:bg-white/[0.08] rounded-full transition active:scale-[0.95]"
           >
-            <X className="w-4 h-4" />
+            <X className="w-4 h-4" strokeWidth={2} />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-5 space-y-4">
+        {/* Sheet Body */}
+        <form onSubmit={handleSubmit} className="px-6 pb-6 pt-2 space-y-3.5">
           <div>
-            <label className="block text-xs font-medium text-gray-300 mb-1">
-              连接名称
+            <label className="block text-[11px] font-medium text-white/60 mb-1">
+              名称
             </label>
             <input
               type="text"
-              placeholder="例如: 生产机器 / 香港测试节点"
+              placeholder="例如: 生产机器 / 香港主节点"
               value={formData.name}
               onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              className="w-full px-3 py-1.5 bg-[#0d1117] border border-[#30363d] rounded-lg text-gray-200 focus:outline-none focus:border-blue-500"
+              className="w-full px-3 py-1.5 bg-black/30 border border-white/[0.12] rounded-[8px] text-[13px] text-white placeholder-white/25 focus:outline-none focus:border-[#007AFF] focus:ring-1 focus:ring-[#007AFF]/40 transition"
             />
           </div>
 
           <div className="grid grid-cols-3 gap-3">
             <div className="col-span-2">
-              <label className="block text-xs font-medium text-gray-300 mb-1">
-                主机地址 / IP <span className="text-red-400">*</span>
+              <label className="block text-[11px] font-medium text-white/60 mb-1">
+                主机地址 / IP <span className="text-rose-400">*</span>
               </label>
               <input
                 type="text"
                 required
-                placeholder="192.168.1.100 或 example.com"
+                placeholder="192.168.1.100"
                 value={formData.host}
                 onChange={(e) => setFormData({ ...formData, host: e.target.value })}
-                className="w-full px-3 py-1.5 bg-[#0d1117] border border-[#30363d] rounded-lg text-gray-200 focus:outline-none focus:border-blue-500"
+                className="w-full px-3 py-1.5 bg-black/30 border border-white/[0.12] rounded-[8px] text-[13px] text-white placeholder-white/25 focus:outline-none focus:border-[#007AFF] focus:ring-1 focus:ring-[#007AFF]/40 transition font-mono"
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-300 mb-1">
+              <label className="block text-[11px] font-medium text-white/60 mb-1">
                 端口
               </label>
               <input
                 type="number"
                 value={formData.port}
                 onChange={(e) => setFormData({ ...formData, port: parseInt(e.target.value) || 22 })}
-                className="w-full px-3 py-1.5 bg-[#0d1117] border border-[#30363d] rounded-lg text-gray-200 focus:outline-none focus:border-blue-500"
+                className="w-full px-3 py-1.5 bg-black/30 border border-white/[0.12] rounded-[8px] text-[13px] text-white focus:outline-none focus:border-[#007AFF] focus:ring-1 focus:ring-[#007AFF]/40 transition font-mono"
               />
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium text-gray-300 mb-1">
+              <label className="block text-[11px] font-medium text-white/60 mb-1">
                 用户名
               </label>
               <input
                 type="text"
                 value={formData.username}
                 onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-                className="w-full px-3 py-1.5 bg-[#0d1117] border border-[#30363d] rounded-lg text-gray-200 focus:outline-none focus:border-blue-500"
+                className="w-full px-3 py-1.5 bg-black/30 border border-white/[0.12] rounded-[8px] text-[13px] text-white focus:outline-none focus:border-[#007AFF] focus:ring-1 focus:ring-[#007AFF]/40 transition font-mono"
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-300 mb-1">
+              <label className="block text-[11px] font-medium text-white/60 mb-1">
                 分组
               </label>
               <input
                 type="text"
-                placeholder="例如: 生产环境 / 测试服"
+                placeholder="默认分组"
                 value={formData.group || ""}
                 onChange={(e) => setFormData({ ...formData, group: e.target.value })}
-                className="w-full px-3 py-1.5 bg-[#0d1117] border border-[#30363d] rounded-lg text-gray-200 focus:outline-none focus:border-blue-500"
+                className="w-full px-3 py-1.5 bg-black/30 border border-white/[0.12] rounded-[8px] text-[13px] text-white placeholder-white/25 focus:outline-none focus:border-[#007AFF] focus:ring-1 focus:ring-[#007AFF]/40 transition"
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-gray-300 mb-1">
-              SSH 私钥路径 (可选，留空使用默认密钥或密码)
+            <label className="block text-[11px] font-medium text-white/60 mb-1">
+              私钥文件 (可选)
             </label>
             <input
               type="text"
-              placeholder="~/.ssh/id_rsa 或 /path/to/key.pem"
+              placeholder="~/.ssh/id_rsa"
               value={formData.identity_file || ""}
               onChange={(e) => setFormData({ ...formData, identity_file: e.target.value })}
-              className="w-full px-3 py-1.5 bg-[#0d1117] border border-[#30363d] rounded-lg text-gray-200 focus:outline-none focus:border-blue-500 font-mono text-xs"
+              className="w-full px-3 py-1.5 bg-black/30 border border-white/[0.12] rounded-[8px] text-[12px] text-white/90 placeholder-white/25 focus:outline-none focus:border-[#007AFF] focus:ring-1 focus:ring-[#007AFF]/40 transition font-mono"
             />
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-gray-300 mb-1">
-              备注说明
+            <label className="block text-[11px] font-medium text-white/60 mb-1">
+              备注
             </label>
             <input
               type="text"
-              placeholder="服务器用途备注"
+              placeholder="可选备忘说明"
               value={formData.description || ""}
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-              className="w-full px-3 py-1.5 bg-[#0d1117] border border-[#30363d] rounded-lg text-gray-200 focus:outline-none focus:border-blue-500"
+              className="w-full px-3 py-1.5 bg-black/30 border border-white/[0.12] rounded-[8px] text-[13px] text-white placeholder-white/25 focus:outline-none focus:border-[#007AFF] focus:ring-1 focus:ring-[#007AFF]/40 transition"
             />
           </div>
 
-          <div className="flex justify-end space-x-2 pt-3 border-t border-[#30363d]">
+          {/* Action Footer */}
+          <div className="flex items-center justify-end space-x-2 pt-4">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-1.5 text-gray-300 hover:text-white bg-[#21262d] hover:bg-[#30363d] rounded-lg transition"
+              className="px-4 py-1.5 text-[13px] font-medium text-white/70 hover:text-white bg-white/[0.08] hover:bg-white/[0.12] rounded-[8px] transition active:scale-[0.97]"
             >
               取消
             </button>
             <button
               type="submit"
-              className="px-4 py-1.5 text-white bg-blue-600 hover:bg-blue-500 rounded-lg font-medium transition shadow-sm"
+              className="px-5 py-1.5 text-[13px] font-medium text-white bg-[#007AFF] hover:bg-[#0A84FF] rounded-[8px] shadow-[0_1px_3px_rgba(0,122,255,0.4)] transition active:scale-[0.97]"
             >
-              保存连接
+              保存
             </button>
           </div>
         </form>

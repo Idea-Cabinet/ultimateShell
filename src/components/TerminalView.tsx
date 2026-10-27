@@ -22,29 +22,31 @@ export const TerminalView: React.FC<Props> = ({ session, isActive }) => {
     const term = new Terminal({
       cursorBlink: true,
       cursorStyle: "bar",
-      fontSize: 14,
-      fontFamily: "Menlo, Monaco, 'Courier New', monospace",
+      fontSize: 13.5,
+      lineHeight: 1.25,
+      fontFamily: 'ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace',
       theme: {
-        background: "#0d1117",
-        foreground: "#e6edf3",
-        cursor: "#58a6ff",
-        selectionBackground: "#1f6feb44",
-        black: "#484f58",
-        red: "#ff7b72",
-        green: "#3fb950",
-        yellow: "#d29922",
-        blue: "#58a6ff",
-        magenta: "#bc8cff",
-        cyan: "#39c5cf",
-        white: "#b1bac4",
-        brightBlack: "#6e7681",
-        brightRed: "#ffa198",
-        brightGreen: "#56d364",
-        brightYellow: "#e3b341",
-        brightBlue: "#79c0ff",
-        brightMagenta: "#d2a8ff",
-        brightCyan: "#56d4dd",
-        brightWhite: "#f0f6fc",
+        background: "#121214",
+        foreground: "#f5f5f7",
+        cursor: "#0A84FF",
+        cursorAccent: "#121214",
+        selectionBackground: "rgba(10, 132, 255, 0.3)",
+        black: "#1e1e24",
+        red: "#ff453a",
+        green: "#32d74b",
+        yellow: "#ffd60a",
+        blue: "#0a84ff",
+        magenta: "#bf5af2",
+        cyan: "#5ac8fa",
+        white: "#f5f5f7",
+        brightBlack: "#636366",
+        brightRed: "#ff6961",
+        brightGreen: "#30d158",
+        brightYellow: "#ffd60a",
+        brightBlue: "#409cff",
+        brightMagenta: "#da8fff",
+        brightCyan: "#70d7ff",
+        brightWhite: "#ffffff",
       },
       convertEol: true,
     });
@@ -59,12 +61,10 @@ export const TerminalView: React.FC<Props> = ({ session, isActive }) => {
     terminalInstanceRef.current = term;
     fitAddonRef.current = fitAddon;
 
-    // Send user keystrokes to Rust PTY
     const onDataDisposable = term.onData((data) => {
       invoke("pty_write", { sessionId: session.id, data }).catch(console.error);
     });
 
-    // Listen to PTY output from Rust
     let unlistenData: (() => void) | null = null;
     let unlistenExit: (() => void) | null = null;
 
@@ -80,7 +80,6 @@ export const TerminalView: React.FC<Props> = ({ session, isActive }) => {
       unlistenExit = unlisten;
     });
 
-    // Spawn the PTY session
     const cols = term.cols || 80;
     const rows = term.rows || 24;
 
@@ -99,7 +98,6 @@ export const TerminalView: React.FC<Props> = ({ session, isActive }) => {
       term.write(`\r\n\x1b[31m连接失败: ${err}\x1b[0m\r\n`);
     });
 
-    // Handle resize
     const handleResize = () => {
       if (!fitAddonRef.current || !terminalInstanceRef.current) return;
       try {
@@ -140,7 +138,7 @@ export const TerminalView: React.FC<Props> = ({ session, isActive }) => {
   return (
     <div
       ref={containerRef}
-      className={`w-full h-full p-2 bg-[#0d1117] ${isActive ? "block" : "hidden"}`}
+      className={`w-full h-full p-2 bg-[#121214] ${isActive ? "block" : "hidden"}`}
       style={{ outline: "none" }}
     />
   );

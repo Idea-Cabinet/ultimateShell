@@ -14,7 +14,6 @@ export function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingHost, setEditingHost] = useState<HostProfile | null>(null);
 
-  // Load saved hosts on launch
   const refreshHosts = async () => {
     try {
       const data = await invoke<HostProfile[]>("get_hosts");
@@ -26,7 +25,6 @@ export function App() {
 
   useEffect(() => {
     refreshHosts();
-    // Open a default local terminal tab on launch
     createNewLocalTab();
   }, []);
 
@@ -61,7 +59,6 @@ export function App() {
       if (activeTabId === id && filtered.length > 0) {
         setActiveTabId(filtered[filtered.length - 1].id);
       } else if (filtered.length === 0) {
-        // If all closed, spawn a new local tab
         const nextId = `local-${Date.now()}`;
         setActiveTabId(nextId);
         return [{ id: nextId, title: "本地终端", isLocal: true, connected: true }];
@@ -75,17 +72,16 @@ export function App() {
       await invoke("save_host", { host });
       await refreshHosts();
     } catch (err) {
-      alert(`保存失败: ${err}`);
+      console.error(`保存失败: ${err}`);
     }
   };
 
   const handleDeleteHost = async (id: string) => {
-    if (!confirm("确定要删除此服务器连接吗？")) return;
     try {
       await invoke("delete_host", { id });
       await refreshHosts();
     } catch (err) {
-      alert(`删除失败: ${err}`);
+      console.error(`删除失败: ${err}`);
     }
   };
 
@@ -93,9 +89,9 @@ export function App() {
     try {
       const imported = await invoke<HostProfile[]>("import_finalshell");
       await refreshHosts();
-      alert(`成功导入 ${imported.length} 个 FinalShell 服务器配置！`);
+      console.log(`成功导入 ${imported.length} 个 FinalShell 服务器配置`);
     } catch (err) {
-      alert(`导入失败: ${err}`);
+      console.error(`导入失败: ${err}`);
     }
   };
 
@@ -107,8 +103,8 @@ export function App() {
   const activeTab = tabs.find((t) => t.id === activeTabId);
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-[#0d1117] text-gray-200">
-      {/* Left Sidebar */}
+    <div className="flex h-screen w-screen overflow-hidden bg-[#121214] text-[#f5f5f7]">
+      {/* macOS Sidebar */}
       <Sidebar
         hosts={hosts}
         onConnect={handleConnect}
@@ -127,7 +123,7 @@ export function App() {
 
       {/* Main Terminal Viewport */}
       <div className="flex-1 flex flex-col h-full overflow-hidden">
-        {/* Top Tab Bar */}
+        {/* Safari/macOS Styled Tab Bar with Drag Region */}
         <TabBar
           tabs={tabs}
           activeTabId={activeTabId}
@@ -137,7 +133,7 @@ export function App() {
         />
 
         {/* Terminals Container */}
-        <div className="flex-1 relative overflow-hidden bg-[#0d1117]">
+        <div className="flex-1 relative overflow-hidden bg-[#121214]">
           {tabs.map((tab) => (
             <TerminalView
               key={tab.id}
@@ -147,29 +143,29 @@ export function App() {
           ))}
         </div>
 
-        {/* Bottom Status Bar */}
-        <div className="h-6 bg-[#161b22] border-t border-[#30363d] px-3 flex items-center justify-between text-[11px] text-gray-400 select-none">
-          <div className="flex items-center space-x-3">
+        {/* Subtle macOS Status Strip */}
+        <div className="h-6 apple-vibrancy-toolbar border-t border-white/[0.06] px-3 flex items-center justify-between text-[11px] text-white/40 select-none">
+          <div className="flex items-center space-x-2.5">
             <span className="flex items-center space-x-1.5">
-              <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-              <span className="text-gray-300 font-mono">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#30D158]"></span>
+              <span className="text-white/70 font-medium">
                 {activeTab ? activeTab.title : "就绪"}
               </span>
             </span>
             {activeTab?.hostProfile && (
-              <span className="text-gray-500 font-mono">
+              <span className="text-white/30 font-mono text-[10.5px]">
                 {activeTab.hostProfile.username}@{activeTab.hostProfile.host}:{activeTab.hostProfile.port}
               </span>
             )}
           </div>
-          <div className="flex items-center space-x-4">
-            <span>活跃会话: {tabs.length}</span>
-            <span className="text-gray-500">UTF-8 / xterm-256color</span>
+          <div className="flex items-center space-x-3 text-[10.5px]">
+            <span>{tabs.length} 个会话</span>
+            <span className="text-white/20 font-mono">UTF-8 / xterm</span>
           </div>
         </div>
       </div>
 
-      {/* New / Edit Host Modal */}
+      {/* macOS Sheet Modal */}
       <HostModal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}

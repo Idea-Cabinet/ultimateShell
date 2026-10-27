@@ -18,47 +18,52 @@ export const TabBar: React.FC<Props> = ({
   onNewLocalTab,
 }) => {
   return (
-    <div className="h-9 bg-[#161b22] border-b border-[#30363d] flex items-center px-1.5 space-x-1 overflow-x-auto select-none">
-      {tabs.map((tab) => {
-        const isActive = tab.id === activeTabId;
-        return (
-          <div
-            key={tab.id}
-            onClick={() => onSelectTab(tab.id)}
-            className={`group h-7 px-3 flex items-center space-x-2 text-xs rounded-md cursor-pointer transition max-w-[200px] border ${
-              isActive
-                ? "bg-[#0d1117] text-white border-[#30363d] shadow-sm"
-                : "bg-transparent text-gray-400 hover:text-gray-200 hover:bg-[#21262d] border-transparent"
-            }`}
-          >
-            {tab.isLocal ? (
-              <Terminal className={`w-3.5 h-3.5 ${isActive ? "text-green-400" : "text-gray-500"}`} />
-            ) : (
-              <Server className={`w-3.5 h-3.5 ${isActive ? "text-blue-400" : "text-gray-500"}`} />
-            )}
-            <span className="truncate font-medium">{tab.title}</span>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onCloseTab(tab.id);
-              }}
-              className={`p-0.5 rounded hover:bg-[#30363d] text-gray-500 hover:text-gray-200 transition ${
-                isActive ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+    <div
+      data-tauri-drag-region
+      className="h-12 apple-vibrancy-toolbar border-b border-white/[0.08] flex items-center px-3 space-x-1.5 overflow-x-auto select-none z-10"
+    >
+      <div className="flex items-center space-x-1 flex-1 overflow-x-auto py-1">
+        {tabs.map((tab) => {
+          const isActive = tab.id === activeTabId;
+          return (
+            <div
+              key={tab.id}
+              onClick={() => onSelectTab(tab.id)}
+              className={`group h-8 px-2.5 flex items-center space-x-2 text-[12px] rounded-[7px] cursor-pointer transition max-w-[200px] min-w-[120px] ${
+                isActive
+                  ? "bg-[#25252a] text-white shadow-[0_2px_6px_rgba(0,0,0,0.3),inset_0_1px_0_rgba(255,255,255,0.15)] border border-white/[0.1] font-medium"
+                  : "text-white/50 hover:text-white/80 hover:bg-white/[0.05] border border-transparent font-normal"
               }`}
             >
-              <X className="w-3 h-3" />
-            </button>
-          </div>
-        );
-      })}
+              {tab.isLocal ? (
+                <Terminal className={`w-3.5 h-3.5 flex-shrink-0 ${isActive ? "text-[#30D158]" : "text-white/40"}`} strokeWidth={1.75} />
+              ) : (
+                <Server className={`w-3.5 h-3.5 flex-shrink-0 ${isActive ? "text-[#0A84FF]" : "text-white/40"}`} strokeWidth={1.75} />
+              )}
+              <span className="truncate flex-1 tracking-tight">{tab.title}</span>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onCloseTab(tab.id);
+                }}
+                className={`p-0.5 rounded-full hover:bg-white/[0.15] text-white/40 hover:text-white transition ${
+                  isActive ? "opacity-70 hover:opacity-100" : "opacity-0 group-hover:opacity-70"
+                }`}
+              >
+                <X className="w-3 h-3" strokeWidth={2} />
+              </button>
+            </div>
+          );
+        })}
 
-      <button
-        onClick={onNewLocalTab}
-        title="新建本地终端标签页"
-        className="h-7 w-7 flex items-center justify-center text-gray-400 hover:text-gray-200 hover:bg-[#21262d] rounded-md transition"
-      >
-        <Plus className="w-4 h-4" />
-      </button>
+        <button
+          onClick={onNewLocalTab}
+          title="新建本地终端"
+          className="h-7 w-7 flex items-center justify-center text-white/50 hover:text-white hover:bg-white/[0.08] rounded-[6px] transition active:scale-[0.95]"
+        >
+          <Plus className="w-3.5 h-3.5" strokeWidth={2} />
+        </button>
+      </div>
     </div>
   );
 };

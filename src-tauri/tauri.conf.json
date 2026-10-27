@@ -14,10 +14,12 @@
       {
         "label": "main",
         "title": "UltimateShell",
-        "width": 1080,
-        "height": 720,
-        "minWidth": 800,
-        "minHeight": 520
+        "width": 1120,
+        "height": 740,
+        "minWidth": 860,
+        "minHeight": 540,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
       }
     ],
     "security": {
