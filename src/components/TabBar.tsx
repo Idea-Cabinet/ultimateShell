@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { usePointerReorder } from "../hooks/usePointerReorder";
 import { TabSession } from "../types";
 import {
   Terminal,
@@ -54,12 +55,7 @@ export const TabBar: React.FC<Props> = ({
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const prevTabsLengthRef = useRef(tabs.length);
 
-  // Tab drag-and-drop reordering states
-  const draggedTabRef = useRef<string | null>(null);
-  const isDraggingTabRef = useRef(false);
-  const [draggedTabId, setDraggedTabId] = useState<string | null>(null);
-  const [dragOverTabId, setDragOverTabId] = useState<string | null>(null);
-  const [tabDropPos, setTabDropPos] = useState<"left" | "right">("left");
+  const reorder = usePointerReorder(tabs, (next) => onReorderTabs?.(next), scrollContainerRef);
 
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({
     visible: false,
@@ -67,66 +63,6 @@ export const TabBar: React.FC<Props> = ({
     y: 0,
     tabId: "",
   });
-
-  // Tab Drag and Drop Handlers
-  const handleTabDragStart = (e: React.DragEvent, id: string) => {
-    draggedTabRef.current = id;
-    isDraggingTabRef.current = true;
-    setDraggedTabId(id);
-    e.dataTransfer.setData("text/plain", id);
-    e.dataTransfer.effectAllowed = "move";
-  };
-
-  const handleTabDragOver = (e: React.DragEvent, id: string) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-    if (draggedTabRef.current && draggedTabRef.current !== id) {
-      const rect = e.currentTarget.getBoundingClientRect();
-      const pos = e.clientX > rect.left + rect.width / 2 ? "right" : "left";
-      setDragOverTabId(id);
-      setTabDropPos(pos);
-    }
-  };
-
-  const handleTabDragLeave = (e: React.DragEvent) => {
-    if (e.currentTarget === e.target) {
-      setDragOverTabId(null);
-    }
-  };
-
-  const handleTabDrop = (e: React.DragEvent, targetId: string) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const sourceId = draggedTabRef.current || e.dataTransfer.getData("text/plain");
-    setDragOverTabId(null);
-    setDraggedTabId(null);
-
-    if (sourceId && sourceId !== targetId && onReorderTabs) {
-      const sourceIndex = tabs.findIndex((t) => t.id === sourceId);
-      const targetIndex = tabs.findIndex((t) => t.id === targetId);
-      if (sourceIndex !== -1 && targetIndex !== -1) {
-        const copy = [...tabs];
-        const [removed] = copy.splice(sourceIndex, 1);
-        const newTargetIndex = copy.findIndex((t) => t.id === targetId);
-        const insertIndex = tabDropPos === "right" ? newTargetIndex + 1 : newTargetIndex;
-        copy.splice(insertIndex, 0, removed);
-        onReorderTabs(copy);
-      }
-    }
-    draggedTabRef.current = null;
-    setTimeout(() => {
-      isDraggingTabRef.current = false;
-    }, 100);
-  };
-
-  const handleTabDragEnd = () => {
-    setDraggedTabId(null);
-    setDragOverTabId(null);
-    draggedTabRef.current = null;
-    setTimeout(() => {
-      isDraggingTabRef.current = false;
-    }, 100);
-  };
 
   // Auto scroll to latest tab ONLY when tabs are added or removed
   useEffect(() => {
@@ -187,7 +123,6 @@ export const TabBar: React.FC<Props> = ({
   return (
     <>
       <div
-        data-tauri-drag-region
         className={`h-12 apple-vibrancy-toolbar border-b border-[var(--border-subtle)] flex items-center px-3 space-x-1.5 select-none z-10 transition-[padding] duration-[180ms] ${
           isSidebarCollapsed ? "pl-[78px]" : ""
         }`}
@@ -209,21 +144,19 @@ export const TabBar: React.FC<Props> = ({
         >
           {tabs.map((tab) => {
             const isActive = tab.id === activeTabId;
-            const isDragging = draggedTabId === tab.id;
-            const isDragOver = dragOverTabId === tab.id;
+            const isDragging = reorder.draggedId === tab.id;
+            const isDragOver = reorder.dropTarget?.id === tab.id;
 
             return (
               <div
                 key={tab.id}
-                draggable
+                draggable={false}
                 data-tauri-drag-region="false"
-                onDragStart={(e) => handleTabDragStart(e, tab.id)}
-                onDragOver={(e) => handleTabDragOver(e, tab.id)}
-                onDragLeave={handleTabDragLeave}
-                onDrop={(e) => handleTabDrop(e, tab.id)}
-                onDragEnd={handleTabDragEnd}
+                data-reorder-id={tab.id}
+                style={{ touchAction: "none" }}
+                onPointerDown={(e) => reorder.onPointerDown(e, tab.id)}
                 onClick={() => {
-                  if (isDraggingTabRef.current) return;
+                  if (reorder.suppressClick()) return;
                   onSelectTab(tab.id);
                 }}
                 onContextMenu={(e) => handleContextMenu(e, tab.id)}
@@ -234,7 +167,7 @@ export const TabBar: React.FC<Props> = ({
                     : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--hover-item)] border border-transparent font-normal"
                 } ${isDragging ? "opacity-35 scale-[0.98]" : ""} ${
                   isDragOver
-                    ? tabDropPos === "left"
+                    ? reorder.dropTarget?.position === "left"
                       ? "before:content-[''] before:absolute before:left-[-2px] before:top-1.5 before:bottom-1.5 before:w-1 before:bg-[#007AFF] before:rounded-full before:z-30 bg-[#007AFF]/10"
                       : "after:content-[''] after:absolute after:right-[-2px] after:top-1.5 after:bottom-1.5 after:w-1 after:bg-[#007AFF] after:rounded-full after:z-30 bg-[#007AFF]/10"
                     : ""

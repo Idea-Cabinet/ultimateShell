@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
+import { usePointerReorder } from "../hooks/usePointerReorder";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { DirResult, FileEntry, TabSession } from "../types";
@@ -185,11 +186,11 @@ export function FileExplorer({
     } catch {}
     return DEFAULT_COLUMNS;
   });
-  const draggedColRef = useRef<ColumnId | null>(null);
-  const isColDraggingRef = useRef(false);
-  const [draggedColId, setDraggedColId] = useState<ColumnId | null>(null);
-  const [dragOverColId, setDragOverColId] = useState<ColumnId | null>(null);
-  const [colDropPos, setColDropPos] = useState<"left" | "right">("left");
+  const columnHeaderRef = useRef<HTMLDivElement>(null);
+  const columnReorder = usePointerReorder(columns, (next) => {
+    setColumns(next);
+    localStorage.setItem("ultimateshell_explorer_cols_v2", JSON.stringify(next));
+  }, columnHeaderRef);
 
   // Dynamic user detection with real-time prompt parsing
   const [detectedUser, setDetectedUser] = useState<string>(() => {
@@ -240,68 +241,6 @@ export function FileExplorer({
 
     window.addEventListener("mousemove", onMouseMove);
     window.addEventListener("mouseup", onMouseUp);
-  };
-
-  // Drag and drop column reordering handlers
-  const handleColDragStart = (e: React.DragEvent, id: ColumnId) => {
-    draggedColRef.current = id;
-    isColDraggingRef.current = true;
-    setDraggedColId(id);
-    e.dataTransfer.setData("text/plain", id);
-    e.dataTransfer.effectAllowed = "move";
-  };
-
-  const handleColDragOver = (e: React.DragEvent, id: ColumnId) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-    if (draggedColRef.current && draggedColRef.current !== id) {
-      const rect = e.currentTarget.getBoundingClientRect();
-      const pos = e.clientX > rect.left + rect.width / 2 ? "right" : "left";
-      setDragOverColId(id);
-      setColDropPos(pos);
-    }
-  };
-
-  const handleColDragLeave = (e: React.DragEvent) => {
-    if (e.currentTarget === e.target) {
-      setDragOverColId(null);
-    }
-  };
-
-  const handleColDrop = (e: React.DragEvent, targetId: ColumnId) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const sourceId = draggedColRef.current || (e.dataTransfer.getData("text/plain") as ColumnId);
-    setDragOverColId(null);
-    setDraggedColId(null);
-
-    if (sourceId && sourceId !== targetId) {
-      setColumns((prev) => {
-        const sourceIndex = prev.findIndex((c) => c.id === sourceId);
-        const targetIndex = prev.findIndex((c) => c.id === targetId);
-        if (sourceIndex === -1 || targetIndex === -1) return prev;
-        const copy = [...prev];
-        const [removed] = copy.splice(sourceIndex, 1);
-        const newTargetIndex = copy.findIndex((c) => c.id === targetId);
-        const insertIndex = colDropPos === "right" ? newTargetIndex + 1 : newTargetIndex;
-        copy.splice(insertIndex, 0, removed);
-        localStorage.setItem("ultimateshell_explorer_cols_v2", JSON.stringify(copy));
-        return copy;
-      });
-    }
-    draggedColRef.current = null;
-    setTimeout(() => {
-      isColDraggingRef.current = false;
-    }, 100);
-  };
-
-  const handleColDragEnd = () => {
-    setDraggedColId(null);
-    setDragOverColId(null);
-    draggedColRef.current = null;
-    setTimeout(() => {
-      isColDraggingRef.current = false;
-    }, 100);
   };
 
   // Column width resizing
@@ -1071,33 +1010,30 @@ export function FileExplorer({
           ) : (
             <div className="flex-1 flex flex-col overflow-hidden">
               {/* Table Header: Supports Resizable Column Widths & Drag-and-Drop Reordering */}
-              <div className="h-7 bg-[var(--bg-card)] border-b border-[var(--border-subtle)] flex items-center text-[11px] text-[var(--text-tertiary)] font-medium select-none flex-shrink-0 overflow-x-auto no-scrollbar">
+              <div ref={columnHeaderRef} className="h-7 bg-[var(--bg-card)] border-b border-[var(--border-subtle)] flex items-center text-[11px] text-[var(--text-tertiary)] font-medium select-none flex-shrink-0 overflow-x-auto no-scrollbar">
                 {columns.map((col) => {
-                  const isDragOver = dragOverColId === col.id;
-                  const isDragging = draggedColId === col.id;
+                  const isDragOver = columnReorder.dropTarget?.id === col.id;
+                  const isDragging = columnReorder.draggedId === col.id;
 
                   return (
                     <div
                       key={col.id}
-                      draggable
-                      onDragStart={(e) => handleColDragStart(e, col.id)}
-                      onDragOver={(e) => handleColDragOver(e, col.id)}
-                      onDragLeave={handleColDragLeave}
-                      onDrop={(e) => handleColDrop(e, col.id)}
-                      onDragEnd={handleColDragEnd}
-                      style={{ width: `${col.width}px` }}
+                      draggable={false}
+                      data-reorder-id={col.id}
+                      onPointerDown={(e) => columnReorder.onPointerDown(e, col.id)}
+                      style={{ width: `${col.width}px`, touchAction: "none" }}
                       className={`relative h-full flex items-center px-2 cursor-grab active:cursor-grabbing hover:bg-[var(--hover-item)] hover:text-[var(--text-primary)] transition-colors flex-shrink-0 group/col select-none ${
                         col.align === "right" ? "justify-end text-right" : "justify-start text-left"
                       } ${
                         isDragOver
-                          ? colDropPos === "left"
+                          ? columnReorder.dropTarget?.position === "left"
                             ? "border-l-2 border-[#007AFF] bg-[#007AFF]/10"
                             : "border-r-2 border-[#007AFF] bg-[#007AFF]/10"
                           : ""
                       } ${isDragging ? "opacity-35" : ""}`}
                       title={`${col.tooltip} (可左右拖拽调整顺序)`}
                       onClick={() => {
-                        if (isColDraggingRef.current) return;
+                        if (columnReorder.suppressClick()) return;
                         if (col.sortable) handleSort(col.id as SortField);
                       }}
                     >
@@ -1111,6 +1047,8 @@ export function FileExplorer({
                       {/* Resizer Handle on right border */}
                       <div
                         draggable={false}
+                        data-reorder-ignore
+                        onPointerDown={(e) => e.stopPropagation()}
                         onMouseDown={(e) => {
                           e.stopPropagation();
                           handleStartColResize(col.id, e);
