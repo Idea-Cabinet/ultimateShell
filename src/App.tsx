@@ -450,7 +450,6 @@ export function App() {
           onReconnectTab={handleReconnectTab}
           onNewLocalTab={createNewLocalTab}
           onReorderTabs={setTabs}
-          onOpenSettings={() => setIsSettingsOpen(true)}
         />
 
         {/* Terminals Container */}
