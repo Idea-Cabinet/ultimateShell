@@ -126,7 +126,7 @@ export const TabBar: React.FC<Props> = ({
     <>
       <div
         className={`h-12 apple-vibrancy-toolbar border-b border-[var(--border-subtle)] flex items-center px-3 space-x-1.5 select-none z-10 transition-[padding] duration-[180ms] ${
-          isSidebarCollapsed ? "pl-[78px]" : ""
+          isSidebarCollapsed ? "pl-[84px]" : ""
         }`}
       >
         {/* Sidebar Toggle Button */}

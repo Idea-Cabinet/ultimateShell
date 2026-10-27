@@ -254,11 +254,11 @@ export const Sidebar: React.FC<Props> = ({
       {/* macOS Unified Titlebar Drag Region & Traffic Lights clearance */}
       <div
         data-tauri-drag-region
-        className="h-12 flex items-center justify-between px-3 pl-[78px] border-b border-[var(--border-subtle)] select-none flex-shrink-0"
+        className="h-12 flex items-center justify-between px-3 pl-[84px] border-b border-[var(--border-subtle)] select-none flex-shrink-0"
       >
         <div className="flex items-center space-x-2 truncate">
-          <Terminal className="w-3.5 h-3.5 text-[var(--text-secondary)]" strokeWidth={1.75} />
-          <span className="text-[13px] font-semibold tracking-[-0.01em] text-[var(--text-primary)] truncate">
+          <Terminal className="w-3.5 h-3.5 text-[var(--text-secondary)] flex-shrink-0" strokeWidth={1.75} />
+          <span className="text-[13px] font-semibold tracking-[-0.01em] text-[var(--text-primary)] truncate leading-none">
             {t("app.title")}
           </span>
         </div>
