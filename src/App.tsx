@@ -8,7 +8,7 @@ import { TabBar } from "./components/TabBar";
 import { TerminalView } from "./components/TerminalView";
 import { HostModal } from "./components/HostModal";
 import { FileExplorer } from "./components/FileExplorer";
-import { Folder, KeyRound, ShieldCheck, Sun, Moon } from "lucide-react";
+import { Folder, KeyRound, ShieldCheck, Sun, Moon, Monitor } from "lucide-react";
 import "./App.css";
 
 interface PasswordUpdateEvent {
@@ -336,10 +336,8 @@ export function App() {
         connectedHostIds={connectedHostIds}
         width={sidebarWidth}
         isCollapsed={isSidebarCollapsed}
-        themeMode={themeMode}
         onWidthChange={handleWidthChange}
         onCollapse={handleCollapse}
-        onThemeChange={setThemeMode}
         onConnect={handleConnect}
         onEdit={(host) => {
           setEditingHost(host);
@@ -490,20 +488,37 @@ export function App() {
             <span title="当前标签栏中打开的所有终端会话总数" className="cursor-default pr-1">
               {tabs.length} 个会话
             </span>
-            {/* Theme Toggle Button: Icon Only without text */}
+            {/* Theme Toggle Button: Cycles System -> Light -> Dark -> System */}
             <button
-              onClick={() => setThemeMode(resolvedTheme === "dark" ? "light" : "dark")}
+              onClick={() => {
+                if (themeMode === "system") {
+                  setThemeMode("light");
+                } else if (themeMode === "light") {
+                  setThemeMode("dark");
+                } else {
+                  setThemeMode("system");
+                }
+              }}
               title={
-                resolvedTheme === "dark"
-                  ? "当前为深色外观，点击切换为浅色"
-                  : "当前为浅色外观，点击切换为深色"
+                themeMode === "system"
+                  ? `外观模式：跟随系统自动 (当前呈现${resolvedTheme === "dark" ? "深色" : "浅色"}，点击切换为浅色)`
+                  : themeMode === "light"
+                  ? "外观模式：浅色明亮 (点击切换为深色)"
+                  : "外观模式：深色暗黑 (点击切换为跟随系统自动)"
               }
-              className="p-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-all active:scale-95 flex items-center justify-center"
+              className="p-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-all active:scale-95 flex items-center justify-center relative"
             >
-              {resolvedTheme === "dark" ? (
-                <Moon className="w-3.5 h-3.5 text-indigo-400" />
-              ) : (
+              {themeMode === "system" ? (
+                <div className="relative flex items-center justify-center">
+                  <Monitor className="w-3.5 h-3.5 text-[#007AFF]" />
+                  <span className="absolute -bottom-0.5 -right-0.5 text-[7px] font-bold font-mono text-[#007AFF] leading-none">
+                    A
+                  </span>
+                </div>
+              ) : themeMode === "light" ? (
                 <Sun className="w-3.5 h-3.5 text-amber-500" />
+              ) : (
+                <Moon className="w-3.5 h-3.5 text-indigo-400" />
               )}
             </button>
           </div>

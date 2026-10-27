@@ -1,7 +1,5 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { HostProfile, TabSession } from "../types";
-import { ThemeMode } from "../hooks/useTheme";
-import { ThemeSelector } from "./ThemeSelector";
 import { ServerPerfMonitor } from "./ServerPerfMonitor";
 import {
   Server,
@@ -26,11 +24,9 @@ interface Props {
   connectedHostIds: Set<string>;
   width: number;
   isCollapsed: boolean;
-  themeMode: ThemeMode;
   activeSession?: TabSession;
   onWidthChange: (w: number) => void;
   onCollapse: (collapsed: boolean) => void;
-  onThemeChange: (mode: ThemeMode) => void;
   onConnect: (host: HostProfile) => void;
   onEdit: (host: HostProfile) => void;
   onDelete: (id: string) => void;
@@ -44,11 +40,9 @@ export const Sidebar: React.FC<Props> = ({
   connectedHostIds,
   width,
   isCollapsed,
-  themeMode,
   activeSession,
   onWidthChange,
   onCollapse,
-  onThemeChange,
   onConnect,
   onEdit,
   onDelete,
@@ -62,6 +56,35 @@ export const Sidebar: React.FC<Props> = ({
     return (localStorage.getItem("ultimateshell_sort_mode") as SortMode) || "recent";
   });
   const [showSortMenu, setShowSortMenu] = useState(false);
+
+  // Defer re-sorting when user is hovering inside the sidebar (prevents jumping under cursor!)
+  const [displayHosts, setDisplayHosts] = useState<HostProfile[]>(hosts);
+  const pendingHostsRef = useRef<HostProfile[] | null>(null);
+  const isHoveringRef = useRef<boolean>(false);
+
+  // Synchronize hosts when not hovering or when server count changes (e.g. added/deleted)
+  useEffect(() => {
+    const countChanged = hosts.length !== displayHosts.length;
+    if (!isHoveringRef.current || countChanged) {
+      setDisplayHosts(hosts);
+      pendingHostsRef.current = null;
+    } else {
+      pendingHostsRef.current = hosts;
+    }
+  }, [hosts, displayHosts.length]);
+
+  const handleSidebarMouseEnter = () => {
+    isHoveringRef.current = true;
+  };
+
+  const handleSidebarMouseLeave = () => {
+    isHoveringRef.current = false;
+    // When cursor leaves sidebar, apply any deferred re-sort!
+    if (pendingHostsRef.current) {
+      setDisplayHosts(pendingHostsRef.current);
+      pendingHostsRef.current = null;
+    }
+  };
 
   // Resizable Performance Monitor Height
   const [perfHeight, setPerfHeight] = useState<number>(() => {
@@ -108,8 +131,8 @@ export const Sidebar: React.FC<Props> = ({
     window.addEventListener("pointerup", onPointerUp);
   };
 
-  // Filter hosts
-  let filteredHosts = hosts.filter(
+  // Filter hosts from displayHosts snapshot
+  let filteredHosts = displayHosts.filter(
     (h) =>
       h.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       h.host.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -140,6 +163,8 @@ export const Sidebar: React.FC<Props> = ({
 
   return (
     <aside
+      onMouseEnter={handleSidebarMouseEnter}
+      onMouseLeave={handleSidebarMouseLeave}
       style={{ width: `${width}px` }}
       className={`relative h-full apple-vibrancy-sidebar border-r border-[var(--border-subtle)] flex flex-col select-none text-[var(--text-primary)] z-20 flex-shrink-0 ${
         isDragging ? "" : "transition-[width] duration-150 ease-[var(--ease-drawer)]"
@@ -364,11 +389,6 @@ export const Sidebar: React.FC<Props> = ({
         height={perfHeight}
         onHeightChange={setPerfHeight}
       />
-
-      {/* Sidebar Footer: Theme Selector */}
-      <div className="p-2 border-t border-[var(--border-subtle)] bg-[var(--bg-sidebar)] flex-shrink-0">
-        <ThemeSelector themeMode={themeMode} onChange={onThemeChange} />
-      </div>
 
       {/* Resizer Divider Handle */}
       <div
