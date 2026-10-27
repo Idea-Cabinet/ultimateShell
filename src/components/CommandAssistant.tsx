@@ -11,6 +11,7 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { TabSession } from "../types";
+import { useI18n } from "../i18n";
 
 export interface ParametricCommand {
   id: string;
@@ -108,6 +109,7 @@ interface Props {
 }
 
 export const CommandAssistant: React.FC<Props> = ({ session: _session, isOpen = true, onClose, onSendToTerminal }) => {
+  const { t } = useI18n();
   const [inputCmd, setInputCmd] = useState("");
   const [history, setHistory] = useState<string[]>(() => {
     try {
@@ -230,7 +232,7 @@ export const CommandAssistant: React.FC<Props> = ({ session: _session, isOpen = 
         <div className="flex items-center space-x-1.5 overflow-x-auto no-scrollbar py-0.5 text-[11px]">
           <span className="text-[10px] text-[var(--text-tertiary)] flex items-center space-x-1 flex-shrink-0">
             <Sparkles className="w-3 h-3 text-amber-500" />
-            <span>智能匹配:</span>
+            <span>{t("cmd.smartMatch")}</span>
           </span>
           {suggestions.map((item) => (
             <button
@@ -259,7 +261,7 @@ export const CommandAssistant: React.FC<Props> = ({ session: _session, isOpen = 
               setHistoryIdx(-1);
             }}
             onKeyDown={handleKeyDown}
-            placeholder="输入指令 (回车发送至活跃终端，↑/↓ 键历史漫游，输入关键词匹配命令模板)..."
+            placeholder={t("cmd.inputPlaceholder")}
             className="flex-1 bg-transparent font-mono text-[12.5px] text-[var(--text-primary)] placeholder-[var(--text-tertiary)] outline-none"
           />
 
@@ -267,7 +269,7 @@ export const CommandAssistant: React.FC<Props> = ({ session: _session, isOpen = 
             <button
               onClick={() => setInputCmd("")}
               className="p-0.5 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
-              title="清空输入框"
+              title={t("cmd.clearInput")}
             >
               <X className="w-3 h-3" />
             </button>
@@ -280,7 +282,7 @@ export const CommandAssistant: React.FC<Props> = ({ session: _session, isOpen = 
               className={`p-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition flex items-center space-x-0.5 ${
                 showHistoryDropdown ? "bg-[var(--hover-item)] text-[#007AFF]" : ""
               }`}
-              title="查看客户端历史命令"
+              title={t("cmd.historyTip")}
             >
               <Clock className="w-3 h-3" />
               <ChevronDown className="w-2.5 h-2.5" />
@@ -293,7 +295,7 @@ export const CommandAssistant: React.FC<Props> = ({ session: _session, isOpen = 
                 onClick={(e) => e.stopPropagation()}
               >
                 <div className="px-2 py-1 text-[10px] font-sans font-semibold text-[var(--text-tertiary)] uppercase flex justify-between items-center border-b border-[var(--border-subtle)]/50">
-                  <span>历史命令 ({history.length})</span>
+                  <span>{t("cmd.historyTitle")} ({history.length})</span>
                   <button
                     onClick={() => {
                       setHistory([]);
@@ -302,12 +304,12 @@ export const CommandAssistant: React.FC<Props> = ({ session: _session, isOpen = 
                     }}
                     className="text-rose-500 hover:underline"
                   >
-                    清空
+                    {t("cmd.historyClear")}
                   </button>
                 </div>
                 {history.length === 0 ? (
                   <div className="p-3 text-center text-[var(--text-tertiary)] font-sans">
-                    暂无历史命令
+                    {t("cmd.historyEmpty")}
                   </div>
                 ) : (
                   history.map((cmd, i) => (
@@ -327,7 +329,7 @@ export const CommandAssistant: React.FC<Props> = ({ session: _session, isOpen = 
                           executeCommand(cmd);
                         }}
                         className="opacity-0 group-hover:opacity-100 p-0.5 rounded bg-[#007AFF] text-white hover:bg-[#0062CC] ml-1 flex-shrink-0"
-                        title="立即执行"
+                        title={t("cmd.runNow")}
                       >
                         <Play className="w-2.5 h-2.5" />
                       </button>
@@ -343,10 +345,10 @@ export const CommandAssistant: React.FC<Props> = ({ session: _session, isOpen = 
         <button
           onClick={() => setShowTemplatesModal(true)}
           className="px-2.5 py-1.5 rounded-lg bg-[var(--hover-item)] hover:bg-[#007AFF]/15 hover:text-[#007AFF] border border-[var(--border-subtle)] text-[var(--text-secondary)] text-[11.5px] font-medium flex items-center space-x-1.5 transition active:scale-95 flex-shrink-0"
-          title="打开常用参数化指令库"
+          title={t("cmd.library")}
         >
           <BookOpen className="w-3.5 h-3.5 text-amber-500" />
-          <span>参数化指令库</span>
+          <span>{t("cmd.library")}</span>
         </button>
 
         {/* Send Button */}
@@ -354,10 +356,10 @@ export const CommandAssistant: React.FC<Props> = ({ session: _session, isOpen = 
           onClick={() => executeCommand(inputCmd)}
           disabled={!inputCmd.trim()}
           className="px-3 py-1.5 rounded-lg bg-[#007AFF] hover:bg-[#0A84FF] disabled:opacity-40 text-white text-[11.5px] font-medium flex items-center space-x-1.5 shadow-sm transition active:scale-95 flex-shrink-0"
-          title="执行并发送至终端 (Enter)"
+          title={t("cmd.send")}
         >
           <Send className="w-3 h-3" />
-          <span>执行</span>
+          <span>{t("cmd.send")}</span>
         </button>
 
         {/* Close Button */}
@@ -378,7 +380,7 @@ export const CommandAssistant: React.FC<Props> = ({ session: _session, isOpen = 
               <div className="flex items-center justify-between pb-3 border-b border-[var(--border-subtle)]">
                 <div className="flex items-center space-x-2">
                   <BookOpen className="w-4 h-4 text-amber-500" />
-                  <h3 className="font-semibold text-[14px]">参数化命令模板库</h3>
+                  <h3 className="font-semibold text-[14px]">{t("cmd.library")}</h3>
                 </div>
                 <button
                   onClick={() => setShowTemplatesModal(false)}
@@ -413,7 +415,7 @@ export const CommandAssistant: React.FC<Props> = ({ session: _session, isOpen = 
                     </div>
                     <button className="px-2.5 py-1 rounded-lg bg-[#007AFF] text-white text-[11px] font-medium opacity-0 group-hover:opacity-100 transition active:scale-95 flex items-center space-x-1 flex-shrink-0">
                       <Sparkles className="w-3 h-3" />
-                      <span>填参使用</span>
+                      <span>{t("cmd.fillParams")}</span>
                     </button>
                   </div>
                 ))}
@@ -432,7 +434,7 @@ export const CommandAssistant: React.FC<Props> = ({ session: _session, isOpen = 
                 <div>
                   <h3 className="font-semibold text-[14px]">{activeParamCmd.name}</h3>
                   <p className="text-[11px] text-[var(--text-secondary)] mt-0.5">
-                    填写参数以自动构建并执行命令
+                    {t("cmd.smartReplace")}
                   </p>
                 </div>
                 <button
@@ -447,7 +449,7 @@ export const CommandAssistant: React.FC<Props> = ({ session: _session, isOpen = 
                 {Object.keys(paramValues).map((key) => (
                   <div key={key}>
                     <label className="block text-[11px] font-mono font-medium text-[var(--text-secondary)] mb-1">
-                      参数: {key}
+                      {key}
                     </label>
                     <input
                       type="text"
@@ -462,7 +464,7 @@ export const CommandAssistant: React.FC<Props> = ({ session: _session, isOpen = 
 
                 <div className="p-2.5 rounded-lg bg-[var(--bg-app)] border border-[var(--border-subtle)] mt-2">
                   <div className="text-[10px] text-[var(--text-tertiary)] uppercase font-semibold mb-1">
-                    最终生成命令预览:
+                    {t("cmd.preview")}:
                   </div>
                   <div className="font-mono text-[11.5px] text-[#007AFF] break-all">
                     {getResolvedCommand()}
@@ -475,14 +477,14 @@ export const CommandAssistant: React.FC<Props> = ({ session: _session, isOpen = 
                   onClick={() => setActiveParamCmd(null)}
                   className="px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--hover-item)] rounded-lg transition"
                 >
-                  取消
+                  {t("common.cancel")}
                 </button>
                 <button
                   onClick={handleApplyParamCommand}
                   className="px-4 py-1.5 text-[12px] font-medium bg-[#007AFF] hover:bg-[#0A84FF] text-white rounded-lg flex items-center space-x-1.5 transition active:scale-95 shadow-sm"
                 >
                   <Send className="w-3 h-3" />
-                  <span>填入并立即执行</span>
+                  <span>{t("cmd.executeAndSend")}</span>
                 </button>
               </div>
             </div>

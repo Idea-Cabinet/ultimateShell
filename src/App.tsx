@@ -3,14 +3,16 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { HostProfile, TabSession, isDefaultGroup } from "./types";
 import { useTheme } from "./hooks/useTheme";
+import { useAppSettings } from "./hooks/useAppSettings";
 import { useI18n } from "./i18n";
 import { Sidebar } from "./components/Sidebar";
 import { TabBar } from "./components/TabBar";
 import { TerminalView } from "./components/TerminalView";
 import { HostModal } from "./components/HostModal";
+import { SettingsModal } from "./components/SettingsModal";
 import { OpsDrawer, DrawerTab } from "./components/OpsDrawer";
 import { CommandAssistant } from "./components/CommandAssistant";
-import { Folder, KeyRound, ShieldCheck, Sun, Moon, Monitor, Activity, HardDrive, Terminal, Globe } from "lucide-react";
+import { Folder, KeyRound, ShieldCheck, Sun, Moon, Monitor, Activity, HardDrive, Terminal, Globe, Settings } from "lucide-react";
 import "./App.css";
 
 interface PasswordUpdateEvent {
@@ -21,12 +23,14 @@ interface PasswordUpdateEvent {
 
 export function App() {
   const { themeMode, setThemeMode, resolvedTheme } = useTheme();
-  const { t, lang, toggleLang } = useI18n();
+  const { settings, updateSettings } = useAppSettings();
+  const { t, lang, setLang, toggleLang } = useI18n();
 
   const [hosts, setHosts] = useState<HostProfile[]>([]);
   const [tabs, setTabs] = useState<TabSession[]>([]);
   const [activeTabId, setActiveTabId] = useState<string>("");
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [editingHost, setEditingHost] = useState<HostProfile | null>(null);
 
   // Status bar stats for active tab
@@ -63,15 +67,26 @@ export function App() {
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | null = null;
+    let unlistenTray: (() => void) | null = null;
+
     listen<PasswordUpdateEvent>("ssh-password-update-prompt", (event) => {
       if (!disposed) setPasswordPrompt(event.payload);
     }).then((fn) => {
       if (disposed) fn();
       else unlisten = fn;
     });
+
+    listen("tray-new-local-tab", () => {
+      if (!disposed) createNewLocalTab();
+    }).then((fn) => {
+      if (disposed) fn();
+      else unlistenTray = fn;
+    });
+
     return () => {
       disposed = true;
       if (unlisten) unlisten();
+      if (unlistenTray) unlistenTray();
     };
   }, []);
 
@@ -435,6 +450,7 @@ export function App() {
           onReconnectTab={handleReconnectTab}
           onNewLocalTab={createNewLocalTab}
           onReorderTabs={setTabs}
+          onOpenSettings={() => setIsSettingsOpen(true)}
         />
 
         {/* Terminals Container */}
@@ -449,6 +465,7 @@ export function App() {
               session={tab}
               isActive={tab.id === activeTabId}
               resolvedTheme={resolvedTheme}
+              settings={settings}
             />
           ))}
         </div>
@@ -685,6 +702,15 @@ export function App() {
                 <Moon className="w-3.5 h-3.5 text-indigo-400" />
               )}
             </button>
+
+            {/* Quick Settings Button */}
+            <button
+              onClick={() => setIsSettingsOpen(true)}
+              title={t("status.settings")}
+              className="p-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-all active:scale-95 flex items-center justify-center"
+            >
+              <Settings className="w-3.5 h-3.5" />
+            </button>
           </div>
         </div>
       </div>
@@ -734,6 +760,18 @@ export function App() {
         onClose={() => setIsModalOpen(false)}
         onSave={handleSaveHost}
         initialHost={editingHost}
+      />
+
+      {/* Preferences & Settings Modal */}
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        settings={settings}
+        onUpdateSettings={updateSettings}
+        themeMode={themeMode}
+        onThemeChange={setThemeMode}
+        lang={lang}
+        onLangChange={setLang}
       />
     </div>
   );

@@ -7,6 +7,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { TabSession } from "../types";
 import { ResolvedTheme } from "../hooks/useTheme";
+import { AppSettings } from "../hooks/useAppSettings";
 import { Search, ChevronUp, ChevronDown, X } from "lucide-react";
 
 const DARK_THEME = {
@@ -61,9 +62,10 @@ interface Props {
   session: TabSession;
   isActive: boolean;
   resolvedTheme: ResolvedTheme;
+  settings?: AppSettings;
 }
 
-export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme }) => {
+export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme, settings }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalInstanceRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -140,11 +142,11 @@ export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme
     const currentTheme = resolvedTheme === "dark" ? DARK_THEME : LIGHT_THEME;
 
     const term = new Terminal({
-      scrollback: 5000,
-      cursorBlink: false,
-      cursorStyle: "block",
+      scrollback: settings?.scrollback ?? 5000,
+      cursorBlink: settings?.cursorBlink ?? false,
+      cursorStyle: settings?.cursorStyle ?? "block",
       cursorInactiveStyle: "outline",
-      fontSize: 13.5,
+      fontSize: settings?.fontSize ?? 13.5,
       lineHeight: 1.25,
       fontFamily: 'ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace',
       theme: currentTheme,
@@ -320,6 +322,18 @@ export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme
     const theme = resolvedTheme === "dark" ? DARK_THEME : LIGHT_THEME;
     terminalInstanceRef.current.options.theme = theme;
   }, [resolvedTheme]);
+
+  // Update terminal settings dynamically
+  useEffect(() => {
+    if (!terminalInstanceRef.current || !settings) return;
+    terminalInstanceRef.current.options.fontSize = settings.fontSize;
+    terminalInstanceRef.current.options.cursorStyle = settings.cursorStyle;
+    terminalInstanceRef.current.options.cursorBlink = settings.cursorBlink;
+    terminalInstanceRef.current.options.scrollback = settings.scrollback;
+    try {
+      fitAddonRef.current?.fit();
+    } catch (_) {}
+  }, [settings?.fontSize, settings?.cursorStyle, settings?.cursorBlink, settings?.scrollback]);
 
   useEffect(() => {
     if (isActive && fitAddonRef.current && terminalInstanceRef.current) {

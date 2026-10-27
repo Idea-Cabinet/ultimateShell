@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { TabSession, SystemPerfStats } from "../types";
 import { Cpu, Layers, Network, HardDrive, Activity } from "lucide-react";
+import { useI18n } from "../i18n";
 
 interface Props {
   activeSession?: TabSession;
@@ -66,6 +67,7 @@ export const ServerPerfMonitor: React.FC<Props> = ({
   height,
   onHeightChange,
 }) => {
+  const { t } = useI18n();
   const [stats, setStats] = useState<SystemPerfStats>({
     cpu_usage: 0,
     mem_percent: 0,
@@ -171,14 +173,14 @@ export const ServerPerfMonitor: React.FC<Props> = ({
           <span className="font-semibold text-[var(--text-primary)] tracking-tight truncate">
             {activeSession
               ? activeSession.isLocal
-                ? "本地系统性能"
-                : `${activeSession.title} 性能`
-              : "未连接终端"}
+                ? t("tab.localTerminal")
+                : `${activeSession.title}`
+              : t("status.disconnected")}
           </span>
         </div>
         <div className="flex items-center space-x-1 flex-shrink-0 text-[10px] text-[var(--text-tertiary)] font-mono">
           <span className={`w-1.5 h-1.5 rounded-full ${activeSession?.connected ? "bg-[#30D158] animate-pulse" : "bg-zinc-400"}`} />
-          <span>实时监控</span>
+          <span>{t("perf.realtime")}</span>
         </div>
       </div>
 
@@ -230,7 +232,7 @@ export const ServerPerfMonitor: React.FC<Props> = ({
               <div className="flex items-center justify-between text-[10px] text-[var(--text-tertiary)]">
                 <span className="flex items-center space-x-1">
                   <Network className="w-3 h-3 text-[#30D158]" />
-                  <span>网络</span>
+                  <span>{t("perf.net")}</span>
                 </span>
                 <span className="font-mono text-[9px] text-[#30D158]">
                   ↓{formatRate(stats.net_rx_kbs)}
@@ -246,14 +248,14 @@ export const ServerPerfMonitor: React.FC<Props> = ({
               <div className="flex items-center justify-between text-[10px] text-[var(--text-tertiary)]">
                 <span className="flex items-center space-x-1">
                   <HardDrive className="w-3 h-3 text-[#FF9500]" />
-                  <span>IO</span>
+                  <span>{t("perf.diskIO")}</span>
                 </span>
                 <span className="font-mono text-[9px] text-[#FF9500]">
-                  R:{formatRate(stats.io_read_kbs)}
+                  {t("perf.read")}:{formatRate(stats.io_read_kbs)}
                 </span>
               </div>
               <div className="font-mono text-[9px] text-[var(--text-tertiary)] text-right">
-                W:{formatRate(stats.io_write_kbs)}
+                {t("perf.write")}:{formatRate(stats.io_write_kbs)}
               </div>
             </div>
           </div>
@@ -271,7 +273,7 @@ export const ServerPerfMonitor: React.FC<Props> = ({
                   {stats.cpu_usage.toFixed(1)}%
                 </div>
                 <div className="text-[9.5px] text-[var(--text-tertiary)] font-mono">
-                  负载 {stats.load_1m.toFixed(2)}
+                  {t("perf.load")} {stats.load_1m.toFixed(2)}
                 </div>
               </div>
               <Sparkline data={cpuHistory} color="#007AFF" maxVal={100} height={26} />
@@ -299,7 +301,7 @@ export const ServerPerfMonitor: React.FC<Props> = ({
               <div className="flex flex-col min-w-[85px]">
                 <div className="flex items-center space-x-1 text-[11px] font-medium text-[var(--text-primary)]">
                   <Network className="w-3.5 h-3.5 text-[#30D158]" />
-                  <span>网络流量</span>
+                  <span>{t("perf.netTraffic")}</span>
                 </div>
                 <div className="font-mono text-[10px] text-[#30D158] mt-1 flex items-center space-x-1">
                   <span>↓</span>
@@ -318,13 +320,13 @@ export const ServerPerfMonitor: React.FC<Props> = ({
               <div className="flex flex-col min-w-[85px]">
                 <div className="flex items-center space-x-1 text-[11px] font-medium text-[var(--text-primary)]">
                   <HardDrive className="w-3.5 h-3.5 text-[#FF9500]" />
-                  <span>磁盘 IO</span>
+                  <span>{t("perf.diskIO")}</span>
                 </div>
                 <div className="font-mono text-[10px] text-[var(--text-secondary)] mt-1">
-                  读 {formatRate(stats.io_read_kbs)}
+                  {t("perf.read")} {formatRate(stats.io_read_kbs)}
                 </div>
                 <div className="font-mono text-[10px] text-[var(--text-tertiary)]">
-                  写 {formatRate(stats.io_write_kbs)}
+                  {t("perf.write")} {formatRate(stats.io_write_kbs)}
                 </div>
               </div>
               <Sparkline data={ioHistory} color="#FF9500" height={26} />

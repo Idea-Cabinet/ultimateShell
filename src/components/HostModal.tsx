@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { HostProfile, isDefaultGroup } from "../types";
-import { X, Server, Lock, FolderOpen } from "lucide-react";
+import { X, Server, Lock, FolderOpen, Eye, EyeOff } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useI18n } from "../i18n";
@@ -25,11 +25,13 @@ export const HostModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialHos
     identity_file: "",
   });
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const firstInputRef = useRef<HTMLInputElement>(null);
 
   // Auto focus first input on modal open
   useEffect(() => {
     if (isOpen) {
+      setShowPassword(false);
       const timer = setTimeout(() => {
         firstInputRef.current?.focus();
       }, 50);
@@ -219,13 +221,28 @@ export const HostModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialHos
               </label>
               <span className="text-[10px] text-emerald-500 font-mono">AES-256-GCM 保护</span>
             </div>
-            <input
-              type="password"
-              placeholder={t("modal.host.passwordPlaceholder")}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-3 py-1.5 bg-[var(--input-bg)] border border-[var(--border-subtle)] rounded-[8px] text-[13px] text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none focus:border-[#007AFF] focus:ring-1 focus:ring-[#007AFF]/40 font-mono"
-            />
+            <div className="relative flex items-center">
+              <input
+                type={showPassword ? "text" : "password"}
+                placeholder={t("modal.host.passwordPlaceholder")}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full px-3 py-1.5 pr-9 bg-[var(--input-bg)] border border-[var(--border-subtle)] rounded-[8px] text-[13px] text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none focus:border-[#007AFF] focus:ring-1 focus:ring-[#007AFF]/40 font-mono"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                tabIndex={-1}
+                title={showPassword ? t("modal.host.hidePassword") : t("modal.host.showPassword")}
+                className="absolute right-2 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] p-1 rounded-md transition hover:bg-[var(--hover-item)] active:scale-95 flex items-center justify-center"
+              >
+                {showPassword ? (
+                  <EyeOff className="w-3.5 h-3.5" strokeWidth={1.75} />
+                ) : (
+                  <Eye className="w-3.5 h-3.5" strokeWidth={1.75} />
+                )}
+              </button>
+            </div>
           </div>
 
           <div>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { TabSession, ProcessEntry } from "../types";
+import { useI18n } from "../i18n";
 import {
   Search,
   RotateCw,
@@ -28,6 +29,7 @@ export const ProcessManager: React.FC<Props> = ({
   onToggleMaximize,
   onClose,
 }) => {
+  const { t } = useI18n();
   const [processes, setProcesses] = useState<ProcessEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -142,7 +144,7 @@ export const ProcessManager: React.FC<Props> = ({
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="搜索 PID、进程指令或用户..."
+              placeholder={t("process.searchPlaceholder")}
               className="h-6 w-full pl-6 pr-5 text-[11px] bg-[var(--bg-app)] border border-[var(--border-subtle)] focus:border-[#007AFF] rounded outline-none text-[var(--text-primary)]"
             />
             {searchQuery && (
@@ -156,7 +158,7 @@ export const ProcessManager: React.FC<Props> = ({
           </div>
 
           <span className="text-[var(--text-tertiary)] text-[10.5px]">
-            共 {filteredProcesses.length} 个活跃进程
+            {filteredProcesses.length} {t("status.processes")}
           </span>
         </div>
 
@@ -169,13 +171,13 @@ export const ProcessManager: React.FC<Props> = ({
               onChange={(e) => setAutoRefresh(e.target.checked)}
               className="rounded accent-[#007AFF] w-3 h-3"
             />
-            <span>3秒自动刷新</span>
+            <span>{t("process.autoRefresh")}</span>
           </label>
 
           <button
             onClick={fetchProcesses}
             className="p-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition"
-            title="手动刷新进程列表"
+            title={t("process.refresh")}
           >
             <RotateCw className={`w-3.5 h-3.5 ${loading ? "animate-spin text-[#007AFF]" : ""}`} />
           </button>
@@ -194,7 +196,7 @@ export const ProcessManager: React.FC<Props> = ({
             <button
               onClick={onClose}
               className="p-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition"
-              title="关闭抽屉面板"
+              title={t("common.close")}
             >
               <X className="w-3.5 h-3.5" />
             </button>
@@ -208,33 +210,33 @@ export const ProcessManager: React.FC<Props> = ({
           onClick={() => handleSort("pid")}
           className="w-20 cursor-pointer hover:text-[var(--text-primary)] flex items-center space-x-1"
         >
-          <span>PID</span>
+          <span>{t("process.colPid")}</span>
           {sortField === "pid" && <span>{sortAsc ? "↑" : "↓"}</span>}
         </div>
         <div
           onClick={() => handleSort("user")}
           className="w-24 cursor-pointer hover:text-[var(--text-primary)] flex items-center space-x-1 truncate"
         >
-          <span>USER</span>
+          <span>{t("process.colUser")}</span>
           {sortField === "user" && <span>{sortAsc ? "↑" : "↓"}</span>}
         </div>
         <div
           onClick={() => handleSort("cpu")}
           className="w-20 text-right pr-3 cursor-pointer hover:text-[var(--text-primary)] flex items-center justify-end space-x-1"
         >
-          <span>%CPU</span>
+          <span>{t("process.colCpu")}</span>
           {sortField === "cpu" && <span>{sortAsc ? "↑" : "↓"}</span>}
         </div>
         <div
           onClick={() => handleSort("mem")}
           className="w-20 text-right pr-3 cursor-pointer hover:text-[var(--text-primary)] flex items-center justify-end space-x-1"
         >
-          <span>%MEM</span>
+          <span>{t("process.colMem")}</span>
           {sortField === "mem" && <span>{sortAsc ? "↑" : "↓"}</span>}
         </div>
         <div className="w-16 text-center">状态</div>
-        <div className="flex-1 truncate pl-2">命令行 (COMMAND)</div>
-        <div className="w-20 text-center flex-shrink-0">操作</div>
+        <div className="flex-1 truncate pl-2">{t("process.colCommand")}</div>
+        <div className="w-20 text-center flex-shrink-0">{t("process.action")}</div>
       </div>
 
       {/* Process Rows List */}
@@ -322,7 +324,7 @@ export const ProcessManager: React.FC<Props> = ({
                 <Skull className="w-5 h-5" />
               </div>
               <div className="flex-1 min-w-0">
-                <h3 className="font-semibold text-[14px]">确认终止进程？</h3>
+                <h3 className="font-semibold text-[14px]">{t("process.confirmKill")}</h3>
                 <div className="text-[12px] text-[var(--text-secondary)] mt-1 break-all font-mono bg-[var(--hover-item)] p-2 rounded-lg border border-[var(--border-subtle)]">
                   PID {killTarget.pid} ({killTarget.user}): {killTarget.command}
                 </div>
@@ -331,7 +333,7 @@ export const ProcessManager: React.FC<Props> = ({
 
             <div className="mt-4 space-y-2">
               <label className="block text-[11px] font-medium text-[var(--text-secondary)]">
-                选择终止信号方式:
+                {t("process.action")}:
               </label>
               <div className="grid grid-cols-2 gap-2 text-[12px]">
                 <button
@@ -343,8 +345,7 @@ export const ProcessManager: React.FC<Props> = ({
                       : "border-[var(--border-subtle)] hover:bg-[var(--hover-item)]"
                   }`}
                 >
-                  <div className="font-semibold">SIGTERM (15)</div>
-                  <div className="text-[10px] text-[var(--text-tertiary)]">优雅终止，保存数据后退出</div>
+                  <div className="font-semibold">{t("process.sigterm")}</div>
                 </button>
                 <button
                   type="button"
@@ -355,8 +356,7 @@ export const ProcessManager: React.FC<Props> = ({
                       : "border-[var(--border-subtle)] hover:bg-[var(--hover-item)]"
                   }`}
                 >
-                  <div className="font-semibold">SIGKILL (9)</div>
-                  <div className="text-[10px] text-[var(--text-tertiary)]">强制立即杀死进程</div>
+                  <div className="font-semibold">{t("process.sigkill")}</div>
                 </button>
               </div>
             </div>
@@ -373,7 +373,7 @@ export const ProcessManager: React.FC<Props> = ({
                 onClick={() => setKillTarget(null)}
                 className="px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--hover-item)] rounded-lg transition"
               >
-                取消
+                {t("common.cancel")}
               </button>
               <button
                 type="button"
@@ -382,7 +382,7 @@ export const ProcessManager: React.FC<Props> = ({
                 className="px-4 py-1.5 text-[12px] font-medium bg-rose-500 hover:bg-rose-600 disabled:opacity-50 text-white rounded-lg flex items-center space-x-1.5 transition active:scale-95 shadow-sm"
               >
                 {isKilling && <RotateCw className="w-3 h-3 animate-spin" />}
-                <span>确认终止</span>
+                <span>{t("process.kill")}</span>
               </button>
             </div>
           </div>

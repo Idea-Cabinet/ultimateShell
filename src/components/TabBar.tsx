@@ -13,6 +13,7 @@ import {
   Edit3,
   XCircle,
   ArrowRightCircle,
+  Settings,
 } from "lucide-react";
 
 interface Props {
@@ -29,6 +30,7 @@ interface Props {
   onReconnectTab: (id: string) => void;
   onNewLocalTab: () => void;
   onReorderTabs?: (newTabs: TabSession[]) => void;
+  onOpenSettings?: () => void;
 }
 
 interface ContextMenuState {
@@ -52,6 +54,7 @@ export const TabBar: React.FC<Props> = ({
   onReconnectTab,
   onNewLocalTab,
   onReorderTabs,
+  onOpenSettings,
 }) => {
   const { t } = useI18n();
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -216,6 +219,21 @@ export const TabBar: React.FC<Props> = ({
 
         {/* Trailing Draggable Area for Window Dragging */}
         <div data-tauri-drag-region className="flex-1 h-full min-w-[20px]" />
+
+        {/* Window Settings Button */}
+        {onOpenSettings && (
+          <div className="flex items-center space-x-1 pr-2.5 flex-shrink-0" data-tauri-drag-region="false">
+            <button
+              draggable={false}
+              data-tauri-drag-region="false"
+              onClick={onOpenSettings}
+              title={t("status.settings")}
+              className="h-7 w-7 flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--hover-item)] rounded-[6px] transition active:scale-[0.95]"
+            >
+              <Settings className="w-3.5 h-3.5" strokeWidth={1.75} />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Right-click Context Menu Popover (macOS Styled) */}

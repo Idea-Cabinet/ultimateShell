@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { TabSession, DiskPartition } from "../types";
+import { useI18n } from "../i18n";
 import { HardDrive, RotateCw, AlertTriangle, Database, Maximize2, Minimize2, X } from "lucide-react";
 
 interface Props {
@@ -16,6 +17,7 @@ export const DiskMountManager: React.FC<Props> = ({
   onToggleMaximize,
   onClose,
 }) => {
+  const { t } = useI18n();
   const [partitions, setPartitions] = useState<DiskPartition[]>([]);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -60,10 +62,10 @@ export const DiskMountManager: React.FC<Props> = ({
         <div className="flex items-center space-x-2">
           <HardDrive className="w-3.5 h-3.5 text-[#007AFF]" />
           <span className="font-semibold text-[var(--text-primary)]">
-            磁盘挂载点与存储分区容量监控
+            {t("disk.title")}
           </span>
           <span className="text-[var(--text-tertiary)] text-[10.5px]">
-            ({partitions.length} 个挂载卷)
+            ({partitions.length} {t("status.filesCount", { count: partitions.length })})
           </span>
         </div>
 
@@ -71,7 +73,7 @@ export const DiskMountManager: React.FC<Props> = ({
           <button
             onClick={fetchDisks}
             className="p-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition"
-            title="刷新磁盘容量状态"
+            title={t("disk.refresh")}
           >
             <RotateCw className={`w-3.5 h-3.5 ${loading ? "animate-spin text-[#007AFF]" : ""}`} />
           </button>
@@ -90,7 +92,7 @@ export const DiskMountManager: React.FC<Props> = ({
             <button
               onClick={onClose}
               className="p-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition"
-              title="关闭抽屉面板"
+              title={t("common.close")}
             >
               <X className="w-3.5 h-3.5" />
             </button>
@@ -158,15 +160,15 @@ export const DiskMountManager: React.FC<Props> = ({
                   {/* Capacity Numbers (Total, Used, Avail) */}
                   <div className="grid grid-cols-3 gap-1 pt-1 border-t border-[var(--border-subtle)]/40 text-[11px] font-mono">
                     <div>
-                      <div className="text-[9.5px] text-[var(--text-tertiary)] font-sans">总容量</div>
+                      <div className="text-[9.5px] text-[var(--text-tertiary)] font-sans">{t("disk.colTotal")}</div>
                       <div className="font-semibold text-[var(--text-primary)] mt-0.5">{part.total}</div>
                     </div>
                     <div>
-                      <div className="text-[9.5px] text-[var(--text-tertiary)] font-sans">已使用</div>
+                      <div className="text-[9.5px] text-[var(--text-tertiary)] font-sans">{t("disk.colUsed")}</div>
                       <div className="font-semibold text-[var(--text-secondary)] mt-0.5">{part.used}</div>
                     </div>
                     <div>
-                      <div className="text-[9.5px] text-[var(--text-tertiary)] font-sans">剩余可用</div>
+                      <div className="text-[9.5px] text-[var(--text-tertiary)] font-sans">{t("disk.colAvail")}</div>
                       <div className={`font-semibold mt-0.5 ${isDanger ? "text-rose-500" : "text-[var(--text-primary)]"}`}>
                         {part.avail}
                       </div>
