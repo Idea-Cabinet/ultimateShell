@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { DirResult, FileEntry, TabSession } from "../types";
 import {
   Folder,
@@ -34,10 +35,80 @@ interface FileExplorerProps {
   height: number;
   isOpen: boolean;
   isMaximized: boolean;
+  currentUser?: string;
   onToggleMaximize: () => void;
   onClose: () => void;
   onSendToTerminal: (cmd: string) => void;
 }
+
+export type ColumnId = "name" | "mtime" | "file_type" | "size" | "permissions" | "owner";
+
+interface ColumnDef {
+  id: ColumnId;
+  label: string;
+  width: number;
+  minWidth: number;
+  align: "left" | "right";
+  sortable: boolean;
+  tooltip: string;
+}
+
+const DEFAULT_COLUMNS: ColumnDef[] = [
+  {
+    id: "name",
+    label: "名称",
+    width: 260,
+    minWidth: 120,
+    align: "left",
+    sortable: true,
+    tooltip: "文件/目录名称 (点击升降序，可拖拽列头排序或拖拽右边缘调整宽度)",
+  },
+  {
+    id: "mtime",
+    label: "修改日期",
+    width: 140,
+    minWidth: 90,
+    align: "left",
+    sortable: true,
+    tooltip: "最后修改日期 (点击按时间先后排序)",
+  },
+  {
+    id: "file_type",
+    label: "类型",
+    width: 110,
+    minWidth: 70,
+    align: "left",
+    sortable: true,
+    tooltip: "文件类型说明 (点击归类排序)",
+  },
+  {
+    id: "size",
+    label: "大小",
+    width: 95,
+    minWidth: 60,
+    align: "right",
+    sortable: true,
+    tooltip: "文件大小 (点击按字节大小排序)",
+  },
+  {
+    id: "permissions",
+    label: "权限",
+    width: 95,
+    minWidth: 70,
+    align: "left",
+    sortable: false,
+    tooltip: "POSIX 权限掩码 (如 drwxr-xr-x)",
+  },
+  {
+    id: "owner",
+    label: "所有者",
+    width: 85,
+    minWidth: 60,
+    align: "left",
+    sortable: false,
+    tooltip: "文件拥有者与群组 (UID:GID)",
+  },
+];
 
 type SortField = "name" | "size" | "mtime" | "file_type";
 type SortDirection = "asc" | "desc";
@@ -57,11 +128,13 @@ export function FileExplorer({
   height,
   isOpen,
   isMaximized,
+  currentUser,
   onToggleMaximize,
   onClose,
   onSendToTerminal,
 }: FileExplorerProps) {
-  const [currentPath, setCurrentPath] = useState<string>("~");
+  // Always default to root directory "/" so no subfolder/root is auto-selected!
+  const [currentPath, setCurrentPath] = useState<string>("/");
   const [parentPath, setParentPath] = useState<string | undefined>(undefined);
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [totalCount, setTotalCount] = useState<number>(0);
@@ -77,7 +150,7 @@ export function FileExplorer({
   const [showHidden, setShowHidden] = useState<boolean>(false);
 
   // Navigation History
-  const [history, setHistory] = useState<string[]>(["~"]);
+  const [history, setHistory] = useState<string[]>(["/"]);
   const [historyIdx, setHistoryIdx] = useState<number>(0);
 
   // Sorting
@@ -87,12 +160,152 @@ export function FileExplorer({
   // Selection
   const [selectedEntry, setSelectedEntry] = useState<FileEntry | null>(null);
 
-  // Left sidebar tree toggle & lazy root
+  // Resizable Left sidebar tree toggle & lazy root
   const [showTreePane, setShowTreePane] = useState<boolean>(true);
+  const [treeWidth, setTreeWidth] = useState<number>(() => {
+    const saved = localStorage.getItem("ultimateshell_tree_width");
+    return saved ? parseInt(saved, 10) : 210;
+  });
   const [rootNodes, setRootNodes] = useState<LazyTreeNode[]>([]);
+
+  // Resizable & Reorderable Table Columns
+  const [columns, setColumns] = useState<ColumnDef[]>(() => {
+    try {
+      const saved = localStorage.getItem("ultimateshell_explorer_cols_v2");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length === DEFAULT_COLUMNS.length) {
+          return parsed;
+        }
+      }
+    } catch {}
+    return DEFAULT_COLUMNS;
+  });
+  const [draggedColId, setDraggedColId] = useState<ColumnId | null>(null);
+  const [dragOverColId, setDragOverColId] = useState<ColumnId | null>(null);
+
+  // Dynamic user detection with real-time prompt parsing
+  const [detectedUser, setDetectedUser] = useState<string>(() => {
+    return currentUser || session.hostProfile?.username || "root";
+  });
+
+  useEffect(() => {
+    if (currentUser) {
+      setDetectedUser(currentUser);
+    }
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (!session.id) return;
+    let unlisten: (() => void) | null = null;
+    listen<string>(`pty-user-${session.id}`, (event) => {
+      if (event.payload) {
+        setDetectedUser(event.payload);
+      }
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [session.id]);
 
   // Request counter to discard stale async responses
   const activeReqId = useRef<number>(0);
+
+  // Tree Pane Horizontal Resizer
+  const handleStartTreeResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = treeWidth;
+
+    const onMouseMove = (ev: MouseEvent) => {
+      const delta = ev.clientX - startX;
+      const newWidth = Math.min(Math.max(140, startW + delta), 480);
+      setTreeWidth(newWidth);
+      localStorage.setItem("ultimateshell_tree_width", newWidth.toString());
+    };
+
+    const onMouseUp = () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  };
+
+  // Drag and drop column reordering handlers
+  const handleColDragStart = (e: React.DragEvent, id: ColumnId) => {
+    e.dataTransfer.setData("text/plain", id);
+    e.dataTransfer.effectAllowed = "move";
+    setDraggedColId(id);
+  };
+
+  const handleColDragOver = (e: React.DragEvent, id: ColumnId) => {
+    e.preventDefault();
+    if (draggedColId && draggedColId !== id) {
+      e.dataTransfer.dropEffect = "move";
+      setDragOverColId(id);
+    }
+  };
+
+  const handleColDragLeave = () => {
+    setDragOverColId(null);
+  };
+
+  const handleColDrop = (e: React.DragEvent, targetId: ColumnId) => {
+    e.preventDefault();
+    const sourceId = e.dataTransfer.getData("text/plain") as ColumnId;
+    setDragOverColId(null);
+    setDraggedColId(null);
+
+    if (sourceId && sourceId !== targetId) {
+      setColumns((prev) => {
+        const sourceIndex = prev.findIndex((c) => c.id === sourceId);
+        const targetIndex = prev.findIndex((c) => c.id === targetId);
+        if (sourceIndex === -1 || targetIndex === -1) return prev;
+        const copy = [...prev];
+        const [removed] = copy.splice(sourceIndex, 1);
+        copy.splice(targetIndex, 0, removed);
+        localStorage.setItem("ultimateshell_explorer_cols_v2", JSON.stringify(copy));
+        return copy;
+      });
+    }
+  };
+
+  const handleColDragEnd = () => {
+    setDraggedColId(null);
+    setDragOverColId(null);
+  };
+
+  // Column width resizing
+  const handleStartColResize = (colId: ColumnId, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const col = columns.find((c) => c.id === colId);
+    if (!col) return;
+    const startWidth = col.width;
+
+    const onMouseMove = (ev: MouseEvent) => {
+      const delta = ev.clientX - startX;
+      const newWidth = Math.max(col.minWidth, startWidth + delta);
+      setColumns((prev) => {
+        const updated = prev.map((c) => (c.id === colId ? { ...c, width: newWidth } : c));
+        localStorage.setItem("ultimateshell_explorer_cols_v2", JSON.stringify(updated));
+        return updated;
+      });
+    };
+
+    const onMouseUp = () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  };
 
   // Preview Modal
   const [previewFile, setPreviewFile] = useState<FileEntry | null>(null);
@@ -234,10 +447,14 @@ export function FileExplorer({
     }
   };
 
-  // Only trigger when opened
+  // Reset to root directory "/" whenever session changes or explorer opens
   useEffect(() => {
     if (isOpen && session.id) {
-      loadDirectory("~", false);
+      setCurrentPath("/");
+      setHistory(["/"]);
+      setHistoryIdx(0);
+      setSelectedEntry(null);
+      loadDirectory("/", false);
       initLazyRoot();
     }
   }, [isOpen, session.id]);
@@ -273,7 +490,7 @@ export function FileExplorer({
   };
 
   const handleGoHome = () => {
-    loadDirectory("~");
+    loadDirectory("/");
   };
 
   const handleRefresh = () => {
@@ -405,6 +622,54 @@ export function FileExplorer({
       return <FileText className="w-4 h-4 text-[var(--text-secondary)] flex-shrink-0" />;
     }
     return <File className="w-4 h-4 text-[var(--text-tertiary)] flex-shrink-0" />;
+  };
+
+  // Render content for each dynamic table cell
+  const renderCellContent = (col: ColumnDef, entry: FileEntry) => {
+    switch (col.id) {
+      case "name":
+        return (
+          <div className="flex items-center space-x-2 truncate w-full">
+            {renderFileIcon(entry)}
+            <span className="truncate">{entry.name}</span>
+            {entry.is_symlink && (
+              <span className="text-[10px] text-[var(--text-tertiary)] font-mono flex-shrink-0">
+                (链接)
+              </span>
+            )}
+          </div>
+        );
+      case "mtime":
+        return (
+          <span className="text-[11px] text-[var(--text-tertiary)] truncate font-mono">
+            {entry.mtime_formatted}
+          </span>
+        );
+      case "file_type":
+        return (
+          <span className="text-[11px] text-[var(--text-tertiary)] truncate">
+            {entry.file_type}
+          </span>
+        );
+      case "size":
+        return (
+          <span className="text-[11px] text-[var(--text-tertiary)] truncate font-mono text-right w-full">
+            {entry.size_formatted}
+          </span>
+        );
+      case "permissions":
+        return (
+          <span className="text-[10.5px] text-[var(--text-tertiary)] truncate font-mono">
+            {entry.permissions}
+          </span>
+        );
+      case "owner":
+        return (
+          <span className="text-[10.5px] text-[var(--text-tertiary)] truncate font-mono">
+            {entry.owner}
+          </span>
+        );
+    }
   };
 
   // Render a lazy tree node recursively with pure on-demand expansion
@@ -633,29 +898,40 @@ export function FileExplorer({
 
       {/* 2. Main Dual-Pane Body */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Left Tree Pane (Pure Lazy Loading) */}
+        {/* Left Tree Pane (Pure Lazy Loading with Horizontal Resizing) */}
         {showTreePane && (
-          <div className="w-52 flex-shrink-0 border-r border-[var(--border-subtle)] bg-[var(--bg-sidebar)] flex flex-col overflow-hidden">
-            <div className="p-2 text-[10.5px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider flex items-center justify-between">
-              <span>目录树 (最外层懒加载)</span>
-              <button
-                onClick={initLazyRoot}
-                className="hover:text-[var(--text-primary)]"
-                title="重新载入外层目录"
-              >
-                <RotateCw className="w-2.5 h-2.5" />
-              </button>
+          <>
+            <div
+              style={{ width: `${treeWidth}px` }}
+              className="flex-shrink-0 border-r border-[var(--border-subtle)] bg-[var(--bg-sidebar)] flex flex-col overflow-hidden select-none"
+            >
+              <div className="p-2 text-[10.5px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider flex items-center justify-between">
+                <span>目录树 (最外层懒加载)</span>
+                <button
+                  onClick={initLazyRoot}
+                  className="hover:text-[var(--text-primary)]"
+                  title="重新载入外层目录"
+                >
+                  <RotateCw className="w-2.5 h-2.5" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto px-1 pb-4">
+                {rootNodes.length === 0 ? (
+                  <div className="p-3 text-[11px] text-[var(--text-tertiary)] text-center">
+                    点击刷新载入外层目录
+                  </div>
+                ) : (
+                  rootNodes.map((node) => renderLazyTreeNode(node))
+                )}
+              </div>
             </div>
-            <div className="flex-1 overflow-y-auto px-1 pb-4">
-              {rootNodes.length === 0 ? (
-                <div className="p-3 text-[11px] text-[var(--text-tertiary)] text-center">
-                  点击刷新载入外层目录
-                </div>
-              ) : (
-                rootNodes.map((node) => renderLazyTreeNode(node))
-              )}
-            </div>
-          </div>
+            {/* Tree Sidebar Horizontal Resizer Handle */}
+            <div
+              onMouseDown={handleStartTreeResize}
+              className="w-1 cursor-col-resize hover:bg-[#007AFF]/60 active:bg-[#007AFF] transition-colors flex-shrink-0 select-none relative z-10"
+              title="左右拖拽调整目录树宽度"
+            />
+          </>
         )}
 
         {/* Right Details Explorer Table */}
@@ -668,66 +944,63 @@ export function FileExplorer({
               <div className="text-[13px] font-medium text-[var(--text-primary)]">无法加载此目录</div>
               <div className="text-[11.5px] text-[var(--text-tertiary)] mt-1 max-w-md">{errorMsg}</div>
               <button
-                onClick={() => loadDirectory("~")}
+                onClick={() => loadDirectory("/")}
                 className="mt-3 px-3 py-1 bg-[#007AFF] text-white rounded text-[11.5px] hover:bg-[#0062CC] transition-colors"
               >
-                返回主目录 (~)
+                返回根目录 (/)
               </button>
             </div>
           ) : (
             <div className="flex-1 flex flex-col overflow-hidden">
-              {/* Table Header */}
-              <div className="h-7 bg-[var(--bg-card)] border-b border-[var(--border-subtle)] flex items-center text-[11px] text-[var(--text-tertiary)] font-medium px-3 select-none flex-shrink-0">
-                <div
-                  onClick={() => handleSort("name")}
-                  title="文件/目录名称 (点击按名称升降序排列)"
-                  className="flex-1 flex items-center space-x-1 cursor-pointer hover:text-[var(--text-primary)] truncate"
-                >
-                  <span>名称</span>
-                  {sortField === "name" && (
-                    <span>{sortDirection === "asc" ? "↑" : "↓"}</span>
-                  )}
-                </div>
+              {/* Table Header: Supports Resizable Column Widths & Drag-and-Drop Reordering */}
+              <div className="h-7 bg-[var(--bg-card)] border-b border-[var(--border-subtle)] flex items-center text-[11px] text-[var(--text-tertiary)] font-medium select-none flex-shrink-0 overflow-x-auto no-scrollbar">
+                {columns.map((col) => {
+                  const isDragOver = dragOverColId === col.id;
+                  const isDragging = draggedColId === col.id;
 
-                <div
-                  onClick={() => handleSort("mtime")}
-                  title="最后修改日期 (点击按时间先后顺序排序)"
-                  className="w-36 flex items-center space-x-1 cursor-pointer hover:text-[var(--text-primary)] truncate pl-2"
-                >
-                  <span>修改日期</span>
-                  {sortField === "mtime" && (
-                    <span>{sortDirection === "asc" ? "↑" : "↓"}</span>
-                  )}
-                </div>
+                  return (
+                    <div
+                      key={col.id}
+                      draggable
+                      onDragStart={(e) => handleColDragStart(e, col.id)}
+                      onDragOver={(e) => handleColDragOver(e, col.id)}
+                      onDragLeave={handleColDragLeave}
+                      onDrop={(e) => handleColDrop(e, col.id)}
+                      onDragEnd={handleColDragEnd}
+                      style={{ width: `${col.width}px` }}
+                      className={`relative h-full flex items-center px-2 cursor-grab active:cursor-grabbing hover:bg-[var(--hover-item)] hover:text-[var(--text-primary)] transition-colors flex-shrink-0 group/col ${
+                        col.align === "right" ? "justify-end text-right" : "justify-start text-left"
+                      } ${isDragOver ? "border-l-2 border-[#007AFF] bg-[#007AFF]/10" : ""} ${
+                        isDragging ? "opacity-35" : ""
+                      }`}
+                      title={col.tooltip}
+                      onClick={() => {
+                        if (col.sortable) handleSort(col.id as SortField);
+                      }}
+                    >
+                      <span className="truncate select-none font-medium">{col.label}</span>
+                      {col.sortable && sortField === col.id && (
+                        <span className="ml-1 text-[10px] text-[#007AFF] font-bold flex-shrink-0">
+                          {sortDirection === "asc" ? "↑" : "↓"}
+                        </span>
+                      )}
 
-                <div
-                  onClick={() => handleSort("file_type")}
-                  title="文件类型说明 (点击归类排序)"
-                  className="w-28 flex items-center space-x-1 cursor-pointer hover:text-[var(--text-primary)] truncate pl-2"
-                >
-                  <span>类型</span>
-                  {sortField === "file_type" && (
-                    <span>{sortDirection === "asc" ? "↑" : "↓"}</span>
-                  )}
-                </div>
-
-                <div
-                  onClick={() => handleSort("size")}
-                  title="文件大小 (点击按字节大小排序)"
-                  className="w-24 text-right flex items-center justify-end space-x-1 cursor-pointer hover:text-[var(--text-primary)] truncate pr-2"
-                >
-                  <span>大小</span>
-                  {sortField === "size" && (
-                    <span>{sortDirection === "asc" ? "↑" : "↓"}</span>
-                  )}
-                </div>
-
-                <div className="w-24 truncate pl-2" title="POSIX 权限掩码 (如 drwxr-xr-x)">权限</div>
-                <div className="w-20 truncate pl-2" title="文件拥有者与群组 (UID:GID)">所有者</div>
+                      {/* Resizer Handle on right border */}
+                      <div
+                        onMouseDown={(e) => handleStartColResize(col.id, e)}
+                        onClick={(e) => e.stopPropagation()}
+                        className="absolute right-0 top-0 bottom-0 w-2.5 cursor-col-resize hover:bg-[#007AFF]/60 active:bg-[#007AFF] flex items-center justify-center opacity-0 group-hover/col:opacity-100 transition-opacity z-10"
+                        title="左右拖拽调整此列宽度"
+                      >
+                        <div className="w-[1px] h-3 bg-[var(--border-strong)]" />
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
 
               {/* Table Rows */}
-              <div className="flex-1 overflow-y-auto">
+              <div className="flex-1 overflow-y-auto overflow-x-auto">
                 {loading && filteredEntries.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-12 text-[var(--text-tertiary)] text-[12px]">
                     <RotateCw className="w-6 h-6 animate-spin text-[#007AFF] mb-2" />
@@ -752,47 +1025,23 @@ export function FileExplorer({
                           setSelectedEntry(entry);
                           setContextMenu({ x: e.clientX, y: e.clientY, entry });
                         }}
-                        className={`h-7 px-3 flex items-center text-[12px] border-b border-[var(--border-subtle)]/40 cursor-default group transition-colors ${
+                        className={`h-7 flex items-center text-[12px] border-b border-[var(--border-subtle)]/40 cursor-default group transition-colors min-w-max ${
                           isSelected
                             ? "bg-[#007AFF]/15 text-[#007AFF] font-medium"
                             : "hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
                         }`}
                       >
-                        {/* Name Column */}
-                        <div className="flex-1 flex items-center space-x-2 truncate pr-2">
-                          {renderFileIcon(entry)}
-                          <span className="truncate">{entry.name}</span>
-                          {entry.is_symlink && (
-                            <span className="text-[10px] text-[var(--text-tertiary)] font-mono">
-                              (链接)
-                            </span>
-                          )}
-                        </div>
-
-                        {/* Date Modified Column */}
-                        <div className="w-36 text-[11px] text-[var(--text-tertiary)] truncate pl-2 font-mono">
-                          {entry.mtime_formatted}
-                        </div>
-
-                        {/* Type Column */}
-                        <div className="w-28 text-[11px] text-[var(--text-tertiary)] truncate pl-2">
-                          {entry.file_type}
-                        </div>
-
-                        {/* Size Column */}
-                        <div className="w-24 text-[11px] text-[var(--text-tertiary)] text-right truncate pr-2 font-mono">
-                          {entry.size_formatted}
-                        </div>
-
-                        {/* Permissions */}
-                        <div className="w-24 text-[10.5px] text-[var(--text-tertiary)] truncate pl-2 font-mono">
-                          {entry.permissions}
-                        </div>
-
-                        {/* Owner */}
-                        <div className="w-20 text-[10.5px] text-[var(--text-tertiary)] truncate pl-2 font-mono">
-                          {entry.owner}
-                        </div>
+                        {columns.map((col) => (
+                          <div
+                            key={col.id}
+                            style={{ width: `${col.width}px` }}
+                            className={`h-full flex items-center px-2 overflow-hidden flex-shrink-0 ${
+                              col.align === "right" ? "justify-end text-right" : "justify-start text-left"
+                            }`}
+                          >
+                            {renderCellContent(col, entry)}
+                          </div>
+                        ))}
                       </div>
                     );
                   })
@@ -809,8 +1058,33 @@ export function FileExplorer({
           <span>
             共 {totalCount} 项 ({totalDirs} 个文件夹, {totalFiles} 个文件)
           </span>
+
+          {/* Current Active User Badge with subtle color distinction */}
+          <div className="flex items-center space-x-1.5 pl-1.5 border-l border-[var(--border-subtle)]">
+            <span className="text-[var(--text-tertiary)]">用户:</span>
+            <span
+              title={
+                detectedUser === "root"
+                  ? "当前终端身份: root (超级管理员特权)"
+                  : `当前终端身份: ${detectedUser} (普通权限用户)`
+              }
+              className={`px-1.5 py-0.2 rounded text-[10px] font-mono font-medium border flex items-center space-x-1 cursor-default ${
+                detectedUser === "root"
+                  ? "bg-rose-500/15 text-rose-500 border-rose-500/30"
+                  : "bg-[#007AFF]/15 text-[#007AFF] border-[#007AFF]/30"
+              }`}
+            >
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${
+                  detectedUser === "root" ? "bg-rose-500" : "bg-[#007AFF]"
+                }`}
+              />
+              <span>{detectedUser}</span>
+            </span>
+          </div>
+
           {selectedEntry && (
-            <span className="flex items-center space-x-1.5 text-[var(--text-secondary)] font-mono">
+            <span className="flex items-center space-x-1.5 text-[var(--text-secondary)] font-mono pl-1.5 border-l border-[var(--border-subtle)]">
               <span className="text-[#007AFF] font-medium">{selectedEntry.name}</span>
               <span>·</span>
               <span>{selectedEntry.size_formatted}</span>

@@ -91,6 +91,11 @@ async fn fs_read_preview(
 }
 
 #[tauri::command]
+fn get_session_user(pty_mgr: State<PtyManager>, session_id: String) -> String {
+    pty_mgr.get_user(&session_id)
+}
+
+#[tauri::command]
 async fn get_session_stats(pty_mgr: State<'_, PtyManager>, session_id: String) -> Result<(String, usize), String> {
     let mgr = pty_mgr.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -185,6 +190,7 @@ pub fn run() {
             pty_resize,
             pty_close,
             get_session_stats,
+            get_session_user,
             get_hosts,
             save_host,
             update_host_access_time,

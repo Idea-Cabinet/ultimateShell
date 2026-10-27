@@ -24,6 +24,25 @@ pub struct PtySession {
     pub pid: Option<u32>,
     pub opts: SpawnOptions,
     pub password_tracker: Option<Arc<Mutex<PasswordTracker>>>,
+    pub active_user: Arc<Mutex<String>>,
+}
+
+fn extract_prompt_username(chunk: &str) -> Option<String> {
+    if let Some(at_idx) = chunk.rfind('@') {
+        let prefix = &chunk[..at_idx];
+        let user_start = prefix.rfind(|c: char| !c.is_alphanumeric() && c != '_' && c != '-');
+        let user = match user_start {
+            Some(idx) => &prefix[idx + 1..],
+            None => prefix,
+        };
+        if !user.is_empty() && user.len() <= 32 && user.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
+            let after = &chunk[at_idx + 1..];
+            if after.contains(':') || after.contains('#') || after.contains('$') || after.contains('~') || after.contains(']') || after.contains(' ') {
+                return Some(user.to_string());
+            }
+        }
+    }
+    None
 }
 
 #[derive(Clone, Default)]
@@ -136,6 +155,16 @@ impl PtyManager {
         }
         let tracker_clone = tracker.clone();
 
+        let initial_user = opts.username.clone().unwrap_or_else(|| {
+            if opts.is_local {
+                std::env::var("USER").unwrap_or_else(|_| "local".to_string())
+            } else {
+                "root".to_string()
+            }
+        });
+        let active_user = Arc::new(Mutex::new(initial_user));
+        let active_user_clone = Arc::clone(&active_user);
+
         let writer_clone = Arc::clone(&writer);
 
         thread::spawn(move || {
@@ -146,6 +175,17 @@ impl PtyManager {
                 }
                 let mut chunk = String::from_utf8_lossy(&buf[..n]).to_string();
                 let mut is_login_success = false;
+
+                if let Some(user) = extract_prompt_username(&chunk) {
+                    if let Ok(mut lock) = active_user_clone.lock() {
+                        if *lock != user {
+                            *lock = user.clone();
+                            let user_event = format!("pty-user-{}", sid_clone);
+                            let _ = app_clone.emit(&user_event, user);
+                        }
+                    }
+                }
+
                 if let Some(ref tracker) = tracker_clone {
                     if let Ok(mut tracker) = tracker.lock() {
                         chunk = tracker.filter_output(&chunk);
@@ -207,10 +247,21 @@ impl PtyManager {
                 pid,
                 opts: opts.clone(),
                 password_tracker: tracker,
+                active_user,
             },
         );
 
         Ok(())
+    }
+
+    pub fn get_user(&self, session_id: &str) -> String {
+        let sessions = self.sessions.lock().unwrap();
+        if let Some(session) = sessions.get(session_id) {
+            if let Ok(guard) = session.active_user.lock() {
+                return guard.clone();
+            }
+        }
+        "unknown".to_string()
     }
 
     pub fn get_opts(&self, session_id: &str) -> Option<SpawnOptions> {

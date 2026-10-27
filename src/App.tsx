@@ -8,7 +8,7 @@ import { TabBar } from "./components/TabBar";
 import { TerminalView } from "./components/TerminalView";
 import { HostModal } from "./components/HostModal";
 import { FileExplorer } from "./components/FileExplorer";
-import { Folder, KeyRound, ShieldCheck } from "lucide-react";
+import { Folder, KeyRound, ShieldCheck, Sun, Moon } from "lucide-react";
 import "./App.css";
 
 interface PasswordUpdateEvent {
@@ -28,9 +28,12 @@ export function App() {
 
   // Status bar stats for active tab
   const [dirStats, setDirStats] = useState<{ path: string; fileCount: number }>({
-    path: "~",
+    path: "/",
     fileCount: 0,
   });
+
+  // Dynamic user detection (supports real-time prompt parsing, e.g. sudo -iu xxx)
+  const [activeUser, setActiveUser] = useState<string>("root");
 
   // File Explorer drawer state (default collapsed for zero lag on connection)
   const [isFileExplorerOpen, setIsFileExplorerOpen] = useState<boolean>(() => {
@@ -161,6 +164,32 @@ export function App() {
     fetchStats();
     const interval = setInterval(fetchStats, 10000);
     return () => clearInterval(interval);
+  }, [activeTabId]);
+
+  // Dynamically track username for the active tab (sudo -iu xxx or su - detection)
+  useEffect(() => {
+    if (!activeTabId) return;
+
+    // 1. Initial query from PTY manager
+    invoke<string>("get_session_user", { sessionId: activeTabId })
+      .then((user) => {
+        if (user) setActiveUser(user);
+      })
+      .catch(() => {});
+
+    // 2. Real-time prompt listener
+    let unlisten: (() => void) | null = null;
+    listen<string>(`pty-user-${activeTabId}`, (event) => {
+      if (event.payload) {
+        setActiveUser(event.payload);
+      }
+    }).then((fn) => {
+      unlisten = fn;
+    });
+
+    return () => {
+      if (unlisten) unlisten();
+    };
   }, [activeTabId]);
 
   const createNewLocalTab = () => {
@@ -378,6 +407,7 @@ export function App() {
             height={explorerHeight}
             isOpen={isFileExplorerOpen}
             isMaximized={isExplorerMaximized}
+            currentUser={activeUser}
             onToggleMaximize={() => setIsExplorerMaximized(!isExplorerMaximized)}
             onClose={() => {
               setIsFileExplorerOpen(false);
@@ -407,14 +437,14 @@ export function App() {
                 {activeTab.hostProfile.username}@{activeTab.hostProfile.host}:{activeTab.hostProfile.port}
               </span>
             )}
-            {/* Toggle File Explorer Button with Current Directory */}
+            {/* Toggle File Explorer Button with Current Directory & Active User */}
             <button
               onClick={() => {
                 const nextState = !isFileExplorerOpen;
                 setIsFileExplorerOpen(nextState);
                 localStorage.setItem("ultimateshell_explorer_open", nextState ? "true" : "false");
               }}
-              className={`flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] font-mono border transition-all ${
+              className={`flex items-center space-x-1.5 px-2 py-0.5 rounded text-[10px] font-mono border transition-all ${
                 isFileExplorerOpen
                   ? "bg-[#007AFF]/15 text-[#007AFF] border-[#007AFF]/40 font-medium"
                   : "bg-[var(--hover-item)] text-[var(--text-secondary)] border-[var(--border-subtle)] hover:border-[var(--border-strong)]"
@@ -425,22 +455,56 @@ export function App() {
               <span>{dirStats.path}</span>
               <span className="text-[var(--text-tertiary)]">·</span>
               <span>{dirStats.fileCount} 项文件</span>
+              {activeUser && (
+                <>
+                  <span className="text-[var(--text-tertiary)]">·</span>
+                  <span
+                    title={
+                      activeUser === "root"
+                        ? "当前终端身份: root (超级管理员特权)"
+                        : `当前终端身份: ${activeUser} (普通权限用户)`
+                    }
+                    className={`px-1 rounded text-[9.5px] font-mono font-medium border flex items-center space-x-1 ${
+                      activeUser === "root"
+                        ? "bg-rose-500/15 text-rose-500 border-rose-500/30"
+                        : "bg-[#007AFF]/15 text-[#007AFF] border-[#007AFF]/30"
+                    }`}
+                  >
+                    <span
+                      className={`w-1 h-1 rounded-full ${
+                        activeUser === "root" ? "bg-rose-500" : "bg-[#007AFF]"
+                      }`}
+                    />
+                    <span>{activeUser}</span>
+                  </span>
+                </>
+              )}
               <span className="text-[9px] px-1 py-0.2 rounded bg-[var(--hover-item)] ml-1">
                 {isFileExplorerOpen ? "已展开" : "展开文件树"}
               </span>
             </button>
           </div>
 
-          <div className="flex items-center space-x-3 text-[10.5px] flex-shrink-0">
-            <span title="当前标签栏中打开的所有终端会话总数" className="cursor-default">
+          <div className="flex items-center space-x-2 text-[10.5px] flex-shrink-0">
+            <span title="当前标签栏中打开的所有终端会话总数" className="cursor-default pr-1">
               {tabs.length} 个会话
             </span>
-            <span
-              title={`当前色彩外观：${resolvedTheme === "dark" ? "深色暗黑主题" : "浅色明亮主题"}`}
-              className="text-[var(--text-tertiary)] font-mono cursor-default"
+            {/* Theme Toggle Button: Icon Only without text */}
+            <button
+              onClick={() => setThemeMode(resolvedTheme === "dark" ? "light" : "dark")}
+              title={
+                resolvedTheme === "dark"
+                  ? "当前为深色外观，点击切换为浅色"
+                  : "当前为浅色外观，点击切换为深色"
+              }
+              className="p-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-all active:scale-95 flex items-center justify-center"
             >
-              {resolvedTheme === "dark" ? "深色外观" : "浅色外观"}
-            </span>
+              {resolvedTheme === "dark" ? (
+                <Moon className="w-3.5 h-3.5 text-indigo-400" />
+              ) : (
+                <Sun className="w-3.5 h-3.5 text-amber-500" />
+              )}
+            </button>
           </div>
         </div>
       </div>
