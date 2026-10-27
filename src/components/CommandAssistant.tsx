@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import {
   Terminal,
   Clock,
@@ -369,121 +370,125 @@ export const CommandAssistant: React.FC<Props> = ({ session: _session, isOpen = 
         </button>
       </div>
 
-      {/* Templates Library Modal */}
-      {showTemplatesModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 backdrop-blur-sm animate-in fade-in duration-100">
-          <div className="apple-card rounded-2xl w-[640px] max-h-[500px] flex flex-col p-5 shadow-2xl border border-[var(--border-subtle)] text-[var(--text-primary)]">
-            <div className="flex items-center justify-between pb-3 border-b border-[var(--border-subtle)]">
-              <div className="flex items-center space-x-2">
-                <BookOpen className="w-4 h-4 text-amber-500" />
-                <h3 className="font-semibold text-[14px]">参数化命令模板库</h3>
-              </div>
-              <button
-                onClick={() => setShowTemplatesModal(false)}
-                className="p-1 rounded-full hover:bg-[var(--hover-item)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto py-3 space-y-2 no-scrollbar">
-              {DEFAULT_TEMPLATES.map((item) => (
-                <div
-                  key={item.id}
-                  onClick={() => openParamDialog(item)}
-                  className="p-3 rounded-xl bg-[var(--hover-item)]/60 hover:bg-[var(--hover-item)] border border-[var(--border-subtle)] cursor-pointer transition flex items-center justify-between group"
+      {/* Templates Library Modal (Rendered to document.body to avoid being covered by sidebar) */}
+      {showTemplatesModal &&
+        createPortal(
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/45 backdrop-blur-sm animate-in fade-in duration-100">
+            <div className="apple-card rounded-2xl w-[640px] max-h-[500px] flex flex-col p-5 shadow-2xl border border-[var(--border-subtle)] text-[var(--text-primary)]">
+              <div className="flex items-center justify-between pb-3 border-b border-[var(--border-subtle)]">
+                <div className="flex items-center space-x-2">
+                  <BookOpen className="w-4 h-4 text-amber-500" />
+                  <h3 className="font-semibold text-[14px]">参数化命令模板库</h3>
+                </div>
+                <button
+                  onClick={() => setShowTemplatesModal(false)}
+                  className="p-1 rounded-full hover:bg-[var(--hover-item)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
                 >
-                  <div className="min-w-0 flex-1 pr-3">
-                    <div className="flex items-center space-x-2">
-                      <span className="font-semibold text-[12.5px] text-[var(--text-primary)]">
-                        {item.name}
-                      </span>
-                      <span className="text-[10px] px-1.5 py-0.2 rounded bg-[#007AFF]/15 text-[#007AFF] font-medium">
-                        {item.category}
-                      </span>
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto py-3 space-y-2 no-scrollbar">
+                {DEFAULT_TEMPLATES.map((item) => (
+                  <div
+                    key={item.id}
+                    onClick={() => openParamDialog(item)}
+                    className="p-3 rounded-xl bg-[var(--hover-item)]/60 hover:bg-[var(--hover-item)] border border-[var(--border-subtle)] cursor-pointer transition flex items-center justify-between group"
+                  >
+                    <div className="min-w-0 flex-1 pr-3">
+                      <div className="flex items-center space-x-2">
+                        <span className="font-semibold text-[12.5px] text-[var(--text-primary)]">
+                          {item.name}
+                        </span>
+                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-[#007AFF]/15 text-[#007AFF] font-medium">
+                          {item.category}
+                        </span>
+                      </div>
+                      <div className="text-[11px] font-mono text-[var(--text-secondary)] mt-1 truncate">
+                        {item.template}
+                      </div>
+                      <div className="text-[10.5px] text-[var(--text-tertiary)] mt-0.5">
+                        {item.description}
+                      </div>
                     </div>
-                    <div className="text-[11px] font-mono text-[var(--text-secondary)] mt-1 truncate">
-                      {item.template}
-                    </div>
-                    <div className="text-[10.5px] text-[var(--text-tertiary)] mt-0.5">
-                      {item.description}
-                    </div>
+                    <button className="px-2.5 py-1 rounded-lg bg-[#007AFF] text-white text-[11px] font-medium opacity-0 group-hover:opacity-100 transition active:scale-95 flex items-center space-x-1 flex-shrink-0">
+                      <Sparkles className="w-3 h-3" />
+                      <span>填参使用</span>
+                    </button>
                   </div>
-                  <button className="px-2.5 py-1 rounded-lg bg-[#007AFF] text-white text-[11px] font-medium opacity-0 group-hover:opacity-100 transition active:scale-95 flex items-center space-x-1 flex-shrink-0">
-                    <Sparkles className="w-3 h-3" />
-                    <span>填参使用</span>
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Parameter Filling Modal */}
-      {activeParamCmd && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 backdrop-blur-sm animate-in fade-in duration-100">
-          <div className="apple-card rounded-2xl w-[480px] p-5 shadow-2xl border border-[var(--border-subtle)] text-[var(--text-primary)]">
-            <div className="flex items-center justify-between pb-3 border-b border-[var(--border-subtle)]">
-              <div>
-                <h3 className="font-semibold text-[14px]">{activeParamCmd.name}</h3>
-                <p className="text-[11px] text-[var(--text-secondary)] mt-0.5">
-                  填写参数以自动构建并执行命令
-                </p>
-              </div>
-              <button
-                onClick={() => setActiveParamCmd(null)}
-                className="p-1 rounded-full hover:bg-[var(--hover-item)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="py-4 space-y-3">
-              {Object.keys(paramValues).map((key) => (
-                <div key={key}>
-                  <label className="block text-[11px] font-mono font-medium text-[var(--text-secondary)] mb-1">
-                    参数: {key}
-                  </label>
-                  <input
-                    type="text"
-                    value={paramValues[key]}
-                    onChange={(e) =>
-                      setParamValues((prev) => ({ ...prev, [key]: e.target.value }))
-                    }
-                    className="w-full px-3 py-1.5 bg-[var(--input-bg)] border border-[var(--border-subtle)] focus:border-[#007AFF] rounded-lg text-[12.5px] font-mono text-[var(--text-primary)] outline-none"
-                  />
-                </div>
-              ))}
-
-              <div className="p-2.5 rounded-lg bg-[var(--bg-app)] border border-[var(--border-subtle)] mt-2">
-                <div className="text-[10px] text-[var(--text-tertiary)] uppercase font-semibold mb-1">
-                  最终生成命令预览:
-                </div>
-                <div className="font-mono text-[11.5px] text-[#007AFF] break-all">
-                  {getResolvedCommand()}
-                </div>
+                ))}
               </div>
             </div>
+          </div>,
+          document.body
+        )}
 
-            <div className="flex items-center justify-end space-x-2 pt-2 border-t border-[var(--border-subtle)]">
-              <button
-                onClick={() => setActiveParamCmd(null)}
-                className="px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--hover-item)] rounded-lg transition"
-              >
-                取消
-              </button>
-              <button
-                onClick={handleApplyParamCommand}
-                className="px-4 py-1.5 text-[12px] font-medium bg-[#007AFF] hover:bg-[#0A84FF] text-white rounded-lg flex items-center space-x-1.5 transition active:scale-95 shadow-sm"
-              >
-                <Send className="w-3 h-3" />
-                <span>填入并立即执行</span>
-              </button>
+      {/* Parameter Filling Modal (Rendered to document.body to avoid being covered by sidebar) */}
+      {activeParamCmd &&
+        createPortal(
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/45 backdrop-blur-sm animate-in fade-in duration-100">
+            <div className="apple-card rounded-2xl w-[480px] p-5 shadow-2xl border border-[var(--border-subtle)] text-[var(--text-primary)]">
+              <div className="flex items-center justify-between pb-3 border-b border-[var(--border-subtle)]">
+                <div>
+                  <h3 className="font-semibold text-[14px]">{activeParamCmd.name}</h3>
+                  <p className="text-[11px] text-[var(--text-secondary)] mt-0.5">
+                    填写参数以自动构建并执行命令
+                  </p>
+                </div>
+                <button
+                  onClick={() => setActiveParamCmd(null)}
+                  className="p-1 rounded-full hover:bg-[var(--hover-item)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="py-4 space-y-3">
+                {Object.keys(paramValues).map((key) => (
+                  <div key={key}>
+                    <label className="block text-[11px] font-mono font-medium text-[var(--text-secondary)] mb-1">
+                      参数: {key}
+                    </label>
+                    <input
+                      type="text"
+                      value={paramValues[key]}
+                      onChange={(e) =>
+                        setParamValues((prev) => ({ ...prev, [key]: e.target.value }))
+                      }
+                      className="w-full px-3 py-1.5 bg-[var(--input-bg)] border border-[var(--border-subtle)] focus:border-[#007AFF] rounded-lg text-[12.5px] font-mono text-[var(--text-primary)] outline-none"
+                    />
+                  </div>
+                ))}
+
+                <div className="p-2.5 rounded-lg bg-[var(--bg-app)] border border-[var(--border-subtle)] mt-2">
+                  <div className="text-[10px] text-[var(--text-tertiary)] uppercase font-semibold mb-1">
+                    最终生成命令预览:
+                  </div>
+                  <div className="font-mono text-[11.5px] text-[#007AFF] break-all">
+                    {getResolvedCommand()}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end space-x-2 pt-2 border-t border-[var(--border-subtle)]">
+                <button
+                  onClick={() => setActiveParamCmd(null)}
+                  className="px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--hover-item)] rounded-lg transition"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={handleApplyParamCommand}
+                  className="px-4 py-1.5 text-[12px] font-medium bg-[#007AFF] hover:bg-[#0A84FF] text-white rounded-lg flex items-center space-x-1.5 transition active:scale-95 shadow-sm"
+                >
+                  <Send className="w-3 h-3" />
+                  <span>填入并立即执行</span>
+                </button>
+              </div>
             </div>
-          </div>
-        </div>
-      )}
+          </div>,
+          document.body
+        )}
     </div>
   );
 };

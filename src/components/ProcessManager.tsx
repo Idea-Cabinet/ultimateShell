@@ -7,16 +7,27 @@ import {
   X,
   Skull,
   AlertTriangle,
+  Maximize2,
+  Minimize2,
 } from "lucide-react";
 
 interface Props {
   session: TabSession;
   onSendToTerminal?: (cmd: string) => void;
+  isMaximized?: boolean;
+  onToggleMaximize?: () => void;
+  onClose?: () => void;
 }
 
 type SortField = "cpu" | "mem" | "pid" | "user";
 
-export const ProcessManager: React.FC<Props> = ({ session, onSendToTerminal: _onSendToTerminal }) => {
+export const ProcessManager: React.FC<Props> = ({
+  session,
+  onSendToTerminal: _onSendToTerminal,
+  isMaximized,
+  onToggleMaximize,
+  onClose,
+}) => {
   const [processes, setProcesses] = useState<ProcessEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -168,6 +179,26 @@ export const ProcessManager: React.FC<Props> = ({ session, onSendToTerminal: _on
           >
             <RotateCw className={`w-3.5 h-3.5 ${loading ? "animate-spin text-[#007AFF]" : ""}`} />
           </button>
+
+          {onToggleMaximize && (
+            <button
+              onClick={onToggleMaximize}
+              className="p-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition"
+              title={isMaximized ? "还原视口高度" : "最大化面板"}
+            >
+              {isMaximized ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+            </button>
+          )}
+
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="p-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition"
+              title="关闭抽屉面板"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </div>
 

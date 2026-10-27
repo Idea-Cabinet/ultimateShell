@@ -1,13 +1,21 @@
 import React, { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { TabSession, DiskPartition } from "../types";
-import { HardDrive, RotateCw, AlertTriangle, Database } from "lucide-react";
+import { HardDrive, RotateCw, AlertTriangle, Database, Maximize2, Minimize2, X } from "lucide-react";
 
 interface Props {
   session: TabSession;
+  isMaximized?: boolean;
+  onToggleMaximize?: () => void;
+  onClose?: () => void;
 }
 
-export const DiskMountManager: React.FC<Props> = ({ session }) => {
+export const DiskMountManager: React.FC<Props> = ({
+  session,
+  isMaximized,
+  onToggleMaximize,
+  onClose,
+}) => {
   const [partitions, setPartitions] = useState<DiskPartition[]>([]);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -59,13 +67,35 @@ export const DiskMountManager: React.FC<Props> = ({ session }) => {
           </span>
         </div>
 
-        <button
-          onClick={fetchDisks}
-          className="p-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition"
-          title="刷新磁盘容量状态"
-        >
-          <RotateCw className={`w-3.5 h-3.5 ${loading ? "animate-spin text-[#007AFF]" : ""}`} />
-        </button>
+        <div className="flex items-center space-x-1.5 flex-shrink-0">
+          <button
+            onClick={fetchDisks}
+            className="p-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition"
+            title="刷新磁盘容量状态"
+          >
+            <RotateCw className={`w-3.5 h-3.5 ${loading ? "animate-spin text-[#007AFF]" : ""}`} />
+          </button>
+
+          {onToggleMaximize && (
+            <button
+              onClick={onToggleMaximize}
+              className="p-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition"
+              title={isMaximized ? "还原视口高度" : "最大化面板"}
+            >
+              {isMaximized ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+            </button>
+          )}
+
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="p-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition"
+              title="关闭抽屉面板"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Main Content */}
