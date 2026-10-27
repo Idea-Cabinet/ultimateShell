@@ -207,7 +207,7 @@ export const TabBar: React.FC<Props> = ({
             draggable={false}
             data-tauri-drag-region="false"
             onClick={onNewLocalTab}
-            title="新建本地终端 (打开新命令行窗口)"
+            title={t("tab.newLocal")}
             className="h-7 w-7 flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--hover-item)] rounded-[6px] transition active:scale-[0.95] flex-shrink-0"
           >
             <Plus className="w-3.5 h-3.5" strokeWidth={2} />

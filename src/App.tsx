@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { HostProfile, TabSession, isDefaultGroup } from "./types";
@@ -29,6 +29,7 @@ export function App() {
   const [hosts, setHosts] = useState<HostProfile[]>([]);
   const [tabs, setTabs] = useState<TabSession[]>([]);
   const [activeTabId, setActiveTabId] = useState<string>("");
+  const initialTabCreatedRef = useRef(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [editingHost, setEditingHost] = useState<HostProfile | null>(null);
@@ -173,7 +174,10 @@ export function App() {
 
   useEffect(() => {
     refreshHosts();
-    createNewLocalTab();
+    if (!initialTabCreatedRef.current) {
+      initialTabCreatedRef.current = true;
+      createNewLocalTab();
+    }
   }, []);
 
   // Poll current directory & file count stats for active tab (Requirement 5)
@@ -226,7 +230,7 @@ export function App() {
     const newId = `local-${Date.now()}`;
     const newTab: TabSession = {
       id: newId,
-      title: "本地终端",
+      title: t("tab.localTerminal"),
       isLocal: true,
       connected: true,
     };
@@ -261,7 +265,7 @@ export function App() {
       } else if (filtered.length === 0) {
         const nextId = `local-${Date.now()}`;
         setActiveTabId(nextId);
-        return [{ id: nextId, title: "本地终端", isLocal: true, connected: true }];
+        return [{ id: nextId, title: t("tab.localTerminal"), isLocal: true, connected: true }];
       }
       return filtered;
     });

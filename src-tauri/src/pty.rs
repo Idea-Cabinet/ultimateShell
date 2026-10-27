@@ -133,6 +133,9 @@ impl PtyManager {
 
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
+        cmd.env("TERM_PROGRAM", "UltimateShell");
+        cmd.env("SHELL_SESSIONS_DISABLE", "1");
+        cmd.env_remove("TERM_SESSION_ID");
 
         let child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
         let pid = child.process_id();
