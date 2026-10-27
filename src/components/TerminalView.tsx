@@ -73,12 +73,15 @@ export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme
 
     const term = new Terminal({
       cursorBlink: true,
-      cursorStyle: "bar",
+      cursorStyle: "block",
+      cursorInactiveStyle: "outline",
+      cursorWidth: 2,
       fontSize: 13.5,
       lineHeight: 1.25,
       fontFamily: 'ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace',
       theme: currentTheme,
       convertEol: true,
+      allowTransparency: true,
     });
 
     const fitAddon = new FitAddon();
@@ -87,6 +90,14 @@ export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme
 
     term.open(containerRef.current);
     fitAddon.fit();
+    term.focus();
+
+    // Ensure terminal grabs focus reliably after mount
+    setTimeout(() => {
+      try {
+        term.focus();
+      } catch (_) {}
+    }, 100);
 
     terminalInstanceRef.current = term;
     fitAddonRef.current = fitAddon;
@@ -170,14 +181,21 @@ export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme
           fitAddonRef.current?.fit();
           terminalInstanceRef.current?.focus();
         } catch (_) {}
-      }, 50);
+      }, 30);
     }
   }, [isActive]);
 
   return (
     <div
       ref={containerRef}
-      className={`w-full h-full p-2 bg-[var(--bg-terminal)] border-none outline-none ${isActive ? "block" : "hidden"}`}
+      tabIndex={0}
+      onClick={() => {
+        terminalInstanceRef.current?.focus();
+      }}
+      onFocus={() => {
+        terminalInstanceRef.current?.focus();
+      }}
+      className={`w-full h-full p-2 bg-[var(--bg-terminal)] border-none outline-none cursor-text ${isActive ? "block" : "hidden"}`}
       style={{ outline: "none", border: "none" }}
     />
   );

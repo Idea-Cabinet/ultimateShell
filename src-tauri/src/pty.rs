@@ -162,7 +162,7 @@ impl PtyManager {
                             let pwd_to_send = format!("{}\n", pwd);
                             let w = Arc::clone(&writer_clone);
                             thread::spawn(move || {
-                                thread::sleep(Duration::from_millis(100));
+                                thread::sleep(Duration::from_millis(300));
                                 if let Ok(mut lock) = w.lock() {
                                     let _ = lock.write_all(pwd_to_send.as_bytes());
                                     let _ = lock.flush();
