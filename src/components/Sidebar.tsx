@@ -6,7 +6,6 @@ import {
   Server,
   Plus,
   Search,
-  ArrowDownToLine,
   ChevronRight,
   Terminal,
   Trash2,
@@ -46,7 +45,6 @@ interface Props {
   onChangeHostGroup?: (hostId: string, newGroup: string) => void;
   onRenameGroup?: (oldGroup: string, newGroup: string) => void;
   onRefreshHosts?: () => void;
-  onImportFinalShell: () => void;
   onRunQuickCommand?: (cmd: string) => void;
 }
 
@@ -66,7 +64,6 @@ export const Sidebar: React.FC<Props> = ({
   onChangeHostGroup,
   onRenameGroup,
   onRefreshHosts,
-  onImportFinalShell,
 }) => {
   const { t } = useI18n();
   const [searchTerm, setSearchTerm] = useState("");
@@ -263,13 +260,6 @@ export const Sidebar: React.FC<Props> = ({
         </div>
 
         <div className="flex items-center space-x-0.5">
-          <button
-            onClick={onImportFinalShell}
-            title={t("sidebar.importFinalShell")}
-            className="p-1 rounded-md text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--hover-item)] transition active:scale-[0.95]"
-          >
-            <ArrowDownToLine className="w-3.5 h-3.5" strokeWidth={1.75} />
-          </button>
           <button
             onClick={() => onNewHost()}
             title={t("sidebar.newHost")}
@@ -645,17 +635,6 @@ export const Sidebar: React.FC<Props> = ({
               >
                 <Plus className="w-3.5 h-3.5" strokeWidth={2} />
                 <span>{t("sidebar.newHost")}</span>
-              </button>
-
-              <button
-                onClick={() => {
-                  onImportFinalShell();
-                  setContextMenu(null);
-                }}
-                className="w-full flex items-center space-x-2 px-3 py-1.5 hover:bg-[#007AFF] hover:text-white text-left transition"
-              >
-                <ArrowDownToLine className="w-3.5 h-3.5" strokeWidth={1.75} />
-                <span>{t("sidebar.importFinalShell")}</span>
               </button>
 
               <div className="h-[1px] bg-[var(--border-subtle)] my-1" />

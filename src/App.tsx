@@ -359,16 +359,6 @@ export function App() {
     }
   };
 
-  const handleImportFinalShell = async () => {
-    try {
-      const imported = await invoke<HostProfile[]>("import_finalshell");
-      await refreshHosts();
-      alert(`成功通过解密脚本导入 ${imported.length} 个 FinalShell 服务器配置，密码已加密记录！`);
-    } catch (err) {
-      alert(`导入失败: ${err}`);
-    }
-  };
-
   const handleRunQuickCommand = (cmd: string) => {
     if (!activeTabId) return;
     invoke("pty_write", { sessionId: activeTabId, data: cmd }).catch(console.error);
@@ -414,7 +404,6 @@ export function App() {
         onChangeHostGroup={handleChangeHostGroup}
         onRenameGroup={handleRenameGroup}
         onRefreshHosts={refreshHosts}
-        onImportFinalShell={handleImportFinalShell}
         onRunQuickCommand={handleRunQuickCommand}
         activeSession={activeTab}
       />

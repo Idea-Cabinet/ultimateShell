@@ -6,7 +6,7 @@ mod ssh_auth;
 mod sftp;
 mod vault;
 
-use hosts::{import_from_finalshell, load_hosts, save_hosts, HostProfile};
+use hosts::{load_hosts, save_hosts, HostProfile};
 use ops::{DiskPartition, ProcessEntry};
 use perf::{PerfManager, SystemPerfStats};
 use pty::{PtyManager, SpawnOptions};
@@ -169,11 +169,6 @@ fn delete_host(id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn import_finalshell() -> Result<Vec<HostProfile>, String> {
-    import_from_finalshell()
-}
-
-#[tauri::command]
 fn save_host_password(host_id: String, password: String) -> Result<(), String> {
     vault::save_password(&host_id, &password)
 }
@@ -281,7 +276,6 @@ pub fn run() {
             save_host,
             update_host_access_time,
             delete_host,
-            import_finalshell,
             save_host_password,
             get_host_password,
             fs_list_dir,

@@ -23,12 +23,11 @@ export const translations = {
     // Sidebar
     "sidebar.hosts": "服务器",
     "sidebar.newHost": "新建服务器",
-    "sidebar.importFinalShell": "导入 FinalShell",
     "sidebar.collapse": "收起侧边栏 (Cmd+B)",
     "sidebar.expand": "展开侧边栏 (Cmd+B)",
     "sidebar.searchPlaceholder": "搜索主机或 IP...",
     "sidebar.noHosts": "无服务器连接",
-    "sidebar.noHostsDesc": "点击上方按钮新建或从 FinalShell 导入",
+    "sidebar.noHostsDesc": "点击上方按钮新建服务器",
     "sidebar.defaultGroup": "默认分组",
     "sidebar.connectedBadge": "当前处于活跃连接状态",
     "sidebar.passwordSaved": "已加密记住密码 (AES-256-GCM 硬件锁保护)",
@@ -40,7 +39,7 @@ export const translations = {
 
     // Sidebar Context Menus
     "sidebar.menu.connect": "快速连接",
-    "sidebar.menu.editHost": "配置连接 (修改主机及密码)...",
+    "sidebar.menu.editHost": "配置连接...",
     "sidebar.menu.duplicateHost": "复制连接配置",
     "sidebar.menu.changeGroup": "移动到分组...",
     "sidebar.menu.deleteHost": "移除服务器",
@@ -139,12 +138,11 @@ export const translations = {
     // Sidebar
     "sidebar.hosts": "Servers",
     "sidebar.newHost": "New Server",
-    "sidebar.importFinalShell": "Import FinalShell",
     "sidebar.collapse": "Collapse Sidebar (Cmd+B)",
     "sidebar.expand": "Expand Sidebar (Cmd+B)",
     "sidebar.searchPlaceholder": "Search hosts or IPs...",
     "sidebar.noHosts": "No Server Connections",
-    "sidebar.noHostsDesc": "Click above to add a server or import from FinalShell",
+    "sidebar.noHostsDesc": "Click above to add a server",
     "sidebar.defaultGroup": "Default Group",
     "sidebar.connectedBadge": "Active connection established",
     "sidebar.passwordSaved": "Encrypted password saved (Hardware vault)",
@@ -156,7 +154,7 @@ export const translations = {
 
     // Sidebar Context Menus
     "sidebar.menu.connect": "Connect",
-    "sidebar.menu.editHost": "Edit Server Configuration...",
+    "sidebar.menu.editHost": "Edit Server...",
     "sidebar.menu.duplicateHost": "Duplicate Server",
     "sidebar.menu.changeGroup": "Move to Group...",
     "sidebar.menu.deleteHost": "Delete Server",
