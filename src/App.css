@@ -1,0 +1,28 @@
+@import "tailwindcss";
+@import "@xterm/xterm/css/xterm.css";
+
+/* Custom scrollbars and terminal tweaks */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #14171d;
+}
+::-webkit-scrollbar-thumb {
+  background: #2b313d;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3b4252;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: #0d1117;
+  color: #e6edf3;
+  user-select: none;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  overflow: hidden;
+}
