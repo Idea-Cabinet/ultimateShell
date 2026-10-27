@@ -22,3 +22,11 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local environment and connection data
+.env
+.env.*
+!.env.example
+.ultimateshell/
+credentials.json
+hosts.json
