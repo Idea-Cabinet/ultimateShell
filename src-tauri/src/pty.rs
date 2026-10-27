@@ -175,8 +175,8 @@ impl PtyManager {
 
         let writer_clone = Arc::clone(&writer);
 
-        // Bounded channel creates native backpressure on high-throughput commands (e.g. while true; do find /; done)
-        let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(64);
+        // Channel decouples raw PTY reads from IPC batching
+        let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
 
         // Thread 1: Fast Raw PTY Reader with OS Pipe Backpressure
         thread::spawn(move || {

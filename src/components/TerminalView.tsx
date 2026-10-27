@@ -193,8 +193,29 @@ export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme
     fitAddonRef.current = fitAddon;
     searchAddonRef.current = searchAddon;
 
+    // High-performance display buffer aligned with display refresh rate
+    let pendingChunks: string[] = [];
+    let rafId: number | null = null;
+
+    const flushBuffer = () => {
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+      if (disposed || pendingChunks.length === 0) return;
+
+      const data = pendingChunks.join("");
+      pendingChunks = [];
+
+      term.write(data);
+    };
+
     const onDataDisposable = term.onData((data) => {
       invoke("pty_write", { sessionId: session.id, data }).catch(console.error);
+      // If user typed something (e.g. Ctrl+C or Enter), flush pending output immediately
+      if (pendingChunks.length > 0) {
+        flushBuffer();
+      }
     });
 
     let disposed = false;
@@ -202,61 +223,30 @@ export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme
     let unlistenData: (() => void) | null = null;
     let unlistenExit: (() => void) | null = null;
 
-    // High-performance write queue with backpressure & flood protection
-    let writeQueue: string[] = [];
-    let queuedBytes = 0;
-    let isWriting = false;
-    let rafHandle: number | null = null;
-
-    const processWriteQueue = () => {
-      if (disposed || writeQueue.length === 0) {
-        isWriting = false;
-        return;
-      }
-
-      // Flood protection: if accumulated data exceeds 1.5MB (massive flood like `find /`),
-      // keep latest 256KB and drop intermediate lines to prevent memory explosion
-      if (queuedBytes > 1536 * 1024) {
-        const warning = "\r\n\x1b[33m[输出速率过高，已启动智能流控以保护内存]\x1b[0m\r\n";
-        let kept: string[] = [];
-        let keptBytes = 0;
-        for (let i = writeQueue.length - 1; i >= 0; i--) {
-          kept.unshift(writeQueue[i]);
-          keptBytes += writeQueue[i].length;
-          if (keptBytes >= 256 * 1024) break;
-        }
-        writeQueue = [warning, ...kept];
-        queuedBytes = keptBytes + warning.length;
-      }
-
-      const chunk = writeQueue.join("");
-      writeQueue = [];
-      queuedBytes = 0;
-      isWriting = true;
-
-      term.write(chunk, () => {
-        isWriting = false;
-        if (writeQueue.length > 0 && !disposed) {
-          rafHandle = requestAnimationFrame(processWriteQueue);
-        }
-      });
-    };
-
     const startSession = async () => {
       try {
         const offData = await listen<string>(`pty-data-${session.id}`, (event) => {
-          if (!disposed) {
-            writeQueue.push(event.payload);
-            queuedBytes += event.payload.length;
+          if (disposed) return;
+          pendingChunks.push(event.payload);
 
-            if (!isWriting) {
-              isWriting = true;
-              if (queuedBytes < 32 * 1024) {
-                processWriteQueue();
-              } else if (rafHandle === null) {
-                rafHandle = requestAnimationFrame(processWriteQueue);
+          // Flood protection: if accumulated pending chunks exceed 1MB, keep latest 256KB
+          if (pendingChunks.length > 20) {
+            let total = 0;
+            for (let i = 0; i < pendingChunks.length; i++) total += pendingChunks[i].length;
+            if (total > 1024 * 1024) {
+              let kept: string[] = [];
+              let keptBytes = 0;
+              for (let i = pendingChunks.length - 1; i >= 0; i--) {
+                kept.unshift(pendingChunks[i]);
+                keptBytes += pendingChunks[i].length;
+                if (keptBytes >= 256 * 1024) break;
               }
+              pendingChunks = kept;
             }
+          }
+
+          if (rafId === null) {
+            rafId = requestAnimationFrame(flushBuffer);
           }
         });
         if (disposed) { offData(); return; }
@@ -314,12 +304,11 @@ export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme
 
     return () => {
       disposed = true;
-      if (rafHandle !== null) {
-        cancelAnimationFrame(rafHandle);
-        rafHandle = null;
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
       }
-      writeQueue = [];
-      queuedBytes = 0;
+      pendingChunks = [];
       resizeObserver.disconnect();
       window.removeEventListener("resize", handleResize);
       onDataDisposable.dispose();
