@@ -12,7 +12,7 @@ import { HostModal } from "./components/HostModal";
 import { SettingsModal } from "./components/SettingsModal";
 import { OpsDrawer, DrawerTab } from "./components/OpsDrawer";
 import { CommandAssistant } from "./components/CommandAssistant";
-import { Folder, KeyRound, ShieldCheck, Sun, Moon, Monitor, Activity, HardDrive, Terminal, Globe, Settings } from "lucide-react";
+import { Folder, KeyRound, ShieldCheck, Sun, Moon, Monitor, Activity, HardDrive, Terminal, Globe, Settings, PanelLeft, PanelLeftClose } from "lucide-react";
 import "./App.css";
 
 interface PasswordUpdateEvent {
@@ -136,6 +136,7 @@ export function App() {
   };
 
   // Sidebar width & collapse state
+  const [isSidebarDragging, setIsSidebarDragging] = useState<boolean>(false);
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
     const saved = localStorage.getItem("ultimateshell_sidebar_width");
     return saved ? parseInt(saved, 10) : 256;
@@ -548,8 +549,43 @@ export function App() {
         onRenameGroup={handleRenameGroup}
         onRefreshHosts={refreshHosts}
         onRunQuickCommand={handleRunQuickCommand}
+        onDragChange={setIsSidebarDragging}
         activeSession={activeTab}
       />
+
+      {/* Single Persistent Morphing Sidebar Collapse/Expand Button */}
+      <button
+        onClick={() => handleCollapse(!isSidebarCollapsed)}
+        title={isSidebarCollapsed ? t("sidebar.expand") : t("sidebar.collapse")}
+        style={{
+          left: isSidebarCollapsed ? 84 : sidebarWidth - 38,
+          top: 10,
+        }}
+        className={`fixed z-40 h-7 w-7 flex items-center justify-center rounded-[6px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--hover-item)] active:scale-[0.95] select-none ${
+          isSidebarDragging
+            ? ""
+            : "transition-[left,transform,background-color,color] duration-160 ease-[var(--ease-drawer)]"
+        }`}
+      >
+        <div className="relative w-4 h-4 flex items-center justify-center pointer-events-none">
+          <PanelLeftClose
+            className={`w-3.5 h-3.5 absolute inset-0 m-auto transition-all duration-150 ease-[var(--ease-drawer)] ${
+              isSidebarCollapsed
+                ? "opacity-0 rotate-90 scale-75 pointer-events-none"
+                : "opacity-100 rotate-0 scale-100"
+            }`}
+            strokeWidth={1.75}
+          />
+          <PanelLeft
+            className={`w-3.5 h-3.5 absolute inset-0 m-auto transition-all duration-150 ease-[var(--ease-drawer)] ${
+              isSidebarCollapsed
+                ? "opacity-100 rotate-0 scale-100"
+                : "opacity-0 -rotate-90 scale-75 pointer-events-none"
+            }`}
+            strokeWidth={1.75}
+          />
+        </div>
+      </button>
 
       {/* Main Terminal Viewport */}
       <div className="flex-1 flex flex-col h-full overflow-hidden min-w-0">
@@ -558,7 +594,6 @@ export function App() {
           tabs={tabs}
           activeTabId={activeTabId}
           isSidebarCollapsed={isSidebarCollapsed}
-          onToggleSidebar={() => handleCollapse(!isSidebarCollapsed)}
           onSelectTab={setActiveTabId}
           onCloseTab={handleCloseTab}
           onCloseOtherTabs={handleCloseOtherTabs}

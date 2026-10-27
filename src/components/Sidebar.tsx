@@ -11,7 +11,6 @@ import {
   Trash2,
   SlidersHorizontal,
   Folder,
-  PanelLeftClose,
   ArrowUpDown,
   Lock,
   X,
@@ -46,6 +45,7 @@ interface Props {
   onRenameGroup?: (oldGroup: string, newGroup: string) => void;
   onRefreshHosts?: () => void;
   onRunQuickCommand?: (cmd: string) => void;
+  onDragChange?: (dragging: boolean) => void;
 }
 
 export const Sidebar: React.FC<Props> = ({
@@ -64,6 +64,7 @@ export const Sidebar: React.FC<Props> = ({
   onChangeHostGroup,
   onRenameGroup,
   onRefreshHosts,
+  onDragChange,
 }) => {
   const { t } = useI18n();
   const [searchTerm, setSearchTerm] = useState("");
@@ -149,6 +150,7 @@ export const Sidebar: React.FC<Props> = ({
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault();
     setIsDragging(true);
+    onDragChange?.(true);
     const startX = e.clientX;
     const startWidth = width;
 
@@ -167,6 +169,7 @@ export const Sidebar: React.FC<Props> = ({
 
     const onPointerUp = () => {
       setIsDragging(false);
+      onDragChange?.(false);
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
     };
@@ -267,20 +270,13 @@ export const Sidebar: React.FC<Props> = ({
           </span>
         </div>
 
-        <div className="flex items-center space-x-0.5">
+        <div className="flex items-center space-x-0.5 pr-8">
           <button
             onClick={() => onNewHost()}
             title={t("sidebar.newHost")}
             className="p-1 rounded-md text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--hover-item)] transition active:scale-[0.95]"
           >
             <Plus className="w-3.5 h-3.5" strokeWidth={2} />
-          </button>
-          <button
-            onClick={() => onCollapse(true)}
-            title={t("sidebar.collapse")}
-            className="p-1 rounded-md text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--hover-item)] transition active:scale-[0.95]"
-          >
-            <PanelLeftClose className="w-3.5 h-3.5" strokeWidth={1.75} />
           </button>
         </div>
       </div>

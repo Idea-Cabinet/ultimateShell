@@ -7,7 +7,6 @@ import {
   Server,
   Plus,
   X,
-  PanelLeft,
   RotateCw,
   Copy,
   Edit3,
@@ -19,7 +18,6 @@ interface Props {
   tabs: TabSession[];
   activeTabId: string;
   isSidebarCollapsed: boolean;
-  onToggleSidebar: () => void;
   onSelectTab: (id: string) => void;
   onCloseTab: (id: string) => void;
   onCloseOtherTabs: (id: string) => void;
@@ -42,7 +40,6 @@ export const TabBar: React.FC<Props> = ({
   tabs,
   activeTabId,
   isSidebarCollapsed,
-  onToggleSidebar,
   onSelectTab,
   onCloseTab,
   onCloseOtherTabs,
@@ -126,18 +123,9 @@ export const TabBar: React.FC<Props> = ({
     <>
       <div
         className={`app-titlebar apple-vibrancy-toolbar border-b border-[var(--border-subtle)] flex items-center px-3 space-x-1.5 select-none z-10 transition-[padding] duration-160 ease-[var(--ease-drawer)] ${
-          isSidebarCollapsed ? "app-titlebar-controls" : ""
+          isSidebarCollapsed ? "pl-[118px]" : ""
         }`}
       >
-        {/* Sidebar Toggle Button */}
-        <button
-          onClick={onToggleSidebar}
-          title={isSidebarCollapsed ? "展开侧边栏 (Cmd+B: 浏览与连接服务器)" : "收起侧边栏 (Cmd+B: 最大化终端显示空间)"}
-          className="h-7 w-7 flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--hover-item)] rounded-[6px] transition active:scale-[0.95] flex-shrink-0 mr-1"
-        >
-          <PanelLeft className="w-4 h-4" strokeWidth={1.75} />
-        </button>
-
         {/* Tabs List (Supports drag-and-drop reordering, auto-scrolls on add/remove) */}
         <div
           ref={scrollContainerRef}
