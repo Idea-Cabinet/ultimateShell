@@ -1,5 +1,5 @@
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::PathBuf;
@@ -9,6 +9,23 @@ use std::thread;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
+#[derive(Clone, Default)]
+pub struct PasswordTracker {
+    pub is_tracking: bool,
+    pub current_input: String,
+    pub tentative_password: Option<String>,
+    pub initial_password: Option<String>,
+    pub host_id: Option<String>,
+    pub host_name: Option<String>,
+}
+
+#[derive(Clone, Serialize)]
+pub struct PasswordUpdatePayload {
+    pub host_id: String,
+    pub host_name: String,
+    pub new_password: String,
+}
+
 pub struct PtySession {
     pub writer: Arc<Mutex<Box<dyn Write + Send>>>,
     pub master: Box<dyn MasterPty + Send>,
@@ -16,6 +33,7 @@ pub struct PtySession {
     pub is_local: bool,
     pub pid: Option<u32>,
     pub opts: SpawnOptions,
+    pub password_tracker: Option<Arc<Mutex<PasswordTracker>>>,
 }
 
 #[derive(Clone, Default)]
@@ -28,6 +46,7 @@ pub struct SpawnOptions {
     pub session_id: String,
     pub is_local: bool,
     pub host_id: Option<String>,
+    pub host_name: Option<String>,
     pub host: Option<String>,
     pub port: Option<u16>,
     pub username: Option<String>,
@@ -109,6 +128,20 @@ impl PtyManager {
             .as_deref()
             .and_then(|hid| crate::vault::get_password(hid));
 
+        let tracker = if !opts.is_local && opts.host_id.is_some() {
+            Some(Arc::new(Mutex::new(PasswordTracker {
+                is_tracking: saved_password.is_none(),
+                current_input: String::new(),
+                tentative_password: None,
+                initial_password: saved_password.clone(),
+                host_id: opts.host_id.clone(),
+                host_name: opts.host_name.clone(),
+            })))
+        } else {
+            None
+        };
+        let tracker_clone = tracker.clone();
+
         let writer_clone = Arc::clone(&writer);
         let password_sent = Arc::new(AtomicBool::new(false));
 
@@ -119,11 +152,11 @@ impl PtyManager {
                     break;
                 }
                 let chunk = String::from_utf8_lossy(&buf[..n]).to_string();
+                let lower = chunk.to_lowercase();
 
-                // Auto-fill password if SSH prompts for password
+                // 1. Auto-fill password if SSH prompts for password
                 if let Some(ref pwd) = saved_password {
                     if !password_sent.load(Ordering::SeqCst) {
-                        let lower = chunk.to_lowercase();
                         if lower.contains("password:") || lower.contains("密码:") {
                             password_sent.store(true, Ordering::SeqCst);
                             let pwd_to_send = format!("{}\n", pwd);
@@ -135,6 +168,61 @@ impl PtyManager {
                                     let _ = lock.flush();
                                 }
                             });
+                        }
+                    }
+                }
+
+                // 2. If password rejected / permission denied:
+                // DO NOT RETRY! Let the user type manually, and start tracking their input.
+                if lower.contains("permission denied")
+                    || lower.contains("please try again")
+                    || lower.contains("authentication failed")
+                    || lower.contains("access denied")
+                {
+                    if let Some(ref t) = tracker_clone {
+                        if let Ok(mut lock) = t.lock() {
+                            lock.is_tracking = true;
+                            lock.tentative_password = None;
+                            lock.current_input.clear();
+                        }
+                    }
+                }
+
+                // 3. Detect login success:
+                let is_password_prompt = lower.contains("password:") || lower.contains("密码:");
+                let is_login_success = !is_password_prompt && (
+                    lower.contains("last login:")
+                    || lower.contains("welcome to")
+                    || lower.contains("linux ")
+                    || (lower.contains("@") && (chunk.contains("$ ") || chunk.contains("# ") || chunk.ends_with('$') || chunk.ends_with('#')))
+                    || chunk.contains("]$")
+                    || chunk.contains("]#")
+                    || chunk.contains("~#")
+                    || chunk.contains("~$")
+                );
+
+                if is_login_success {
+                    if let Some(ref t) = tracker_clone {
+                        let mut to_emit: Option<PasswordUpdatePayload> = None;
+                        if let Ok(mut lock) = t.lock() {
+                            if let Some(ref tent) = lock.tentative_password {
+                                let is_diff = match lock.initial_password {
+                                    Some(ref init) => init != tent,
+                                    None => !tent.is_empty(),
+                                };
+                                if is_diff && !tent.trim().is_empty() {
+                                    to_emit = Some(PasswordUpdatePayload {
+                                        host_id: lock.host_id.clone().unwrap_or_default(),
+                                        host_name: lock.host_name.clone().unwrap_or_else(|| "服务器".to_string()),
+                                        new_password: tent.clone(),
+                                    });
+                                }
+                            }
+                            lock.is_tracking = false;
+                            lock.tentative_password = None;
+                        }
+                        if let Some(payload) = to_emit {
+                            let _ = app_clone.emit("ssh-password-update-prompt", payload);
                         }
                     }
                 }
@@ -158,6 +246,7 @@ impl PtyManager {
                 is_local: opts.is_local,
                 pid,
                 opts: opts.clone(),
+                password_tracker: tracker,
             },
         );
 
@@ -172,6 +261,27 @@ impl PtyManager {
     pub fn write(&self, session_id: &str, data: &str) -> Result<(), String> {
         let sessions = self.sessions.lock().unwrap();
         if let Some(session) = sessions.get(session_id) {
+            if let Some(ref t) = session.password_tracker {
+                if let Ok(mut lock) = t.lock() {
+                    if lock.is_tracking {
+                        for c in data.chars() {
+                            if c == '\r' || c == '\n' {
+                                if !lock.current_input.is_empty() {
+                                    lock.tentative_password = Some(lock.current_input.clone());
+                                    lock.current_input.clear();
+                                }
+                            } else if c == '\x08' || c == '\x7f' {
+                                lock.current_input.pop();
+                            } else if c == '\x03' || c == '\x15' {
+                                lock.current_input.clear();
+                            } else if !c.is_control() {
+                                lock.current_input.push(c);
+                            }
+                        }
+                    }
+                }
+            }
+
             let mut writer = session.writer.lock().map_err(|e| e.to_string())?;
             writer
                 .write_all(data.as_bytes())

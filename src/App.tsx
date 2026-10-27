@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { HostProfile, TabSession } from "./types";
 import { useTheme } from "./hooks/useTheme";
 import { Sidebar } from "./components/Sidebar";
@@ -7,8 +8,14 @@ import { TabBar } from "./components/TabBar";
 import { TerminalView } from "./components/TerminalView";
 import { HostModal } from "./components/HostModal";
 import { FileExplorer } from "./components/FileExplorer";
-import { Folder } from "lucide-react";
+import { Folder, KeyRound, ShieldCheck } from "lucide-react";
 import "./App.css";
+
+interface PasswordUpdateEvent {
+  host_id: string;
+  host_name: string;
+  new_password: string;
+}
 
 export function App() {
   const { themeMode, setThemeMode, resolvedTheme } = useTheme();
@@ -34,6 +41,39 @@ export function App() {
     return saved ? parseInt(saved, 10) : 280;
   });
   const [isExplorerMaximized, setIsExplorerMaximized] = useState<boolean>(false);
+
+  // Password update confirmation prompt
+  const [passwordPrompt, setPasswordPrompt] = useState<PasswordUpdateEvent | null>(null);
+
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    listen<PasswordUpdateEvent>("ssh-password-update-prompt", (event) => {
+      setPasswordPrompt(event.payload);
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, []);
+
+  const handleAcceptPasswordUpdate = async () => {
+    if (!passwordPrompt) return;
+    try {
+      await invoke("save_host_password", {
+        hostId: passwordPrompt.host_id,
+        password: passwordPrompt.new_password,
+      });
+      await refreshHosts();
+      setPasswordPrompt(null);
+    } catch (err) {
+      console.error("更新密码失败:", err);
+    }
+  };
+
+  const handleDeclinePasswordUpdate = () => {
+    setPasswordPrompt(null);
+  };
 
   // Vertical resize handle between terminal and explorer
   const handleStartExplorerResize = (e: React.MouseEvent) => {
@@ -390,6 +430,45 @@ export function App() {
           </div>
         </div>
       </div>
+
+      {/* Floating Password Update Sheet Prompt */}
+      {passwordPrompt && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center pt-20 bg-black/35 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="apple-card rounded-2xl w-[440px] p-5 shadow-2xl border border-[var(--border-subtle)] text-[var(--text-primary)]">
+            <div className="flex items-start space-x-3.5">
+              <div className="w-10 h-10 rounded-xl bg-[#007AFF]/15 text-[#007AFF] flex items-center justify-center flex-shrink-0">
+                <KeyRound className="w-5 h-5" />
+              </div>
+              <div className="flex-1 truncate">
+                <div className="text-[14px] font-semibold tracking-tight">更新服务器登录密码？</div>
+                <div className="text-[12px] text-[var(--text-secondary)] mt-1.5 leading-relaxed">
+                  检测到你已通过新密码成功登录「
+                  <span className="font-medium text-[var(--text-primary)]">{passwordPrompt.host_name}</span>
+                  」。是否将新密码加密更新到本地硬件保险库（AES-256-GCM 加密），以便下次免密自动连接？
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end space-x-2 pt-5">
+              <button
+                type="button"
+                onClick={handleDeclinePasswordUpdate}
+                className="px-4 py-1.5 text-[12.5px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] bg-[var(--active-item)] hover:bg-[var(--hover-item)] rounded-[8px] active:scale-[0.97] transition-all"
+              >
+                暂不更新
+              </button>
+              <button
+                type="button"
+                onClick={handleAcceptPasswordUpdate}
+                className="px-4 py-1.5 text-[12.5px] font-medium text-white bg-[#007AFF] hover:bg-[#0A84FF] rounded-[8px] shadow-[0_1px_3px_rgba(0,122,255,0.4)] active:scale-[0.97] transition-all flex items-center space-x-1.5"
+              >
+                <ShieldCheck className="w-4 h-4" />
+                <span>更新并安全记住</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* macOS Sheet Modal with Hardware Fingerprint Password Vault */}
       <HostModal
