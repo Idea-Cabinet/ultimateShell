@@ -63,9 +63,6 @@ interface Props {
   resolvedTheme: ResolvedTheme;
 }
 
-// Global flag ensuring ASCII input method switch is triggered at most once across all tabs
-let hasGlobalAsciiSwitched = false;
-
 export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalInstanceRef = useRef<Terminal | null>(null);
@@ -80,14 +77,6 @@ export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme
   const [useRegex, setUseRegex] = useState(false);
   const [searchResult, setSearchResult] = useState<{ index: number; count: number } | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
-
-  // Switch macOS input method to English/ASCII on first cursor focus
-  const switchToAscii = useCallback(() => {
-    if (!hasGlobalAsciiSwitched) {
-      hasGlobalAsciiSwitched = true;
-      invoke("switch_to_ascii_input").catch(() => {});
-    }
-  }, []);
 
   const getSearchOptions = useCallback(() => ({
     caseSensitive,
@@ -183,7 +172,6 @@ export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme
       term.textarea.setAttribute("autocorrect", "off");
       term.textarea.setAttribute("spellcheck", "false");
       term.textarea.setAttribute("lang", "en");
-      term.textarea.addEventListener("focus", switchToAscii, { once: true });
     }
 
     if (isActive) {
@@ -478,11 +466,9 @@ export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme
         ref={containerRef}
         tabIndex={0}
         onClick={() => {
-          switchToAscii();
           terminalInstanceRef.current?.focus();
         }}
         onFocus={() => {
-          switchToAscii();
           terminalInstanceRef.current?.focus();
         }}
         className="w-full h-full bg-[var(--bg-terminal)] border-none outline-none cursor-text"

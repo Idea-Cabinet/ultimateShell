@@ -24,27 +24,16 @@ export const HostModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialHos
   });
   const [password, setPassword] = useState("");
   const firstInputRef = useRef<HTMLInputElement>(null);
-  const hasSwitchedFormInputRef = useRef(false);
 
-  // Switch to English/ASCII input method on modal open & form focus
+  // Auto focus first input on modal open
   useEffect(() => {
     if (isOpen) {
-      hasSwitchedFormInputRef.current = false;
-      invoke("switch_to_ascii_input").catch(() => {});
       const timer = setTimeout(() => {
         firstInputRef.current?.focus();
-        invoke("switch_to_ascii_input").catch(() => {});
       }, 50);
       return () => clearTimeout(timer);
     }
   }, [isOpen]);
-
-  const handleFormFocusCapture = () => {
-    if (!hasSwitchedFormInputRef.current) {
-      hasSwitchedFormInputRef.current = true;
-      invoke("switch_to_ascii_input").catch(() => {});
-    }
-  };
 
   useEffect(() => {
     if (initialHost) {
@@ -133,7 +122,6 @@ export const HostModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialHos
         {/* Sheet Body */}
         <form
           onSubmit={handleSubmit}
-          onFocusCapture={handleFormFocusCapture}
           className="px-6 pb-6 pt-2 space-y-3.5"
         >
           <div>
