@@ -19,7 +19,7 @@ Still in development. Currently tested on macOS.
 
 ## Run
 
-Requires Node.js 22.12+, a recent stable Rust toolchain, OpenSSH, and [Tauri system dependencies](https://v2.tauri.app/start/prerequisites/).
+Requires Node.js **22.23.4**, a recent stable Rust toolchain, OpenSSH, and [Tauri system dependencies](https://v2.tauri.app/start/prerequisites/).
 
 ```bash
 git clone https://github.com/Idea-Cabinet/ultimateShell.git

@@ -19,7 +19,7 @@
 
 ## 运行
 
-需要 Node.js 22.12+、较新的稳定版 Rust、OpenSSH 及 [Tauri 系统依赖](https://v2.tauri.app/start/prerequisites/)。
+需要 Node.js **22.23.4**、较新的稳定版 Rust、OpenSSH 及 [Tauri 系统依赖](https://v2.tauri.app/start/prerequisites/)。
 
 ```bash
 git clone https://github.com/Idea-Cabinet/ultimateShell.git
