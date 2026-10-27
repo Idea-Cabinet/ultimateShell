@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { HostProfile } from "../types";
 import { X, Server, Lock, FolderOpen } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
@@ -23,6 +23,28 @@ export const HostModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialHos
     identity_file: "",
   });
   const [password, setPassword] = useState("");
+  const firstInputRef = useRef<HTMLInputElement>(null);
+  const hasSwitchedFormInputRef = useRef(false);
+
+  // Switch to English/ASCII input method on modal open & form focus
+  useEffect(() => {
+    if (isOpen) {
+      hasSwitchedFormInputRef.current = false;
+      invoke("switch_to_ascii_input").catch(() => {});
+      const timer = setTimeout(() => {
+        firstInputRef.current?.focus();
+        invoke("switch_to_ascii_input").catch(() => {});
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [isOpen]);
+
+  const handleFormFocusCapture = () => {
+    if (!hasSwitchedFormInputRef.current) {
+      hasSwitchedFormInputRef.current = true;
+      invoke("switch_to_ascii_input").catch(() => {});
+    }
+  };
 
   useEffect(() => {
     if (initialHost) {
@@ -109,13 +131,21 @@ export const HostModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialHos
         </div>
 
         {/* Sheet Body */}
-        <form onSubmit={handleSubmit} className="px-6 pb-6 pt-2 space-y-3.5">
+        <form
+          onSubmit={handleSubmit}
+          onFocusCapture={handleFormFocusCapture}
+          className="px-6 pb-6 pt-2 space-y-3.5"
+        >
           <div>
             <label className="block text-[11px] font-medium text-[var(--text-secondary)] mb-1">
               名称
             </label>
             <input
+              ref={firstInputRef}
               type="text"
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
               placeholder="例如: 生产机器 / 香港主节点"
               value={formData.name}
               onChange={(e) => setFormData({ ...formData, name: e.target.value })}
@@ -131,6 +161,9 @@ export const HostModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialHos
               <input
                 type="text"
                 required
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
                 placeholder="192.168.1.100"
                 value={formData.host}
                 onChange={(e) => setFormData({ ...formData, host: e.target.value })}
@@ -157,6 +190,9 @@ export const HostModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialHos
               </label>
               <input
                 type="text"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
                 value={formData.username}
                 onChange={(e) => setFormData({ ...formData, username: e.target.value })}
                 className="w-full px-3 py-1.5 bg-[var(--input-bg)] border border-[var(--border-subtle)] rounded-[8px] text-[13px] text-[var(--text-primary)] focus:outline-none focus:border-[#007AFF] focus:ring-1 focus:ring-[#007AFF]/40 font-mono"
@@ -169,6 +205,9 @@ export const HostModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialHos
               <input
                 type="text"
                 placeholder="默认分组"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
                 value={formData.group || ""}
                 onChange={(e) => setFormData({ ...formData, group: e.target.value })}
                 className="w-full px-3 py-1.5 bg-[var(--input-bg)] border border-[var(--border-subtle)] rounded-[8px] text-[13px] text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none focus:border-[#007AFF] focus:ring-1 focus:ring-[#007AFF]/40"

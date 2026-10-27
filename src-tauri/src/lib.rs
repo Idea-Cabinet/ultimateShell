@@ -90,6 +90,30 @@ async fn fs_read_preview(
     .map_err(|e| format!("异步执行错误: {}", e))?
 }
 
+#[cfg(target_os = "macos")]
+#[link(name = "Carbon", kind = "framework")]
+unsafe extern "C" {
+    fn TISCopyCurrentASCIICapableKeyboardInputSource() -> *mut std::ffi::c_void;
+    fn TISSelectInputSource(source: *mut std::ffi::c_void) -> i32;
+    fn CFRelease(cf: *mut std::ffi::c_void);
+}
+
+#[tauri::command]
+fn switch_to_ascii_input() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    unsafe {
+        let source = TISCopyCurrentASCIICapableKeyboardInputSource();
+        if !source.is_null() {
+            let res = TISSelectInputSource(source);
+            CFRelease(source);
+            if res != 0 {
+                return Err(format!("TISSelectInputSource failed with code {}", res));
+            }
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn get_session_user(pty_mgr: State<PtyManager>, session_id: String) -> String {
     pty_mgr.get_user(&session_id)
@@ -189,6 +213,7 @@ pub fn run() {
             pty_write,
             pty_resize,
             pty_close,
+            switch_to_ascii_input,
             get_session_stats,
             get_session_user,
             get_hosts,

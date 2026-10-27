@@ -65,6 +65,15 @@ export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalInstanceRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
+  const hasSwitchedInputRef = useRef(false);
+
+  // Switch macOS input method to English/ASCII on first cursor focus
+  const switchToAscii = () => {
+    if (!hasSwitchedInputRef.current) {
+      hasSwitchedInputRef.current = true;
+      invoke("switch_to_ascii_input").catch(() => {});
+    }
+  };
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -89,7 +98,21 @@ export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme
 
     term.open(containerRef.current);
     fitAddon.fit();
-    if (isActive) term.focus();
+
+    // Optimize xterm helper textarea for English terminal interaction
+    if (term.textarea) {
+      term.textarea.setAttribute("autocapitalize", "off");
+      term.textarea.setAttribute("autocomplete", "off");
+      term.textarea.setAttribute("autocorrect", "off");
+      term.textarea.setAttribute("spellcheck", "false");
+      term.textarea.setAttribute("lang", "en");
+      term.textarea.addEventListener("focus", switchToAscii, { once: true });
+    }
+
+    if (isActive) {
+      term.focus();
+      switchToAscii();
+    }
 
     terminalInstanceRef.current = term;
     fitAddonRef.current = fitAddon;
@@ -184,6 +207,7 @@ export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme
 
   useEffect(() => {
     if (isActive && fitAddonRef.current && terminalInstanceRef.current) {
+      switchToAscii();
       const timer = setTimeout(() => {
         try {
           fitAddonRef.current?.fit();
@@ -199,9 +223,11 @@ export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme
       ref={containerRef}
       tabIndex={0}
       onClick={() => {
+        switchToAscii();
         terminalInstanceRef.current?.focus();
       }}
       onFocus={() => {
+        switchToAscii();
         terminalInstanceRef.current?.focus();
       }}
       className={`w-full h-full bg-[var(--bg-terminal)] border-none outline-none cursor-text ${isActive ? "block" : "hidden"}`}
