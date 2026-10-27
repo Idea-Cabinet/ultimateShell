@@ -26,6 +26,7 @@ interface Props {
   onRenameTab: (id: string, newTitle: string) => void;
   onReconnectTab: (id: string) => void;
   onNewLocalTab: () => void;
+  onReorderTabs?: (newTabs: TabSession[]) => void;
 }
 
 interface ContextMenuState {
@@ -48,9 +49,17 @@ export const TabBar: React.FC<Props> = ({
   onRenameTab,
   onReconnectTab,
   onNewLocalTab,
+  onReorderTabs,
 }) => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const prevTabsLengthRef = useRef(tabs.length);
+
+  // Tab drag-and-drop reordering states
+  const draggedTabRef = useRef<string | null>(null);
+  const isDraggingTabRef = useRef(false);
+  const [draggedTabId, setDraggedTabId] = useState<string | null>(null);
+  const [dragOverTabId, setDragOverTabId] = useState<string | null>(null);
+  const [tabDropPos, setTabDropPos] = useState<"left" | "right">("left");
 
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({
     visible: false,
@@ -58,6 +67,66 @@ export const TabBar: React.FC<Props> = ({
     y: 0,
     tabId: "",
   });
+
+  // Tab Drag and Drop Handlers
+  const handleTabDragStart = (e: React.DragEvent, id: string) => {
+    draggedTabRef.current = id;
+    isDraggingTabRef.current = true;
+    setDraggedTabId(id);
+    e.dataTransfer.setData("text/plain", id);
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleTabDragOver = (e: React.DragEvent, id: string) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (draggedTabRef.current && draggedTabRef.current !== id) {
+      const rect = e.currentTarget.getBoundingClientRect();
+      const pos = e.clientX > rect.left + rect.width / 2 ? "right" : "left";
+      setDragOverTabId(id);
+      setTabDropPos(pos);
+    }
+  };
+
+  const handleTabDragLeave = (e: React.DragEvent) => {
+    if (e.currentTarget === e.target) {
+      setDragOverTabId(null);
+    }
+  };
+
+  const handleTabDrop = (e: React.DragEvent, targetId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const sourceId = draggedTabRef.current || e.dataTransfer.getData("text/plain");
+    setDragOverTabId(null);
+    setDraggedTabId(null);
+
+    if (sourceId && sourceId !== targetId && onReorderTabs) {
+      const sourceIndex = tabs.findIndex((t) => t.id === sourceId);
+      const targetIndex = tabs.findIndex((t) => t.id === targetId);
+      if (sourceIndex !== -1 && targetIndex !== -1) {
+        const copy = [...tabs];
+        const [removed] = copy.splice(sourceIndex, 1);
+        const newTargetIndex = copy.findIndex((t) => t.id === targetId);
+        const insertIndex = tabDropPos === "right" ? newTargetIndex + 1 : newTargetIndex;
+        copy.splice(insertIndex, 0, removed);
+        onReorderTabs(copy);
+      }
+    }
+    draggedTabRef.current = null;
+    setTimeout(() => {
+      isDraggingTabRef.current = false;
+    }, 100);
+  };
+
+  const handleTabDragEnd = () => {
+    setDraggedTabId(null);
+    setDragOverTabId(null);
+    draggedTabRef.current = null;
+    setTimeout(() => {
+      isDraggingTabRef.current = false;
+    }, 100);
+  };
 
   // Auto scroll to latest tab ONLY when tabs are added or removed
   useEffect(() => {
@@ -132,36 +201,58 @@ export const TabBar: React.FC<Props> = ({
           <PanelLeft className="w-4 h-4" strokeWidth={1.75} />
         </button>
 
-        {/* Tabs List (Auto-scrolls on add/remove, supports manual dragging/scrolling) */}
+        {/* Tabs List (Supports drag-and-drop reordering, auto-scrolls on add/remove) */}
         <div
           ref={scrollContainerRef}
-          className="flex items-center space-x-1 flex-1 overflow-x-auto py-1 scroll-smooth"
+          data-tauri-drag-region="false"
+          className="flex items-center space-x-1 max-w-full overflow-x-auto py-1 scroll-smooth"
         >
           {tabs.map((tab) => {
             const isActive = tab.id === activeTabId;
+            const isDragging = draggedTabId === tab.id;
+            const isDragOver = dragOverTabId === tab.id;
+
             return (
               <div
                 key={tab.id}
-                onClick={() => onSelectTab(tab.id)}
+                draggable
+                data-tauri-drag-region="false"
+                onDragStart={(e) => handleTabDragStart(e, tab.id)}
+                onDragOver={(e) => handleTabDragOver(e, tab.id)}
+                onDragLeave={handleTabDragLeave}
+                onDrop={(e) => handleTabDrop(e, tab.id)}
+                onDragEnd={handleTabDragEnd}
+                onClick={() => {
+                  if (isDraggingTabRef.current) return;
+                  onSelectTab(tab.id);
+                }}
                 onContextMenu={(e) => handleContextMenu(e, tab.id)}
-                title={tab.isLocal ? "本地 Shell 会话 (右键打开菜单)" : `远程主机: ${tab.hostProfile?.username}@${tab.hostProfile?.host} (右键打开菜单)`}
-                className={`group h-8 px-2.5 flex items-center space-x-2 text-[12px] rounded-[7px] cursor-pointer transition max-w-[200px] min-w-[120px] ${
+                title={tab.isLocal ? "本地 Shell 会话 (按住可拖拽调整顺序 / 右键打开菜单)" : `远程主机: ${tab.hostProfile?.username}@${tab.hostProfile?.host} (按住可拖拽调整顺序 / 右键打开菜单)`}
+                className={`group h-8 px-2.5 flex items-center space-x-2 text-[12px] rounded-[7px] cursor-grab active:cursor-grabbing transition max-w-[200px] min-w-[120px] relative select-none ${
                   isActive
                     ? "bg-[var(--active-tab-bg)] text-[var(--text-primary)] shadow-[var(--active-tab-shadow)] border border-[var(--border-subtle)] font-medium"
                     : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--hover-item)] border border-transparent font-normal"
+                } ${isDragging ? "opacity-35 scale-[0.98]" : ""} ${
+                  isDragOver
+                    ? tabDropPos === "left"
+                      ? "before:content-[''] before:absolute before:left-[-2px] before:top-1.5 before:bottom-1.5 before:w-1 before:bg-[#007AFF] before:rounded-full before:z-30 bg-[#007AFF]/10"
+                      : "after:content-[''] after:absolute after:right-[-2px] after:top-1.5 after:bottom-1.5 after:w-1 after:bg-[#007AFF] after:rounded-full after:z-30 bg-[#007AFF]/10"
+                    : ""
                 }`}
               >
                 {tab.isLocal ? (
-                  <span title="本地 Shell 终端" className="inline-flex items-center">
+                  <span title="本地 Shell 终端" className="inline-flex items-center pointer-events-none">
                     <Terminal className={`w-3.5 h-3.5 flex-shrink-0 ${isActive ? "text-[#30D158]" : "text-[var(--text-tertiary)]"}`} strokeWidth={1.75} />
                   </span>
                 ) : (
-                  <span title="SSH 远程云服务器终端" className="inline-flex items-center">
+                  <span title="SSH 远程云服务器终端" className="inline-flex items-center pointer-events-none">
                     <Server className={`w-3.5 h-3.5 flex-shrink-0 ${isActive ? "text-[#007AFF]" : "text-[var(--text-tertiary)]"}`} strokeWidth={1.75} />
                   </span>
                 )}
-                <span className="truncate flex-1 tracking-tight">{tab.title}</span>
+                <span className="truncate flex-1 tracking-tight pointer-events-none">{tab.title}</span>
                 <button
+                  draggable={false}
+                  data-tauri-drag-region="false"
                   onClick={(e) => {
                     e.stopPropagation();
                     onCloseTab(tab.id);
@@ -171,20 +262,25 @@ export const TabBar: React.FC<Props> = ({
                     isActive ? "opacity-80 hover:opacity-100" : "opacity-0 group-hover:opacity-80"
                   }`}
                 >
-                  <X className="w-3 h-3" strokeWidth={2} />
+                  <X className="w-3 h-3 pointer-events-none" strokeWidth={2} />
                 </button>
               </div>
             );
           })}
 
           <button
+            draggable={false}
+            data-tauri-drag-region="false"
             onClick={onNewLocalTab}
             title="新建本地终端 (打开新命令行窗口)"
-            className="h-7 w-7 flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--hover-item)] rounded-[6px] transition active:scale-[0.95]"
+            className="h-7 w-7 flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--hover-item)] rounded-[6px] transition active:scale-[0.95] flex-shrink-0"
           >
             <Plus className="w-3.5 h-3.5" strokeWidth={2} />
           </button>
         </div>
+
+        {/* Trailing Draggable Area for Window Dragging */}
+        <div data-tauri-drag-region className="flex-1 h-full min-w-[20px]" />
       </div>
 
       {/* Right-click Context Menu Popover (macOS Styled) */}

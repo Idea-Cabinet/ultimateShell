@@ -382,6 +382,7 @@ export function App() {
           onRenameTab={handleRenameTab}
           onReconnectTab={handleReconnectTab}
           onNewLocalTab={createNewLocalTab}
+          onReorderTabs={setTabs}
         />
 
         {/* Terminals Container */}

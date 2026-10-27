@@ -185,8 +185,11 @@ export function FileExplorer({
     } catch {}
     return DEFAULT_COLUMNS;
   });
+  const draggedColRef = useRef<ColumnId | null>(null);
+  const isColDraggingRef = useRef(false);
   const [draggedColId, setDraggedColId] = useState<ColumnId | null>(null);
   const [dragOverColId, setDragOverColId] = useState<ColumnId | null>(null);
+  const [colDropPos, setColDropPos] = useState<"left" | "right">("left");
 
   // Dynamic user detection with real-time prompt parsing
   const [detectedUser, setDetectedUser] = useState<string>(() => {
@@ -241,26 +244,34 @@ export function FileExplorer({
 
   // Drag and drop column reordering handlers
   const handleColDragStart = (e: React.DragEvent, id: ColumnId) => {
+    draggedColRef.current = id;
+    isColDraggingRef.current = true;
+    setDraggedColId(id);
     e.dataTransfer.setData("text/plain", id);
     e.dataTransfer.effectAllowed = "move";
-    setDraggedColId(id);
   };
 
   const handleColDragOver = (e: React.DragEvent, id: ColumnId) => {
     e.preventDefault();
-    if (draggedColId && draggedColId !== id) {
-      e.dataTransfer.dropEffect = "move";
+    e.dataTransfer.dropEffect = "move";
+    if (draggedColRef.current && draggedColRef.current !== id) {
+      const rect = e.currentTarget.getBoundingClientRect();
+      const pos = e.clientX > rect.left + rect.width / 2 ? "right" : "left";
       setDragOverColId(id);
+      setColDropPos(pos);
     }
   };
 
-  const handleColDragLeave = () => {
-    setDragOverColId(null);
+  const handleColDragLeave = (e: React.DragEvent) => {
+    if (e.currentTarget === e.target) {
+      setDragOverColId(null);
+    }
   };
 
   const handleColDrop = (e: React.DragEvent, targetId: ColumnId) => {
     e.preventDefault();
-    const sourceId = e.dataTransfer.getData("text/plain") as ColumnId;
+    e.stopPropagation();
+    const sourceId = draggedColRef.current || (e.dataTransfer.getData("text/plain") as ColumnId);
     setDragOverColId(null);
     setDraggedColId(null);
 
@@ -271,16 +282,26 @@ export function FileExplorer({
         if (sourceIndex === -1 || targetIndex === -1) return prev;
         const copy = [...prev];
         const [removed] = copy.splice(sourceIndex, 1);
-        copy.splice(targetIndex, 0, removed);
+        const newTargetIndex = copy.findIndex((c) => c.id === targetId);
+        const insertIndex = colDropPos === "right" ? newTargetIndex + 1 : newTargetIndex;
+        copy.splice(insertIndex, 0, removed);
         localStorage.setItem("ultimateshell_explorer_cols_v2", JSON.stringify(copy));
         return copy;
       });
     }
+    draggedColRef.current = null;
+    setTimeout(() => {
+      isColDraggingRef.current = false;
+    }, 100);
   };
 
   const handleColDragEnd = () => {
     setDraggedColId(null);
     setDragOverColId(null);
+    draggedColRef.current = null;
+    setTimeout(() => {
+      isColDraggingRef.current = false;
+    }, 100);
   };
 
   // Column width resizing
@@ -1065,26 +1086,35 @@ export function FileExplorer({
                       onDrop={(e) => handleColDrop(e, col.id)}
                       onDragEnd={handleColDragEnd}
                       style={{ width: `${col.width}px` }}
-                      className={`relative h-full flex items-center px-2 cursor-grab active:cursor-grabbing hover:bg-[var(--hover-item)] hover:text-[var(--text-primary)] transition-colors flex-shrink-0 group/col ${
+                      className={`relative h-full flex items-center px-2 cursor-grab active:cursor-grabbing hover:bg-[var(--hover-item)] hover:text-[var(--text-primary)] transition-colors flex-shrink-0 group/col select-none ${
                         col.align === "right" ? "justify-end text-right" : "justify-start text-left"
-                      } ${isDragOver ? "border-l-2 border-[#007AFF] bg-[#007AFF]/10" : ""} ${
-                        isDragging ? "opacity-35" : ""
-                      }`}
-                      title={col.tooltip}
+                      } ${
+                        isDragOver
+                          ? colDropPos === "left"
+                            ? "border-l-2 border-[#007AFF] bg-[#007AFF]/10"
+                            : "border-r-2 border-[#007AFF] bg-[#007AFF]/10"
+                          : ""
+                      } ${isDragging ? "opacity-35" : ""}`}
+                      title={`${col.tooltip} (可左右拖拽调整顺序)`}
                       onClick={() => {
+                        if (isColDraggingRef.current) return;
                         if (col.sortable) handleSort(col.id as SortField);
                       }}
                     >
-                      <span className="truncate select-none font-medium">{col.label}</span>
+                      <span className="truncate select-none font-medium pointer-events-none">{col.label}</span>
                       {col.sortable && sortField === col.id && (
-                        <span className="ml-1 text-[10px] text-[#007AFF] font-bold flex-shrink-0">
+                        <span className="ml-1 text-[10px] text-[#007AFF] font-bold flex-shrink-0 pointer-events-none">
                           {sortDirection === "asc" ? "↑" : "↓"}
                         </span>
                       )}
 
                       {/* Resizer Handle on right border */}
                       <div
-                        onMouseDown={(e) => handleStartColResize(col.id, e)}
+                        draggable={false}
+                        onMouseDown={(e) => {
+                          e.stopPropagation();
+                          handleStartColResize(col.id, e);
+                        }}
                         onClick={(e) => e.stopPropagation()}
                         className="absolute right-0 top-0 bottom-0 w-2.5 cursor-col-resize hover:bg-[#007AFF]/60 active:bg-[#007AFF] flex items-center justify-center opacity-0 group-hover/col:opacity-100 transition-opacity z-10"
                         title="左右拖拽调整此列宽度"
