@@ -1,23 +1,64 @@
 @import "tailwindcss";
 @import "@xterm/xterm/css/xterm.css";
 
-/* Apple Design Foundations & Motion */
+/* Apple Design Foundations & Theme Variables */
 :root {
   --apple-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", sans-serif;
-  --apple-mono: "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  --apple-mono: "SF Mono", Menlo, Monaco, Consolas, monospace;
   --apple-spring: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Light Theme Variables */
+  --bg-app: #f5f5f7;
+  --bg-sidebar: rgba(240, 240, 245, 0.82);
+  --bg-toolbar: rgba(246, 246, 248, 0.75);
+  --bg-terminal: #ffffff;
+  --bg-card: rgba(255, 255, 255, 0.88);
+  --border-subtle: rgba(0, 0, 0, 0.08);
+  --border-highlight: rgba(0, 0, 0, 0.14);
+  --text-primary: #1d1d1f;
+  --text-secondary: rgba(60, 60, 67, 0.65);
+  --text-tertiary: rgba(60, 60, 67, 0.4);
+  --hover-item: rgba(0, 0, 0, 0.05);
+  --active-item: rgba(0, 0, 0, 0.08);
+  --active-tab-bg: #ffffff;
+  --active-tab-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  --input-bg: rgba(0, 0, 0, 0.04);
+  --scroll-thumb: rgba(0, 0, 0, 0.2);
+  --card-shadow: 0 20px 40px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.dark {
+  /* Dark Theme Variables */
+  --bg-app: #121214;
+  --bg-sidebar: rgba(28, 28, 32, 0.78);
+  --bg-toolbar: rgba(24, 24, 28, 0.72);
+  --bg-terminal: #121214;
+  --bg-card: rgba(36, 36, 42, 0.85);
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-highlight: rgba(255, 255, 255, 0.16);
+  --text-primary: #f5f5f7;
+  --text-secondary: rgba(235, 235, 245, 0.6);
+  --text-tertiary: rgba(235, 235, 245, 0.35);
+  --hover-item: rgba(255, 255, 255, 0.06);
+  --active-item: rgba(255, 255, 255, 0.1);
+  --active-tab-bg: #25252a;
+  --active-tab-shadow: 0 2px 6px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  --input-bg: rgba(0, 0, 0, 0.3);
+  --scroll-thumb: rgba(255, 255, 255, 0.18);
+  --card-shadow: 0 20px 40px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.15);
 }
 
 body {
   margin: 0;
   padding: 0;
-  background-color: #121214;
-  color: #f5f5f7;
+  background-color: var(--bg-app);
+  color: var(--text-primary);
   user-select: none;
   font-family: var(--apple-font);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow: hidden;
+  transition: background-color 200ms ease, color 200ms ease;
 }
 
 /* Apple-style spring press feedback on active */
@@ -31,28 +72,23 @@ button:active, [role="button"]:active, .apple-clickable:active {
 
 /* Apple Frosted Glass / Translucent Materials */
 .apple-vibrancy-sidebar {
-  background: rgba(28, 28, 32, 0.78);
+  background: var(--bg-sidebar);
   backdrop-filter: blur(35px) saturate(190%);
   -webkit-backdrop-filter: blur(35px) saturate(190%);
 }
 
 .apple-vibrancy-toolbar {
-  background: rgba(24, 24, 28, 0.72);
+  background: var(--bg-toolbar);
   backdrop-filter: blur(30px) saturate(180%);
   -webkit-backdrop-filter: blur(30px) saturate(180%);
 }
 
 .apple-card {
-  background: rgba(36, 36, 42, 0.82);
+  background: var(--bg-card);
   backdrop-filter: blur(40px) saturate(200%);
   -webkit-backdrop-filter: blur(40px) saturate(200%);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.15);
-}
-
-/* Subtle border bevel / light catching top edge */
-.apple-top-bevel {
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--card-shadow);
 }
 
 /* Custom discreet macOS scrollbars */
@@ -64,11 +100,11 @@ button:active, [role="button"]:active, .apple-clickable:active {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.18);
+  background: var(--scroll-thumb);
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.32);
+  background: var(--text-secondary);
 }
 
 /* xterm terminal container tuning */
