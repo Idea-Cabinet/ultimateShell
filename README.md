@@ -6,14 +6,11 @@ An SSH client for macOS, built with Tauri, Rust, React, and xterm.js.
 
 ## Features
 
-- Local terminals and SSH connections
-- Multiple tabs with drag-to-reorder and reconnect
-- Host groups, search, and recent connections
-- Command templates, parameters, and history
-- Terminal output search
-- Linux server monitoring, process management, and disk usage
-- Local and remote file browsing with text previews
-- Light/dark themes, English/Chinese UI, and native macOS menus
+- SSH connections and local terminals
+- Host management
+- Command library
+- Linux server monitoring and process management
+- Local and remote file browsing
 
 Still in development. Currently tested on macOS.
 
