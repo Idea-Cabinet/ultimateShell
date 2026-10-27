@@ -18,10 +18,15 @@ import {
   Layers,
   Network,
   PanelLeftClose,
+  ArrowUpDown,
+  Lock,
 } from "lucide-react";
+
+export type SortMode = "recent" | "newest" | "oldest" | "name";
 
 interface Props {
   hosts: HostProfile[];
+  connectedHostIds: Set<string>;
   width: number;
   isCollapsed: boolean;
   themeMode: ThemeMode;
@@ -38,6 +43,7 @@ interface Props {
 
 export const Sidebar: React.FC<Props> = ({
   hosts,
+  connectedHostIds,
   width,
   isCollapsed,
   themeMode,
@@ -54,6 +60,16 @@ export const Sidebar: React.FC<Props> = ({
   const [searchTerm, setSearchTerm] = useState("");
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [isDragging, setIsDragging] = useState(false);
+  const [sortMode, setSortMode] = useState<SortMode>(() => {
+    return (localStorage.getItem("ultimateshell_sort_mode") as SortMode) || "recent";
+  });
+  const [showSortMenu, setShowSortMenu] = useState(false);
+
+  const handleSortChange = (mode: SortMode) => {
+    setSortMode(mode);
+    localStorage.setItem("ultimateshell_sort_mode", mode);
+    setShowSortMenu(false);
+  };
 
   const toggleGroup = (group: string) => {
     setCollapsedGroups((prev) => ({ ...prev, [group]: !prev[group] }));
@@ -88,12 +104,26 @@ export const Sidebar: React.FC<Props> = ({
     window.addEventListener("pointerup", onPointerUp);
   };
 
-  const filteredHosts = hosts.filter(
+  // Filter hosts
+  let filteredHosts = hosts.filter(
     (h) =>
       h.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       h.host.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (h.group && h.group.toLowerCase().includes(searchTerm.toLowerCase()))
   );
+
+  // Sort hosts
+  filteredHosts.sort((a, b) => {
+    if (sortMode === "recent") {
+      return (b.access_time || 0) - (a.access_time || 0);
+    } else if (sortMode === "newest") {
+      return (b.create_time || 0) - (a.create_time || 0);
+    } else if (sortMode === "oldest") {
+      return (a.create_time || 0) - (b.create_time || 0);
+    } else {
+      return a.name.localeCompare(b.name, "zh-CN");
+    }
+  });
 
   const groups: Record<string, HostProfile[]> = {};
   filteredHosts.forEach((h) => {
@@ -134,7 +164,7 @@ export const Sidebar: React.FC<Props> = ({
         <div className="flex items-center space-x-0.5">
           <button
             onClick={onImportFinalShell}
-            title="从 FinalShell 导入主机"
+            title="一键解密导入 FinalShell 历史连接与凭据"
             className="p-1 rounded-md text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--hover-item)] transition active:scale-[0.95]"
           >
             <ArrowDownToLine className="w-3.5 h-3.5" strokeWidth={1.75} />
@@ -156,17 +186,56 @@ export const Sidebar: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* macOS Search Bar */}
-      <div className="px-2.5 py-2 flex-shrink-0">
-        <div className="relative flex items-center">
+      {/* Search Bar & Sort Dropdown */}
+      <div className="px-2.5 py-2 flex-shrink-0 flex items-center space-x-1.5">
+        <div className="relative flex-1 flex items-center">
           <Search className="w-3.5 h-3.5 absolute left-2.5 text-[var(--text-tertiary)] pointer-events-none" strokeWidth={1.75} />
           <input
             type="text"
-            placeholder="搜索连接..."
+            placeholder="搜索主机或 IP..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-8 pr-2.5 py-1 text-[12px] bg-[var(--input-bg)] text-[var(--text-primary)] placeholder-[var(--text-tertiary)] border border-[var(--border-subtle)] rounded-md focus:outline-none focus:border-[#007AFF] focus:ring-1 focus:ring-[#007AFF]/40 transition-all font-normal"
           />
+        </div>
+
+        {/* Sort Button */}
+        <div className="relative">
+          <button
+            onClick={() => setShowSortMenu(!showSortMenu)}
+            title="服务器排序"
+            className={`p-1.5 rounded-md border border-[var(--border-subtle)] transition active:scale-[0.95] ${
+              showSortMenu
+                ? "bg-[#007AFF] text-white"
+                : "bg-[var(--input-bg)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--hover-item)]"
+            }`}
+          >
+            <ArrowUpDown className="w-3 h-3" strokeWidth={1.75} />
+          </button>
+
+          {/* Sort Menu Popover */}
+          {showSortMenu && (
+            <div className="absolute right-0 top-8 z-50 w-32 apple-card rounded-xl py-1 text-[11px] shadow-2xl border border-[var(--border-subtle)]">
+              {[
+                { id: "recent", label: "最近连接" },
+                { id: "newest", label: "最新创建" },
+                { id: "oldest", label: "最早创建" },
+                { id: "name", label: "按名称 A-Z" },
+              ].map((item) => (
+                <button
+                  key={item.id}
+                  onClick={() => handleSortChange(item.id as SortMode)}
+                  className={`w-full text-left px-3 py-1.5 transition ${
+                    sortMode === item.id
+                      ? "text-[#007AFF] font-medium bg-[var(--hover-item)]"
+                      : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--hover-item)]"
+                  }`}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
@@ -176,7 +245,7 @@ export const Sidebar: React.FC<Props> = ({
           <div className="text-center py-12 px-4 space-y-2">
             <Server className="w-7 h-7 mx-auto text-[var(--text-tertiary)]" strokeWidth={1.5} />
             <p className="text-[12px] text-[var(--text-secondary)] font-medium">无服务器连接</p>
-            <p className="text-[11px] text-[var(--text-tertiary)]">点击右上角 + 或 导入按钮</p>
+            <p className="text-[11px] text-[var(--text-tertiary)]">点击上方按钮新建或从 FinalShell 导入</p>
           </div>
         ) : (
           Object.entries(groups).map(([groupName, groupHosts]) => {
@@ -206,55 +275,73 @@ export const Sidebar: React.FC<Props> = ({
                 {/* macOS Rounded Item Pill */}
                 {!isGroupCollapsed && (
                   <div className="space-y-0.5 pl-1.5">
-                    {groupHosts.map((host) => (
-                      <div
-                        key={host.id}
-                        onDoubleClick={() => onConnect(host)}
-                        className="group relative flex items-center justify-between px-2.5 py-1.5 text-xs rounded-[7px] hover:bg-[var(--hover-item)] cursor-pointer transition active:scale-[0.98]"
-                      >
+                    {groupHosts.map((host) => {
+                      const isConnected = connectedHostIds.has(host.id);
+                      return (
                         <div
-                          className="flex items-center space-x-2 truncate flex-1"
-                          onClick={() => onConnect(host)}
+                          key={host.id}
+                          onDoubleClick={() => onConnect(host)}
+                          className="group relative flex items-center justify-between px-2.5 py-1.5 text-xs rounded-[7px] hover:bg-[var(--hover-item)] cursor-pointer transition active:scale-[0.98]"
                         >
-                          <div className="relative flex-shrink-0">
-                            <Server className="w-3.5 h-3.5 text-[var(--text-secondary)] group-hover:text-[#007AFF] transition" strokeWidth={1.75} />
-                            <span className="absolute -bottom-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-emerald-500 ring-1 ring-[var(--bg-app)]"></span>
-                          </div>
-                          <div className="truncate">
-                            <div className="text-[12.5px] font-medium text-[var(--text-primary)] truncate">
-                              {host.name}
+                          <div
+                            className="flex items-center space-x-2 truncate flex-1"
+                            onClick={() => onConnect(host)}
+                          >
+                            <div className="relative flex-shrink-0">
+                              <Server
+                                className={`w-3.5 h-3.5 transition ${
+                                  isConnected ? "text-[#007AFF]" : "text-[var(--text-secondary)]"
+                                }`}
+                                strokeWidth={1.75}
+                              />
+                              {/* Requirement 3: Only display green dot on actively connected servers! */}
+                              {isConnected && (
+                                <span className="absolute -bottom-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse ring-1 ring-[var(--bg-app)]" />
+                              )}
                             </div>
-                            <div className="text-[10.5px] text-[var(--text-tertiary)] font-mono truncate tracking-tight">
-                              {host.username}@{host.host}
+                            <div className="truncate flex-1">
+                              <div className="flex items-center space-x-1 truncate">
+                                <span className="text-[12.5px] font-medium text-[var(--text-primary)] truncate">
+                                  {host.name}
+                                </span>
+                                {host.has_password && (
+                                  <span title="已加密记住密码" className="inline-flex items-center">
+                                    <Lock className="w-2.5 h-2.5 text-[var(--text-tertiary)] flex-shrink-0" />
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[10.5px] text-[var(--text-tertiary)] font-mono truncate tracking-tight">
+                                {host.username}@{host.host}
+                              </div>
                             </div>
                           </div>
-                        </div>
 
-                        {/* Subtle Action Hover Icons */}
-                        <div className="opacity-0 group-hover:opacity-100 flex items-center space-x-0.5 transition-opacity">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onEdit(host);
-                            }}
-                            className="p-1 text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--active-item)] rounded transition"
-                            title="配置连接"
-                          >
-                            <SlidersHorizontal className="w-3 h-3" strokeWidth={1.75} />
-                          </button>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onDelete(host.id);
-                            }}
-                            className="p-1 text-[var(--text-secondary)] hover:text-rose-500 hover:bg-rose-500/10 rounded transition"
-                            title="移除"
-                          >
-                            <Trash2 className="w-3 h-3" strokeWidth={1.75} />
-                          </button>
+                          {/* Action Hover Icons */}
+                          <div className="opacity-0 group-hover:opacity-100 flex items-center space-x-0.5 transition-opacity">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onEdit(host);
+                              }}
+                              className="p-1 text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--active-item)] rounded transition"
+                              title="配置连接"
+                            >
+                              <SlidersHorizontal className="w-3 h-3" strokeWidth={1.75} />
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onDelete(host.id);
+                              }}
+                              className="p-1 text-[var(--text-secondary)] hover:text-rose-500 hover:bg-rose-500/10 rounded transition"
+                              title="移除"
+                            >
+                              <Trash2 className="w-3 h-3" strokeWidth={1.75} />
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -290,7 +377,7 @@ export const Sidebar: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* Resizer Divider Handle (Hover to drag width, with min/max constraint) */}
+      {/* Resizer Divider Handle */}
       <div
         onPointerDown={handlePointerDown}
         title="按住左右拖拽调整侧边栏宽度"

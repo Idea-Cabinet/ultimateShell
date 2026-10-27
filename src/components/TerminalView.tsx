@@ -117,6 +117,7 @@ export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme
       opts: {
         session_id: session.id,
         is_local: session.isLocal,
+        host_id: session.hostProfile?.id,
         host: session.hostProfile?.host,
         port: session.hostProfile?.port,
         username: session.hostProfile?.username,

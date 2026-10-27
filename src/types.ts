@@ -7,6 +7,9 @@ export interface HostProfile {
   group?: string;
   description?: string;
   identity_file?: string;
+  create_time?: number;
+  access_time?: number;
+  has_password?: boolean;
 }
 
 export interface TabSession {

@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from "react";
 import { HostProfile } from "../types";
-import { X, Server } from "lucide-react";
+import { X, Server, Lock } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
 
 interface Props {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (host: HostProfile) => void;
+  onSave: (host: HostProfile, password?: string) => void;
   initialHost?: HostProfile | null;
 }
 
@@ -20,10 +21,22 @@ export const HostModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialHos
     description: "",
     identity_file: "",
   });
+  const [password, setPassword] = useState("");
 
   useEffect(() => {
     if (initialHost) {
       setFormData(initialHost);
+      // Fetch saved password from hardware vault if editing
+      if (initialHost.id) {
+        invoke<string | null>("get_host_password", { hostId: initialHost.id })
+          .then((p) => {
+            if (p) setPassword(p);
+            else setPassword("");
+          })
+          .catch(() => setPassword(""));
+      } else {
+        setPassword("");
+      }
     } else {
       setFormData({
         id: "",
@@ -35,6 +48,7 @@ export const HostModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialHos
         description: "",
         identity_file: "",
       });
+      setPassword("");
     }
   }, [initialHost, isOpen]);
 
@@ -43,17 +57,19 @@ export const HostModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialHos
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.host.trim()) return;
-    onSave({
-      ...formData,
-      name: formData.name.trim() || formData.host.trim(),
-    });
+    onSave(
+      {
+        ...formData,
+        name: formData.name.trim() || formData.host.trim(),
+      },
+      password.trim() || undefined
+    );
     onClose();
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 backdrop-blur-md">
-      {/* Modal with Emil Kowalski physical scale(0.95) -> scale(1) entrance */}
-      <div className="apple-card apple-modal-enter rounded-2xl w-[450px] overflow-hidden text-sm text-[var(--text-primary)]">
+      <div className="apple-card apple-modal-enter rounded-2xl w-[460px] overflow-hidden text-sm text-[var(--text-primary)]">
         {/* Sheet Header */}
         <div className="flex items-center justify-between px-6 pt-5 pb-3">
           <div className="flex items-center space-x-2.5">
@@ -62,9 +78,9 @@ export const HostModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialHos
             </div>
             <div>
               <h2 className="text-[15px] font-semibold tracking-[-0.015em] text-[var(--text-primary)]">
-                {initialHost ? "编辑服务器" : "添加服务器"}
+                {initialHost ? "编辑服务器连接" : "添加服务器连接"}
               </h2>
-              <p className="text-[11px] text-[var(--text-secondary)]">配置 SSH 远程主机连接凭证</p>
+              <p className="text-[11px] text-[var(--text-secondary)]">配置 SSH 远程主机连接与硬件加密凭据</p>
             </div>
           </div>
           <button
@@ -141,6 +157,24 @@ export const HostModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialHos
                 className="w-full px-3 py-1.5 bg-[var(--input-bg)] border border-[var(--border-subtle)] rounded-[8px] text-[13px] text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none focus:border-[#007AFF] focus:ring-1 focus:ring-[#007AFF]/40"
               />
             </div>
+          </div>
+
+          {/* Password with Hardware Fingerprint Encryption (Requirement 6) */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-[11px] font-medium text-[var(--text-secondary)] flex items-center space-x-1">
+                <Lock className="w-3 h-3 text-[#007AFF]" />
+                <span>服务器登录密码 (硬件指纹安全加密)</span>
+              </label>
+              <span className="text-[10px] text-emerald-500 font-mono">AES-256-GCM 保护</span>
+            </div>
+            <input
+              type="password"
+              placeholder="输入密码以实现免密自动连接"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full px-3 py-1.5 bg-[var(--input-bg)] border border-[var(--border-subtle)] rounded-[8px] text-[13px] text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none focus:border-[#007AFF] focus:ring-1 focus:ring-[#007AFF]/40 font-mono"
+            />
           </div>
 
           <div>

@@ -6,6 +6,7 @@ import { Sidebar } from "./components/Sidebar";
 import { TabBar } from "./components/TabBar";
 import { TerminalView } from "./components/TerminalView";
 import { HostModal } from "./components/HostModal";
+import { Folder } from "lucide-react";
 import "./App.css";
 
 export function App() {
@@ -16,6 +17,12 @@ export function App() {
   const [activeTabId, setActiveTabId] = useState<string>("");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingHost, setEditingHost] = useState<HostProfile | null>(null);
+
+  // Status bar stats for active tab
+  const [dirStats, setDirStats] = useState<{ path: string; fileCount: number }>({
+    path: "~",
+    fileCount: 0,
+  });
 
   // Sidebar width & collapse state
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
@@ -63,6 +70,23 @@ export function App() {
     createNewLocalTab();
   }, []);
 
+  // Poll current directory & file count stats for active tab (Requirement 5)
+  useEffect(() => {
+    if (!activeTabId) return;
+
+    const fetchStats = () => {
+      invoke<[string, number]>("get_session_stats", { sessionId: activeTabId })
+        .then(([path, fileCount]) => {
+          setDirStats({ path, fileCount });
+        })
+        .catch(() => {});
+    };
+
+    fetchStats();
+    const interval = setInterval(fetchStats, 3000);
+    return () => clearInterval(interval);
+  }, [activeTabId]);
+
   const createNewLocalTab = () => {
     const newId = `local-${Date.now()}`;
     const newTab: TabSession = {
@@ -86,8 +110,14 @@ export function App() {
     };
     setTabs((prev) => [...prev, newTab]);
     setActiveTabId(newId);
+
+    // Update access time for sorting
+    invoke("update_host_access_time", { hostId: host.id })
+      .then(refreshHosts)
+      .catch(() => {});
   };
 
+  // Close single tab (Requirement 1: closes server connection on backend)
   const handleCloseTab = (id: string) => {
     setTabs((prev) => {
       const filtered = prev.filter((t) => t.id !== id);
@@ -102,9 +132,58 @@ export function App() {
     });
   };
 
-  const handleSaveHost = async (host: HostProfile) => {
+  // Close other tabs
+  const handleCloseOtherTabs = (id: string) => {
+    setTabs((prev) => prev.filter((t) => t.id === id));
+    setActiveTabId(id);
+  };
+
+  // Close tabs to the right
+  const handleCloseRightTabs = (id: string) => {
+    setTabs((prev) => {
+      const idx = prev.findIndex((t) => t.id === id);
+      if (idx === -1) return prev;
+      const retained = prev.slice(0, idx + 1);
+      if (!retained.some((t) => t.id === activeTabId)) {
+        setActiveTabId(id);
+      }
+      return retained;
+    });
+  };
+
+  // Duplicate tab
+  const handleDuplicateTab = (id: string) => {
+    const tab = tabs.find((t) => t.id === id);
+    if (!tab) return;
+    if (tab.isLocal) {
+      createNewLocalTab();
+    } else if (tab.hostProfile) {
+      handleConnect(tab.hostProfile);
+    }
+  };
+
+  // Rename tab
+  const handleRenameTab = (id: string, newTitle: string) => {
+    setTabs((prev) =>
+      prev.map((t) => (t.id === id ? { ...t, title: newTitle } : t))
+    );
+  };
+
+  // Reconnect tab
+  const handleReconnectTab = (id: string) => {
+    const tab = tabs.find((t) => t.id === id);
+    if (!tab) return;
+    // Replace with fresh sessionId to reconnect
+    const newId = `${tab.isLocal ? "local" : "ssh"}-${Date.now()}`;
+    setTabs((prev) =>
+      prev.map((t) => (t.id === id ? { ...t, id: newId } : t))
+    );
+    setActiveTabId(newId);
+  };
+
+  const handleSaveHost = async (host: HostProfile, password?: string) => {
     try {
-      await invoke("save_host", { host });
+      await invoke("save_host", { host, password });
       await refreshHosts();
     } catch (err) {
       console.error(`保存失败: ${err}`);
@@ -124,9 +203,9 @@ export function App() {
     try {
       const imported = await invoke<HostProfile[]>("import_finalshell");
       await refreshHosts();
-      console.log(`成功导入 ${imported.length} 个 FinalShell 服务器配置`);
+      alert(`成功通过解密脚本导入 ${imported.length} 个 FinalShell 服务器配置，密码已加密记录！`);
     } catch (err) {
-      console.error(`导入失败: ${err}`);
+      alert(`导入失败: ${err}`);
     }
   };
 
@@ -137,11 +216,19 @@ export function App() {
 
   const activeTab = tabs.find((t) => t.id === activeTabId);
 
+  // Requirement 3: Only servers that currently have an active tab show the green dot!
+  const connectedHostIds = new Set<string>(
+    tabs
+      .filter((t) => !t.isLocal && t.hostProfile)
+      .map((t) => t.hostProfile!.id)
+  );
+
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[var(--bg-app)] text-[var(--text-primary)]">
-      {/* Resizable / Collapsible macOS Sidebar */}
+      {/* Resizable / Collapsible macOS Sidebar with Active Status & Sorting */}
       <Sidebar
         hosts={hosts}
+        connectedHostIds={connectedHostIds}
         width={sidebarWidth}
         isCollapsed={isSidebarCollapsed}
         themeMode={themeMode}
@@ -164,7 +251,7 @@ export function App() {
 
       {/* Main Terminal Viewport */}
       <div className="flex-1 flex flex-col h-full overflow-hidden min-w-0">
-        {/* Safari/macOS Styled Tab Bar with Drag Region and Sidebar Toggle */}
+        {/* Safari/macOS Styled Tab Bar with Auto-scroll and Right-click Context Menu */}
         <TabBar
           tabs={tabs}
           activeTabId={activeTabId}
@@ -172,6 +259,11 @@ export function App() {
           onToggleSidebar={() => handleCollapse(!isSidebarCollapsed)}
           onSelectTab={setActiveTabId}
           onCloseTab={handleCloseTab}
+          onCloseOtherTabs={handleCloseOtherTabs}
+          onCloseRightTabs={handleCloseRightTabs}
+          onDuplicateTab={handleDuplicateTab}
+          onRenameTab={handleRenameTab}
+          onReconnectTab={handleReconnectTab}
           onNewLocalTab={createNewLocalTab}
         />
 
@@ -187,9 +279,9 @@ export function App() {
           ))}
         </div>
 
-        {/* Subtle macOS Status Strip */}
+        {/* Bottom Status Bar with Current Path & File Count (Requirement 5) */}
         <div className="h-6 apple-vibrancy-toolbar border-t border-[var(--border-subtle)] px-3 flex items-center justify-between text-[11px] text-[var(--text-tertiary)] select-none">
-          <div className="flex items-center space-x-2.5 truncate">
+          <div className="flex items-center space-x-3 truncate">
             <span className="flex items-center space-x-1.5 flex-shrink-0">
               <span className="w-1.5 h-1.5 rounded-full bg-[#30D158]"></span>
               <span className="text-[var(--text-secondary)] font-medium">
@@ -201,7 +293,15 @@ export function App() {
                 {activeTab.hostProfile.username}@{activeTab.hostProfile.host}:{activeTab.hostProfile.port}
               </span>
             )}
+            {/* Requirement 5: Current Directory & File Count indicator */}
+            <span className="flex items-center space-x-1 text-[var(--text-secondary)] bg-[var(--hover-item)] px-2 py-0.5 rounded text-[10px] font-mono border border-[var(--border-subtle)]">
+              <Folder className="w-3 h-3 text-[#007AFF]" />
+              <span>{dirStats.path}</span>
+              <span className="text-[var(--text-tertiary)]">·</span>
+              <span>{dirStats.fileCount} 项文件</span>
+            </span>
           </div>
+
           <div className="flex items-center space-x-3 text-[10.5px] flex-shrink-0">
             <span>{tabs.length} 个会话</span>
             <span className="text-[var(--text-tertiary)] font-mono">
@@ -211,7 +311,7 @@ export function App() {
         </div>
       </div>
 
-      {/* macOS Sheet Modal */}
+      {/* macOS Sheet Modal with Hardware Fingerprint Password Vault */}
       <HostModal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
