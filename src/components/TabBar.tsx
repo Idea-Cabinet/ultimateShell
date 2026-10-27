@@ -126,7 +126,7 @@ export const TabBar: React.FC<Props> = ({
         {/* Sidebar Toggle Button */}
         <button
           onClick={onToggleSidebar}
-          title={isSidebarCollapsed ? "展开侧边栏 (Cmd+B)" : "收起侧边栏 (Cmd+B)"}
+          title={isSidebarCollapsed ? "展开侧边栏 (Cmd+B: 浏览与连接服务器)" : "收起侧边栏 (Cmd+B: 最大化终端显示空间)"}
           className="h-7 w-7 flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--hover-item)] rounded-[6px] transition active:scale-[0.95] flex-shrink-0 mr-1"
         >
           <PanelLeft className="w-4 h-4" strokeWidth={1.75} />
@@ -144,6 +144,7 @@ export const TabBar: React.FC<Props> = ({
                 key={tab.id}
                 onClick={() => onSelectTab(tab.id)}
                 onContextMenu={(e) => handleContextMenu(e, tab.id)}
+                title={tab.isLocal ? "本地 Shell 会话 (右键打开菜单)" : `远程主机: ${tab.hostProfile?.username}@${tab.hostProfile?.host} (右键打开菜单)`}
                 className={`group h-8 px-2.5 flex items-center space-x-2 text-[12px] rounded-[7px] cursor-pointer transition max-w-[200px] min-w-[120px] ${
                   isActive
                     ? "bg-[var(--active-tab-bg)] text-[var(--text-primary)] shadow-[var(--active-tab-shadow)] border border-[var(--border-subtle)] font-medium"
@@ -151,9 +152,13 @@ export const TabBar: React.FC<Props> = ({
                 }`}
               >
                 {tab.isLocal ? (
-                  <Terminal className={`w-3.5 h-3.5 flex-shrink-0 ${isActive ? "text-[#30D158]" : "text-[var(--text-tertiary)]"}`} strokeWidth={1.75} />
+                  <span title="本地 Shell 终端" className="inline-flex items-center">
+                    <Terminal className={`w-3.5 h-3.5 flex-shrink-0 ${isActive ? "text-[#30D158]" : "text-[var(--text-tertiary)]"}`} strokeWidth={1.75} />
+                  </span>
                 ) : (
-                  <Server className={`w-3.5 h-3.5 flex-shrink-0 ${isActive ? "text-[#007AFF]" : "text-[var(--text-tertiary)]"}`} strokeWidth={1.75} />
+                  <span title="SSH 远程云服务器终端" className="inline-flex items-center">
+                    <Server className={`w-3.5 h-3.5 flex-shrink-0 ${isActive ? "text-[#007AFF]" : "text-[var(--text-tertiary)]"}`} strokeWidth={1.75} />
+                  </span>
                 )}
                 <span className="truncate flex-1 tracking-tight">{tab.title}</span>
                 <button
@@ -161,6 +166,7 @@ export const TabBar: React.FC<Props> = ({
                     e.stopPropagation();
                     onCloseTab(tab.id);
                   }}
+                  title="关闭标签页 (彻底杀死底层连接进程)"
                   className={`p-0.5 rounded-full hover:bg-[var(--hover-item)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition ${
                     isActive ? "opacity-80 hover:opacity-100" : "opacity-0 group-hover:opacity-80"
                   }`}
@@ -173,7 +179,7 @@ export const TabBar: React.FC<Props> = ({
 
           <button
             onClick={onNewLocalTab}
-            title="新建本地终端"
+            title="新建本地终端 (打开新命令行窗口)"
             className="h-7 w-7 flex items-center justify-center text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--hover-item)] rounded-[6px] transition active:scale-[0.95]"
           >
             <Plus className="w-3.5 h-3.5" strokeWidth={2} />

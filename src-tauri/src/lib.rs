@@ -1,5 +1,6 @@
 mod hosts;
 mod pty;
+mod ssh_auth;
 mod sftp;
 mod vault;
 

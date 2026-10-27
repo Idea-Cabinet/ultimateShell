@@ -3,21 +3,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
-#[derive(Clone, Default)]
-pub struct PasswordTracker {
-    pub is_tracking: bool,
-    pub current_input: String,
-    pub tentative_password: Option<String>,
-    pub initial_password: Option<String>,
-    pub host_id: Option<String>,
-    pub host_name: Option<String>,
-}
+use crate::ssh_auth::PasswordTracker;
 
 #[derive(Clone, Serialize)]
 pub struct PasswordUpdatePayload {
@@ -73,6 +63,8 @@ impl PtyManager {
 
         let pair = pty_system.openpty(size).map_err(|e| e.to_string())?;
 
+        let auth_token = uuid::Uuid::new_v4().to_string();
+        let success_marker = format!("\x1b]777;ultimateshell-auth-{}\x07", auth_token);
         let mut cmd = if opts.is_local {
             let shell = std::env::var("SHELL").unwrap_or_else(|_| {
                 if cfg!(target_os = "windows") {
@@ -94,6 +86,10 @@ impl PtyManager {
             let mut c = CommandBuilder::new("ssh");
             c.arg("-o");
             c.arg("StrictHostKeyChecking=accept-new");
+            c.arg("-o");
+            c.arg("PermitLocalCommand=yes");
+            c.arg("-o");
+            c.arg(format!("LocalCommand=printf '\\033]777;ultimateshell-auth-{}\\007'", auth_token));
             c.arg("-p");
             c.arg(port.to_string());
 
@@ -129,21 +125,18 @@ impl PtyManager {
             .and_then(|hid| crate::vault::get_password(hid));
 
         let tracker = if !opts.is_local && opts.host_id.is_some() {
-            Some(Arc::new(Mutex::new(PasswordTracker {
-                is_tracking: saved_password.is_none(),
-                current_input: String::new(),
-                tentative_password: None,
-                initial_password: saved_password.clone(),
-                host_id: opts.host_id.clone(),
-                host_name: opts.host_name.clone(),
-            })))
+            Some(Arc::new(Mutex::new(PasswordTracker::new(
+                saved_password, opts.host_id.clone(), opts.host_name.clone(),
+            ))))
         } else {
             None
         };
+        if let Some(ref tracker) = tracker {
+            tracker.lock().unwrap().set_success_marker(success_marker);
+        }
         let tracker_clone = tracker.clone();
 
         let writer_clone = Arc::clone(&writer);
-        let password_sent = Arc::new(AtomicBool::new(false));
 
         thread::spawn(move || {
             let mut buf = [0u8; 4096];
@@ -151,55 +144,22 @@ impl PtyManager {
                 if n == 0 {
                     break;
                 }
-                let chunk = String::from_utf8_lossy(&buf[..n]).to_string();
-                let lower = chunk.to_lowercase();
-
-                // 1. Auto-fill password if SSH prompts for password
-                if let Some(ref pwd) = saved_password {
-                    if !password_sent.load(Ordering::SeqCst) {
-                        if lower.contains("password:") || lower.contains("密码:") {
-                            password_sent.store(true, Ordering::SeqCst);
-                            let pwd_to_send = format!("{}\n", pwd);
-                            let w = Arc::clone(&writer_clone);
-                            thread::spawn(move || {
-                                thread::sleep(Duration::from_millis(300));
-                                if let Ok(mut lock) = w.lock() {
-                                    let _ = lock.write_all(pwd_to_send.as_bytes());
-                                    let _ = lock.flush();
-                                }
-                            });
+                let mut chunk = String::from_utf8_lossy(&buf[..n]).to_string();
+                let mut is_login_success = false;
+                if let Some(ref tracker) = tracker_clone {
+                    if let Ok(mut tracker) = tracker.lock() {
+                        chunk = tracker.filter_output(&chunk);
+                        is_login_success = tracker.login_succeeded();
+                        if let Some(password) = tracker.observe_output(&chunk) {
+                            // SSH disables echo before emitting its password prompt.
+                            // Send once, without a delayed task racing manual input.
+                            if let Ok(mut writer) = writer_clone.lock() {
+                                let _ = writer.write_all(format!("{}\r", password).as_bytes());
+                                let _ = writer.flush();
+                            }
                         }
                     }
                 }
-
-                // 2. If password rejected / permission denied:
-                // DO NOT RETRY! Let the user type manually, and start tracking their input.
-                if lower.contains("permission denied")
-                    || lower.contains("please try again")
-                    || lower.contains("authentication failed")
-                    || lower.contains("access denied")
-                {
-                    if let Some(ref t) = tracker_clone {
-                        if let Ok(mut lock) = t.lock() {
-                            lock.is_tracking = true;
-                            lock.tentative_password = None;
-                            lock.current_input.clear();
-                        }
-                    }
-                }
-
-                // 3. Detect login success:
-                let is_password_prompt = lower.contains("password:") || lower.contains("密码:");
-                let is_login_success = !is_password_prompt && (
-                    lower.contains("last login:")
-                    || lower.contains("welcome to")
-                    || lower.contains("linux ")
-                    || (lower.contains("@") && (chunk.contains("$ ") || chunk.contains("# ") || chunk.ends_with('$') || chunk.ends_with('#')))
-                    || chunk.contains("]$")
-                    || chunk.contains("]#")
-                    || chunk.contains("~#")
-                    || chunk.contains("~$")
-                );
 
                 if is_login_success {
                     if let Some(ref t) = tracker_clone {
@@ -263,22 +223,7 @@ impl PtyManager {
         if let Some(session) = sessions.get(session_id) {
             if let Some(ref t) = session.password_tracker {
                 if let Ok(mut lock) = t.lock() {
-                    if lock.is_tracking {
-                        for c in data.chars() {
-                            if c == '\r' || c == '\n' {
-                                if !lock.current_input.is_empty() {
-                                    lock.tentative_password = Some(lock.current_input.clone());
-                                    lock.current_input.clear();
-                                }
-                            } else if c == '\x08' || c == '\x7f' {
-                                lock.current_input.pop();
-                            } else if c == '\x03' || c == '\x15' {
-                                lock.current_input.clear();
-                            } else if !c.is_control() {
-                                lock.current_input.push(c);
-                            }
-                        }
-                    }
+                    lock.record_input(data);
                 }
             }
 

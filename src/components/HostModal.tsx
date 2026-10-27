@@ -101,6 +101,7 @@ export const HostModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialHos
           </div>
           <button
             onClick={onClose}
+            title="关闭窗口 (Esc: 取消并返回)"
             className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)] p-1.5 hover:bg-[var(--hover-item)] rounded-full active:scale-[0.95]"
           >
             <X className="w-4 h-4" strokeWidth={2} />
@@ -209,7 +210,7 @@ export const HostModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialHos
                 type="button"
                 onClick={handleSelectPrivateKey}
                 className="px-3 py-1.5 bg-[var(--active-item)] hover:bg-[var(--hover-item)] border border-[var(--border-subtle)] hover:border-[var(--border-strong)] rounded-[8px] text-[12px] text-[var(--text-primary)] flex items-center space-x-1.5 flex-shrink-0 active:scale-[0.97] transition-all"
-                title="打开系统文件选择器"
+                title="选择私钥文件 (从系统 Finder 浏览并载入私钥)"
               >
                 <FolderOpen className="w-3.5 h-3.5 text-[#007AFF]" />
                 <span>选择文件</span>

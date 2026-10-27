@@ -10,7 +10,7 @@ import { ResolvedTheme } from "../hooks/useTheme";
 const DARK_THEME = {
   background: "#121214",
   foreground: "#f5f5f7",
-  cursor: "#0A84FF",
+  cursor: "#f5f5f7",
   cursorAccent: "#121214",
   selectionBackground: "rgba(10, 132, 255, 0.3)",
   black: "#1e1e24",
@@ -34,7 +34,7 @@ const DARK_THEME = {
 const LIGHT_THEME = {
   background: "#ffffff",
   foreground: "#1c1c1e",
-  cursor: "#007AFF",
+  cursor: "#1c1c1e",
   cursorAccent: "#ffffff",
   selectionBackground: "rgba(0, 122, 255, 0.25)",
   black: "#24292f",
@@ -72,10 +72,9 @@ export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme
     const currentTheme = resolvedTheme === "dark" ? DARK_THEME : LIGHT_THEME;
 
     const term = new Terminal({
-      cursorBlink: true,
+      cursorBlink: false,
       cursorStyle: "block",
       cursorInactiveStyle: "outline",
-      cursorWidth: 2,
       fontSize: 13.5,
       lineHeight: 1.25,
       fontFamily: 'ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace',
@@ -90,14 +89,7 @@ export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme
 
     term.open(containerRef.current);
     fitAddon.fit();
-    term.focus();
-
-    // Ensure terminal grabs focus reliably after mount
-    setTimeout(() => {
-      try {
-        term.focus();
-      } catch (_) {}
-    }, 100);
+    if (isActive) term.focus();
 
     terminalInstanceRef.current = term;
     fitAddonRef.current = fitAddon;
@@ -106,40 +98,48 @@ export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme
       invoke("pty_write", { sessionId: session.id, data }).catch(console.error);
     });
 
+    let disposed = false;
+    let spawned = false;
     let unlistenData: (() => void) | null = null;
     let unlistenExit: (() => void) | null = null;
 
-    listen<string>(`pty-data-${session.id}`, (event) => {
-      term.write(event.payload);
-    }).then((unlisten) => {
-      unlistenData = unlisten;
-    });
+    const startSession = async () => {
+      try {
+        const offData = await listen<string>(`pty-data-${session.id}`, (event) => {
+          if (!disposed) term.write(event.payload);
+        });
+        if (disposed) { offData(); return; }
+        unlistenData = offData;
+        const offExit = await listen(`pty-exit-${session.id}`, () => {
+          if (!disposed) term.write("\r\n\x1b[90m[会话已结束]\x1b[0m\r\n");
+        });
+        if (disposed) { offExit(); return; }
+        unlistenExit = offExit;
 
-    listen(`pty-exit-${session.id}`, () => {
-      term.write("\r\n\x1b[90m[会话已结束]\x1b[0m\r\n");
-    }).then((unlisten) => {
-      unlistenExit = unlisten;
-    });
+        const cols = term.cols || 80;
+        const rows = term.rows || 24;
 
-    const cols = term.cols || 80;
-    const rows = term.rows || 24;
-
-    invoke("pty_spawn", {
-      opts: {
-        session_id: session.id,
-        is_local: session.isLocal,
-        host_id: session.hostProfile?.id,
-        host_name: session.hostProfile?.name || session.title,
-        host: session.hostProfile?.host,
-        port: session.hostProfile?.port,
-        username: session.hostProfile?.username,
-        identity_file: session.hostProfile?.identity_file,
-        cols,
-        rows,
-      },
-    }).catch((err) => {
-      term.write(`\r\n\x1b[31m连接失败: ${err}\x1b[0m\r\n`);
-    });
+        await invoke("pty_spawn", {
+          opts: {
+            session_id: session.id,
+            is_local: session.isLocal,
+            host_id: session.hostProfile?.id,
+            host_name: session.hostProfile?.name || session.title,
+            host: session.hostProfile?.host,
+            port: session.hostProfile?.port,
+            username: session.hostProfile?.username,
+            identity_file: session.hostProfile?.identity_file,
+            cols,
+            rows,
+          },
+        });
+        spawned = true;
+        if (disposed) await invoke("pty_close", { sessionId: session.id });
+      } catch (err) {
+        if (!disposed) term.write(`\r\n\x1b[31m连接失败: ${err}\x1b[0m\r\n`);
+      }
+    };
+    void startSession();
 
     const handleResize = () => {
       if (!fitAddonRef.current || !terminalInstanceRef.current) return;
@@ -155,14 +155,22 @@ export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme
       } catch (_) {}
     };
 
+    const resizeObserver = new ResizeObserver(() => {
+      if (containerRef.current?.getClientRects().length) handleResize();
+    });
+    resizeObserver.observe(containerRef.current);
     window.addEventListener("resize", handleResize);
 
     return () => {
+      disposed = true;
+      resizeObserver.disconnect();
       window.removeEventListener("resize", handleResize);
       onDataDisposable.dispose();
       if (unlistenData) unlistenData();
       if (unlistenExit) unlistenExit();
-      invoke("pty_close", { sessionId: session.id }).catch(() => {});
+      if (spawned) invoke("pty_close", { sessionId: session.id }).catch(() => {});
+      terminalInstanceRef.current = null;
+      fitAddonRef.current = null;
       term.dispose();
     };
   }, [session.id]);
@@ -176,12 +184,13 @@ export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme
 
   useEffect(() => {
     if (isActive && fitAddonRef.current && terminalInstanceRef.current) {
-      setTimeout(() => {
+      const timer = setTimeout(() => {
         try {
           fitAddonRef.current?.fit();
           terminalInstanceRef.current?.focus();
         } catch (_) {}
       }, 30);
+      return () => clearTimeout(timer);
     }
   }, [isActive]);
 
@@ -195,7 +204,7 @@ export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme
       onFocus={() => {
         terminalInstanceRef.current?.focus();
       }}
-      className={`w-full h-full p-2 bg-[var(--bg-terminal)] border-none outline-none cursor-text ${isActive ? "block" : "hidden"}`}
+      className={`w-full h-full bg-[var(--bg-terminal)] border-none outline-none cursor-text ${isActive ? "block" : "hidden"}`}
       style={{ outline: "none", border: "none" }}
     />
   );

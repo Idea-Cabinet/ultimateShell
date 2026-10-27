@@ -149,42 +149,14 @@ button:active, [role="button"]:active, .apple-clickable:active {
   }
 }
 
-/* Global focus ring reset to eliminate unwanted thick black outlines */
-*,
-*::before,
-*::after,
-:focus,
-:focus-visible,
-:focus-within {
-  outline: none !important;
-  outline-color: transparent !important;
-  -webkit-focus-ring-color: transparent !important;
-}
-
-/* xterm terminal container tuning */
+/* Reset focus decoration only on terminal containers, not xterm's cursor spans. */
 .xterm,
 .xterm-viewport,
 .xterm-screen,
 .xterm-helper-textarea {
-  outline: none !important;
-  outline-color: transparent !important;
-  border: none !important;
-  box-shadow: none !important;
-  -webkit-focus-ring-color: transparent !important;
-}
-
-/* Ensure xterm cursor is always boldly visible (block & outline) */
-.xterm .xterm-cursor,
-.xterm .xterm-cursor-block,
-.xterm .xterm-cursor-bar {
-  opacity: 1 !important;
-  visibility: visible !important;
-}
-
-.xterm .xterm-cursor-outline {
-  outline: 1.5px solid #007AFF !important;
-  opacity: 1 !important;
-  visibility: visible !important;
+  outline: none;
+  border: none;
+  box-shadow: none;
 }
 
 .xterm {

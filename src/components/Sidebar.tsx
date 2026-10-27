@@ -20,6 +20,7 @@ import {
   PanelLeftClose,
   ArrowUpDown,
   Lock,
+  X,
 } from "lucide-react";
 
 export type SortMode = "recent" | "newest" | "oldest" | "name";
@@ -133,11 +134,11 @@ export const Sidebar: React.FC<Props> = ({
   });
 
   const quickCommands = [
-    { label: "性能", icon: Activity, cmd: "htop\n" },
-    { label: "磁盘", icon: HardDrive, cmd: "df -h\n" },
-    { label: "内存", icon: Cpu, cmd: "free -m\n" },
-    { label: "容器", icon: Layers, cmd: "docker ps\n" },
-    { label: "端口", icon: Network, cmd: "ss -tuln\n" },
+    { label: "性能", icon: Activity, cmd: "htop\n", desc: "性能监测 (htop: 查看 CPU/内存/进程占用)" },
+    { label: "磁盘", icon: HardDrive, cmd: "df -h\n", desc: "磁盘空间 (df -h: 查看各分区剩余容量)" },
+    { label: "内存", icon: Cpu, cmd: "free -m\n", desc: "内存状态 (free -m: 查看物理及交换内存)" },
+    { label: "容器", icon: Layers, cmd: "docker ps\n", desc: "容器列表 (docker ps: 查看活跃容器状态)" },
+    { label: "端口", icon: Network, cmd: "ss -tuln\n", desc: "网络端口 (ss -tuln: 查看系统监听服务端口)" },
   ];
 
   if (isCollapsed) return null;
@@ -164,21 +165,21 @@ export const Sidebar: React.FC<Props> = ({
         <div className="flex items-center space-x-0.5">
           <button
             onClick={onImportFinalShell}
-            title="一键解密导入 FinalShell 历史连接与凭据"
+            title="导入 FinalShell (一键解密导入历史配置与密码)"
             className="p-1 rounded-md text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--hover-item)] transition active:scale-[0.95]"
           >
             <ArrowDownToLine className="w-3.5 h-3.5" strokeWidth={1.75} />
           </button>
           <button
             onClick={onNewHost}
-            title="新建服务器连接"
+            title="新建服务器 (配置新主机及密码)"
             className="p-1 rounded-md text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--hover-item)] transition active:scale-[0.95]"
           >
             <Plus className="w-3.5 h-3.5" strokeWidth={2} />
           </button>
           <button
             onClick={() => onCollapse(true)}
-            title="收起侧边栏 (Cmd+B)"
+            title="收起侧边栏 (快捷键: Cmd+B)"
             className="p-1 rounded-md text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--hover-item)] transition active:scale-[0.95]"
           >
             <PanelLeftClose className="w-3.5 h-3.5" strokeWidth={1.75} />
@@ -195,15 +196,24 @@ export const Sidebar: React.FC<Props> = ({
             placeholder="搜索主机或 IP..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-8 pr-2.5 py-1 text-[12px] bg-[var(--input-bg)] text-[var(--text-primary)] placeholder-[var(--text-tertiary)] border border-[var(--border-subtle)] rounded-md focus:outline-none focus:border-[#007AFF] focus:ring-1 focus:ring-[#007AFF]/40 transition-all font-normal"
+            className="w-full pl-8 pr-7 py-1 text-[12px] bg-[var(--input-bg)] text-[var(--text-primary)] placeholder-[var(--text-tertiary)] border border-[var(--border-subtle)] rounded-md focus:outline-none focus:border-[#007AFF] focus:ring-1 focus:ring-[#007AFF]/40 transition-all font-normal"
           />
+          {searchTerm && (
+            <button
+              onClick={() => setSearchTerm("")}
+              title="清除搜索关键字"
+              className="absolute right-2 p-0.5 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          )}
         </div>
 
         {/* Sort Button */}
         <div className="relative">
           <button
             onClick={() => setShowSortMenu(!showSortMenu)}
-            title="服务器排序"
+            title="切换排序方式 (最近连接/最新创建/名称)"
             className={`p-1.5 rounded-md border border-[var(--border-subtle)] transition active:scale-[0.95] ${
               showSortMenu
                 ? "bg-[#007AFF] text-white"
@@ -287,7 +297,10 @@ export const Sidebar: React.FC<Props> = ({
                             className="flex items-center space-x-2 truncate flex-1"
                             onClick={() => onConnect(host)}
                           >
-                            <div className="relative flex-shrink-0">
+                            <div
+                              title={isConnected ? "已建立连接 (双击重新打开会话)" : "双击打开终端连接"}
+                              className="relative flex-shrink-0"
+                            >
                               <Server
                                 className={`w-3.5 h-3.5 transition ${
                                   isConnected ? "text-[#007AFF]" : "text-[var(--text-secondary)]"
@@ -296,7 +309,7 @@ export const Sidebar: React.FC<Props> = ({
                               />
                               {/* Requirement 3: Only display green dot on actively connected servers! */}
                               {isConnected && (
-                                <span className="absolute -bottom-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse ring-1 ring-[var(--bg-app)]" />
+                                <span title="当前处于活跃连接状态" className="absolute -bottom-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse ring-1 ring-[var(--bg-app)]" />
                               )}
                             </div>
                             <div className="truncate flex-1">
@@ -305,7 +318,7 @@ export const Sidebar: React.FC<Props> = ({
                                   {host.name}
                                 </span>
                                 {host.has_password && (
-                                  <span title="已加密记住密码" className="inline-flex items-center">
+                                  <span title="已加密记住密码 (AES-256-GCM 硬件锁保护)" className="inline-flex items-center">
                                     <Lock className="w-2.5 h-2.5 text-[var(--text-tertiary)] flex-shrink-0" />
                                   </span>
                                 )}
@@ -324,7 +337,7 @@ export const Sidebar: React.FC<Props> = ({
                                 onEdit(host);
                               }}
                               className="p-1 text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--active-item)] rounded transition"
-                              title="配置连接"
+                              title="配置连接 (修改主机、端口及密码)"
                             >
                               <SlidersHorizontal className="w-3 h-3" strokeWidth={1.75} />
                             </button>
@@ -334,7 +347,7 @@ export const Sidebar: React.FC<Props> = ({
                                 onDelete(host.id);
                               }}
                               className="p-1 text-[var(--text-secondary)] hover:text-rose-500 hover:bg-rose-500/10 rounded transition"
-                              title="移除"
+                              title="移除服务器 (从侧边栏删除主机)"
                             >
                               <Trash2 className="w-3 h-3" strokeWidth={1.75} />
                             </button>
@@ -362,6 +375,7 @@ export const Sidebar: React.FC<Props> = ({
               <button
                 key={qc.label}
                 onClick={() => onRunQuickCommand(qc.cmd)}
+                title={qc.desc}
                 className="flex items-center space-x-1.5 px-2 py-1 bg-[var(--active-tab-bg)] hover:bg-[var(--hover-item)] border border-[var(--border-subtle)] rounded-[6px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] text-[11px] font-medium transition active:scale-[0.96]"
               >
                 <Icon className="w-3 h-3 text-[var(--text-tertiary)]" strokeWidth={1.75} />

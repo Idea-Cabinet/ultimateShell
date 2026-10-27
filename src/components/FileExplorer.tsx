@@ -480,7 +480,7 @@ export function FileExplorer({
             onClick={handleGoBack}
             disabled={historyIdx <= 0}
             className="p-1 rounded hover:bg-[var(--hover-item)] disabled:opacity-30 disabled:hover:bg-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
-            title="后退 (Back)"
+            title="后退 (返回上一个浏览历史路径)"
           >
             <ArrowLeft className="w-3.5 h-3.5" />
           </button>
@@ -488,7 +488,7 @@ export function FileExplorer({
             onClick={handleGoForward}
             disabled={historyIdx >= history.length - 1}
             className="p-1 rounded hover:bg-[var(--hover-item)] disabled:opacity-30 disabled:hover:bg-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
-            title="前进 (Forward)"
+            title="前进 (进入下一个浏览历史路径)"
           >
             <ArrowRight className="w-3.5 h-3.5" />
           </button>
@@ -496,21 +496,21 @@ export function FileExplorer({
             onClick={handleGoUp}
             disabled={!parentPath || parentPath === currentPath}
             className="p-1 rounded hover:bg-[var(--hover-item)] disabled:opacity-30 disabled:hover:bg-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
-            title="上一级目录 (Up)"
+            title="上一级目录 (跳转到父目录: ..)"
           >
             <ArrowUp className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={handleRefresh}
             className="p-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
-            title="刷新当前目录 (Refresh)"
+            title="刷新当前目录 (重新拉取文件与文件夹列表)"
           >
             <RotateCw className={`w-3.5 h-3.5 ${loading ? "animate-spin text-[#007AFF]" : ""}`} />
           </button>
           <button
             onClick={handleGoHome}
             className="p-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
-            title="主目录 (~)"
+            title="主目录 (跳转至用户 ~ 路径)"
           >
             <Home className="w-3.5 h-3.5" />
           </button>
@@ -577,6 +577,7 @@ export function FileExplorer({
             {searchQuery && (
               <button
                 onClick={() => setSearchQuery("")}
+                title="清除筛选内容"
                 className="absolute right-1.5 p-0.5 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
               >
                 <X className="w-2.5 h-2.5" />
@@ -592,7 +593,7 @@ export function FileExplorer({
                 ? "bg-[#007AFF]/15 text-[#007AFF]"
                 : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--hover-item)]"
             }`}
-            title={showHidden ? "隐藏以点开头的文件" : "显示隐藏文件 (.dotfiles)"}
+            title={showHidden ? "隐藏以点开头的文件 (隐藏 .dotfiles)" : "显示隐藏文件 (查看 .bashrc/.ssh 等隐藏项)"}
           >
             {showHidden ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
           </button>
@@ -605,7 +606,7 @@ export function FileExplorer({
                 ? "bg-[var(--hover-item)] text-[var(--text-primary)]"
                 : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--hover-item)]"
             }`}
-            title={showTreePane ? "收起左侧目录树" : "展开左侧目录树"}
+            title={showTreePane ? "收起左侧目录树 (增大详细列表区域)" : "展开左侧目录树 (查看树状结构)"}
           >
             <Layers className="w-3.5 h-3.5" />
           </button>
@@ -614,7 +615,7 @@ export function FileExplorer({
           <button
             onClick={onToggleMaximize}
             className="p-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
-            title={isMaximized ? "还原窗口" : "最大化资源管理器"}
+            title={isMaximized ? "还原视口高度 (恢复半屏分栏)" : "最大化文件树 (全屏浏览文件系统)"}
           >
             {isMaximized ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
           </button>
@@ -623,7 +624,7 @@ export function FileExplorer({
           <button
             onClick={onClose}
             className="p-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
-            title="关闭文件管理器"
+            title="关闭文件管理器 (可在底部状态栏随时再次展开)"
           >
             <X className="w-3.5 h-3.5" />
           </button>
@@ -679,6 +680,7 @@ export function FileExplorer({
               <div className="h-7 bg-[var(--bg-card)] border-b border-[var(--border-subtle)] flex items-center text-[11px] text-[var(--text-tertiary)] font-medium px-3 select-none flex-shrink-0">
                 <div
                   onClick={() => handleSort("name")}
+                  title="文件/目录名称 (点击按名称升降序排列)"
                   className="flex-1 flex items-center space-x-1 cursor-pointer hover:text-[var(--text-primary)] truncate"
                 >
                   <span>名称</span>
@@ -689,6 +691,7 @@ export function FileExplorer({
 
                 <div
                   onClick={() => handleSort("mtime")}
+                  title="最后修改日期 (点击按时间先后顺序排序)"
                   className="w-36 flex items-center space-x-1 cursor-pointer hover:text-[var(--text-primary)] truncate pl-2"
                 >
                   <span>修改日期</span>
@@ -699,6 +702,7 @@ export function FileExplorer({
 
                 <div
                   onClick={() => handleSort("file_type")}
+                  title="文件类型说明 (点击归类排序)"
                   className="w-28 flex items-center space-x-1 cursor-pointer hover:text-[var(--text-primary)] truncate pl-2"
                 >
                   <span>类型</span>
@@ -709,6 +713,7 @@ export function FileExplorer({
 
                 <div
                   onClick={() => handleSort("size")}
+                  title="文件大小 (点击按字节大小排序)"
                   className="w-24 text-right flex items-center justify-end space-x-1 cursor-pointer hover:text-[var(--text-primary)] truncate pr-2"
                 >
                   <span>大小</span>
@@ -717,8 +722,8 @@ export function FileExplorer({
                   )}
                 </div>
 
-                <div className="w-24 truncate pl-2">权限</div>
-                <div className="w-20 truncate pl-2">所有者</div>
+                <div className="w-24 truncate pl-2" title="POSIX 权限掩码 (如 drwxr-xr-x)">权限</div>
+                <div className="w-20 truncate pl-2" title="文件拥有者与群组 (UID:GID)">所有者</div>
               </div>
 
               {/* Table Rows */}
@@ -820,7 +825,7 @@ export function FileExplorer({
             <button
               onClick={() => onSendToTerminal(`cd "${selectedEntry.path}"\n`)}
               className="px-2 py-0.5 rounded bg-[var(--hover-item)] hover:bg-[#007AFF]/15 hover:text-[#007AFF] text-[10.5px] flex items-center space-x-1 transition-colors"
-              title="在终端中跳转到此目录"
+              title="在活跃终端自动输入 cd 并跳转至此路径"
             >
               <Terminal className="w-3 h-3" />
               <span>在终端 cd</span>
@@ -847,6 +852,7 @@ export function FileExplorer({
                   loadDirectory(contextMenu.entry.path);
                   setContextMenu(null);
                 }}
+                title="打开并载入此文件夹"
                 className="w-full px-3 py-1.5 text-left hover:bg-[#007AFF] hover:text-white flex items-center space-x-2 text-[var(--text-primary)]"
               >
                 <FolderOpen className="w-3.5 h-3.5" />
@@ -857,6 +863,7 @@ export function FileExplorer({
                   onSendToTerminal(`cd "${contextMenu.entry.path}"\n`);
                   setContextMenu(null);
                 }}
+                title="在终端 Shell 中执行 cd 进入此路径"
                 className="w-full px-3 py-1.5 text-left hover:bg-[#007AFF] hover:text-white flex items-center space-x-2 text-[var(--text-primary)]"
               >
                 <Terminal className="w-3.5 h-3.5" />
@@ -869,6 +876,7 @@ export function FileExplorer({
                 openFilePreview(contextMenu.entry);
                 setContextMenu(null);
               }}
+              title="在弹窗中查看只读 UTF-8 文本内容"
               className="w-full px-3 py-1.5 text-left hover:bg-[#007AFF] hover:text-white flex items-center space-x-2 text-[var(--text-primary)]"
             >
               <Eye className="w-3.5 h-3.5" />
@@ -883,6 +891,7 @@ export function FileExplorer({
               navigator.clipboard.writeText(contextMenu.entry.path);
               setContextMenu(null);
             }}
+            title="复制此项完整绝对路径到剪贴板"
             className="w-full px-3 py-1.5 text-left hover:bg-[#007AFF] hover:text-white flex items-center space-x-2 text-[var(--text-primary)]"
           >
             <Copy className="w-3.5 h-3.5" />
@@ -894,6 +903,7 @@ export function FileExplorer({
               navigator.clipboard.writeText(contextMenu.entry.name);
               setContextMenu(null);
             }}
+            title="仅复制文件名到剪贴板"
             className="w-full px-3 py-1.5 text-left hover:bg-[#007AFF] hover:text-white flex items-center space-x-2 text-[var(--text-primary)]"
           >
             <Copy className="w-3.5 h-3.5" />
@@ -920,6 +930,7 @@ export function FileExplorer({
               <div className="flex items-center space-x-2">
                 <button
                   onClick={() => navigator.clipboard.writeText(previewContent)}
+                  title="一键复制全部文本内容到剪贴板"
                   className="px-2.5 py-1 rounded bg-[var(--hover-item)] hover:bg-[#007AFF]/15 hover:text-[#007AFF] text-[11.5px] flex items-center space-x-1.5 transition-colors"
                 >
                   <Copy className="w-3.5 h-3.5" />
@@ -927,6 +938,7 @@ export function FileExplorer({
                 </button>
                 <button
                   onClick={() => setPreviewFile(null)}
+                  title="关闭预览弹窗 (Esc)"
                   className="p-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
                 >
                   <X className="w-4 h-4" />

@@ -46,13 +46,16 @@ export function App() {
   const [passwordPrompt, setPasswordPrompt] = useState<PasswordUpdateEvent | null>(null);
 
   useEffect(() => {
+    let disposed = false;
     let unlisten: (() => void) | null = null;
     listen<PasswordUpdateEvent>("ssh-password-update-prompt", (event) => {
-      setPasswordPrompt(event.payload);
+      if (!disposed) setPasswordPrompt(event.payload);
     }).then((fn) => {
-      unlisten = fn;
+      if (disposed) fn();
+      else unlisten = fn;
     });
     return () => {
+      disposed = true;
       if (unlisten) unlisten();
     };
   }, []);
@@ -387,14 +390,20 @@ export function App() {
         {/* Bottom Status Bar with Current Path & File Tree Toggle Button */}
         <div className="h-6 apple-vibrancy-toolbar border-t border-[var(--border-subtle)] px-3 flex items-center justify-between text-[11px] text-[var(--text-tertiary)] select-none">
           <div className="flex items-center space-x-3 truncate">
-            <span className="flex items-center space-x-1.5 flex-shrink-0">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#30D158]"></span>
+            <span
+              title={activeTab?.connected ? "会话状态：已正常连接并就绪" : "会话状态：已断开或已退出"}
+              className="flex items-center space-x-1.5 flex-shrink-0 cursor-default"
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${activeTab?.connected ? "bg-[#30D158]" : "bg-zinc-400"}`}></span>
               <span className="text-[var(--text-secondary)] font-medium">
                 {activeTab ? activeTab.title : "就绪"}
               </span>
             </span>
             {activeTab?.hostProfile && (
-              <span className="text-[var(--text-tertiary)] font-mono text-[10.5px] truncate">
+              <span
+                title={`远程连接目标: ${activeTab.hostProfile.username}@${activeTab.hostProfile.host}:${activeTab.hostProfile.port}`}
+                className="text-[var(--text-tertiary)] font-mono text-[10.5px] truncate cursor-default"
+              >
                 {activeTab.hostProfile.username}@{activeTab.hostProfile.host}:{activeTab.hostProfile.port}
               </span>
             )}
@@ -410,7 +419,7 @@ export function App() {
                   ? "bg-[#007AFF]/15 text-[#007AFF] border-[#007AFF]/40 font-medium"
                   : "bg-[var(--hover-item)] text-[var(--text-secondary)] border-[var(--border-subtle)] hover:border-[var(--border-strong)]"
               }`}
-              title="点击展开/收起可视化文件树与资源管理器"
+              title="展开/收起可视化文件树 (Windows/SFTP 风格按需懒加载)"
             >
               <Folder className="w-3 h-3 text-[#007AFF]" />
               <span>{dirStats.path}</span>
@@ -423,8 +432,13 @@ export function App() {
           </div>
 
           <div className="flex items-center space-x-3 text-[10.5px] flex-shrink-0">
-            <span>{tabs.length} 个会话</span>
-            <span className="text-[var(--text-tertiary)] font-mono">
+            <span title="当前标签栏中打开的所有终端会话总数" className="cursor-default">
+              {tabs.length} 个会话
+            </span>
+            <span
+              title={`当前色彩外观：${resolvedTheme === "dark" ? "深色暗黑主题" : "浅色明亮主题"}`}
+              className="text-[var(--text-tertiary)] font-mono cursor-default"
+            >
               {resolvedTheme === "dark" ? "深色外观" : "浅色外观"}
             </span>
           </div>
@@ -439,7 +453,7 @@ export function App() {
               <div className="w-10 h-10 rounded-xl bg-[#007AFF]/15 text-[#007AFF] flex items-center justify-center flex-shrink-0">
                 <KeyRound className="w-5 h-5" />
               </div>
-              <div className="flex-1 truncate">
+              <div className="flex-1 min-w-0">
                 <div className="text-[14px] font-semibold tracking-tight">更新服务器登录密码？</div>
                 <div className="text-[12px] text-[var(--text-secondary)] mt-1.5 leading-relaxed">
                   检测到你已通过新密码成功登录「
@@ -463,7 +477,7 @@ export function App() {
                 className="px-4 py-1.5 text-[12.5px] font-medium text-white bg-[#007AFF] hover:bg-[#0A84FF] rounded-[8px] shadow-[0_1px_3px_rgba(0,122,255,0.4)] active:scale-[0.97] transition-all flex items-center space-x-1.5"
               >
                 <ShieldCheck className="w-4 h-4" />
-                <span>更新并安全记住</span>
+                <span>更新密码</span>
               </button>
             </div>
           </div>
