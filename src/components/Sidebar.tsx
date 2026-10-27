@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { HostProfile, TabSession } from "../types";
 import { ServerPerfMonitor } from "./ServerPerfMonitor";
+import { useI18n } from "../i18n";
 import {
   Server,
   Plus,
@@ -15,9 +16,19 @@ import {
   ArrowUpDown,
   Lock,
   X,
+  Copy,
+  FolderPlus,
+  Edit3,
+  RotateCw,
+  FolderOpen,
 } from "lucide-react";
 
 export type SortMode = "recent" | "newest" | "oldest" | "name";
+
+type SidebarContextMenu =
+  | { type: "host"; x: number; y: number; host: HostProfile }
+  | { type: "group"; x: number; y: number; groupName: string }
+  | { type: "blank"; x: number; y: number };
 
 interface Props {
   hosts: HostProfile[];
@@ -30,7 +41,11 @@ interface Props {
   onConnect: (host: HostProfile) => void;
   onEdit: (host: HostProfile) => void;
   onDelete: (id: string) => void;
-  onNewHost: () => void;
+  onNewHost: (initialGroup?: string) => void;
+  onDuplicateHost?: (host: HostProfile) => void;
+  onChangeHostGroup?: (hostId: string, newGroup: string) => void;
+  onRenameGroup?: (oldGroup: string, newGroup: string) => void;
+  onRefreshHosts?: () => void;
   onImportFinalShell: () => void;
   onRunQuickCommand?: (cmd: string) => void;
 }
@@ -47,8 +62,13 @@ export const Sidebar: React.FC<Props> = ({
   onEdit,
   onDelete,
   onNewHost,
+  onDuplicateHost,
+  onChangeHostGroup,
+  onRenameGroup,
+  onRefreshHosts,
   onImportFinalShell,
 }) => {
+  const { t } = useI18n();
   const [searchTerm, setSearchTerm] = useState("");
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [isDragging, setIsDragging] = useState(false);
@@ -56,6 +76,7 @@ export const Sidebar: React.FC<Props> = ({
     return (localStorage.getItem("ultimateshell_sort_mode") as SortMode) || "recent";
   });
   const [showSortMenu, setShowSortMenu] = useState(false);
+  const [contextMenu, setContextMenu] = useState<SidebarContextMenu | null>(null);
 
   // Defer re-sorting when user is hovering inside the sidebar (prevents jumping under cursor!)
   const [displayHosts, setDisplayHosts] = useState<HostProfile[]>(hosts);
@@ -72,6 +93,20 @@ export const Sidebar: React.FC<Props> = ({
       pendingHostsRef.current = hosts;
     }
   }, [hosts, displayHosts.length]);
+
+  // Global click / Escape listener to dismiss context menu
+  useEffect(() => {
+    const handleGlobalClick = () => setContextMenu(null);
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setContextMenu(null);
+    };
+    window.addEventListener("click", handleGlobalClick);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("click", handleGlobalClick);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, []);
 
   const handleSidebarMouseEnter = () => {
     isHoveringRef.current = true;
@@ -100,6 +135,18 @@ export const Sidebar: React.FC<Props> = ({
 
   const toggleGroup = (group: string) => {
     setCollapsedGroups((prev) => ({ ...prev, [group]: !prev[group] }));
+  };
+
+  const handleExpandAllGroups = () => {
+    setCollapsedGroups({});
+    setContextMenu(null);
+  };
+
+  const handleCollapseAllGroups = () => {
+    const allCollapsed: Record<string, boolean> = {};
+    Object.keys(groups).forEach((g) => (allCollapsed[g] = true));
+    setCollapsedGroups(allCollapsed);
+    setContextMenu(null);
   };
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -131,6 +178,38 @@ export const Sidebar: React.FC<Props> = ({
     window.addEventListener("pointerup", onPointerUp);
   };
 
+  // Context Menu Triggers
+  const handleHostContextMenu = (e: React.MouseEvent, host: HostProfile) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({
+      type: "host",
+      x: Math.min(e.clientX, window.innerWidth - 210),
+      y: Math.min(e.clientY, window.innerHeight - 250),
+      host,
+    });
+  };
+
+  const handleGroupContextMenu = (e: React.MouseEvent, groupName: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({
+      type: "group",
+      x: Math.min(e.clientX, window.innerWidth - 210),
+      y: Math.min(e.clientY, window.innerHeight - 250),
+      groupName,
+    });
+  };
+
+  const handleBlankContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setContextMenu({
+      type: "blank",
+      x: Math.min(e.clientX, window.innerWidth - 210),
+      y: Math.min(e.clientY, window.innerHeight - 220),
+    });
+  };
+
   // Filter hosts from displayHosts snapshot
   let filteredHosts = displayHosts.filter(
     (h) =>
@@ -152,9 +231,10 @@ export const Sidebar: React.FC<Props> = ({
     }
   });
 
+  const defaultGroupLabel = t("sidebar.defaultGroup");
   const groups: Record<string, HostProfile[]> = {};
   filteredHosts.forEach((h) => {
-    const g = h.group || "默认分组";
+    const g = h.group || defaultGroupLabel;
     if (!groups[g]) groups[g] = [];
     groups[g].push(h);
   });
@@ -178,28 +258,28 @@ export const Sidebar: React.FC<Props> = ({
         <div className="flex items-center space-x-2 truncate">
           <Terminal className="w-3.5 h-3.5 text-[var(--text-secondary)]" strokeWidth={1.75} />
           <span className="text-[13px] font-semibold tracking-[-0.01em] text-[var(--text-primary)] truncate">
-            UltimateShell
+            {t("app.title")}
           </span>
         </div>
 
         <div className="flex items-center space-x-0.5">
           <button
             onClick={onImportFinalShell}
-            title="导入 FinalShell (一键解密导入历史配置与密码)"
+            title={t("sidebar.importFinalShell")}
             className="p-1 rounded-md text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--hover-item)] transition active:scale-[0.95]"
           >
             <ArrowDownToLine className="w-3.5 h-3.5" strokeWidth={1.75} />
           </button>
           <button
-            onClick={onNewHost}
-            title="新建服务器 (配置新主机及密码)"
+            onClick={() => onNewHost()}
+            title={t("sidebar.newHost")}
             className="p-1 rounded-md text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--hover-item)] transition active:scale-[0.95]"
           >
             <Plus className="w-3.5 h-3.5" strokeWidth={2} />
           </button>
           <button
             onClick={() => onCollapse(true)}
-            title="收起侧边栏 (快捷键: Cmd+B)"
+            title={t("sidebar.collapse")}
             className="p-1 rounded-md text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--hover-item)] transition active:scale-[0.95]"
           >
             <PanelLeftClose className="w-3.5 h-3.5" strokeWidth={1.75} />
@@ -213,7 +293,7 @@ export const Sidebar: React.FC<Props> = ({
           <Search className="w-3.5 h-3.5 absolute left-2.5 text-[var(--text-tertiary)] pointer-events-none" strokeWidth={1.75} />
           <input
             type="text"
-            placeholder="搜索主机或 IP..."
+            placeholder={t("sidebar.searchPlaceholder")}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-8 pr-7 py-1 text-[12px] bg-[var(--input-bg)] text-[var(--text-primary)] placeholder-[var(--text-tertiary)] border border-[var(--border-subtle)] rounded-md focus:outline-none focus:border-[#007AFF] focus:ring-1 focus:ring-[#007AFF]/40 transition-all font-normal"
@@ -221,7 +301,7 @@ export const Sidebar: React.FC<Props> = ({
           {searchTerm && (
             <button
               onClick={() => setSearchTerm("")}
-              title="清除搜索关键字"
+              title="Clear"
               className="absolute right-2 p-0.5 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
             >
               <X className="w-3 h-3" />
@@ -233,7 +313,7 @@ export const Sidebar: React.FC<Props> = ({
         <div className="relative">
           <button
             onClick={() => setShowSortMenu(!showSortMenu)}
-            title="切换排序方式 (最近连接/最新创建/名称)"
+            title="Sort hosts"
             className={`p-1.5 rounded-md border border-[var(--border-subtle)] transition active:scale-[0.95] ${
               showSortMenu
                 ? "bg-[#007AFF] text-white"
@@ -247,10 +327,10 @@ export const Sidebar: React.FC<Props> = ({
           {showSortMenu && (
             <div className="absolute right-0 top-8 z-50 w-32 apple-card rounded-xl py-1 text-[11px] shadow-2xl border border-[var(--border-subtle)]">
               {[
-                { id: "recent", label: "最近连接" },
-                { id: "newest", label: "最新创建" },
-                { id: "oldest", label: "最早创建" },
-                { id: "name", label: "按名称 A-Z" },
+                { id: "recent", label: t("sidebar.sort.recent") },
+                { id: "newest", label: t("sidebar.sort.newest") },
+                { id: "oldest", label: t("sidebar.sort.oldest") },
+                { id: "name", label: t("sidebar.sort.name") },
               ].map((item) => (
                 <button
                   key={item.id}
@@ -269,22 +349,27 @@ export const Sidebar: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* Server Tree List */}
-      <div className="flex-1 overflow-y-auto px-2 py-1 space-y-3">
+      {/* Server Tree List - Blank Area Right-Clickable */}
+      <div
+        onContextMenu={handleBlankContextMenu}
+        className="flex-1 overflow-y-auto px-2 py-1 space-y-3"
+      >
         {Object.keys(groups).length === 0 ? (
           <div className="text-center py-12 px-4 space-y-2">
             <Server className="w-7 h-7 mx-auto text-[var(--text-tertiary)]" strokeWidth={1.5} />
-            <p className="text-[12px] text-[var(--text-secondary)] font-medium">无服务器连接</p>
-            <p className="text-[11px] text-[var(--text-tertiary)]">点击上方按钮新建或从 FinalShell 导入</p>
+            <p className="text-[12px] text-[var(--text-secondary)] font-medium">{t("sidebar.noHosts")}</p>
+            <p className="text-[11px] text-[var(--text-tertiary)]">{t("sidebar.noHostsDesc")}</p>
           </div>
         ) : (
           Object.entries(groups).map(([groupName, groupHosts]) => {
             const isGroupCollapsed = !!collapsedGroups[groupName];
             return (
               <div key={groupName} className="space-y-0.5">
-                {/* macOS Section Header */}
+                {/* macOS Section Header - Right-Clickable */}
                 <div
                   onClick={() => toggleGroup(groupName)}
+                  onContextMenu={(e) => handleGroupContextMenu(e, groupName)}
+                  title="点击展开/收起 (右键打开分组操作菜单)"
                   className="flex items-center justify-between px-2 py-1 text-[11px] font-semibold tracking-wider text-[var(--text-tertiary)] uppercase cursor-pointer rounded-md hover:bg-[var(--hover-item)] transition group"
                 >
                   <div className="flex items-center space-x-1.5 truncate">
@@ -294,7 +379,11 @@ export const Sidebar: React.FC<Props> = ({
                       }`}
                       strokeWidth={2}
                     />
-                    <Folder className="w-3 h-3 text-[var(--text-tertiary)]" strokeWidth={1.5} />
+                    {isGroupCollapsed ? (
+                      <Folder className="w-3 h-3 text-[var(--text-tertiary)]" strokeWidth={1.5} />
+                    ) : (
+                      <FolderOpen className="w-3 h-3 text-[#F2B93B]" strokeWidth={1.5} />
+                    )}
                     <span className="tracking-tight normal-case text-[var(--text-secondary)] font-medium truncate">{groupName}</span>
                   </div>
                   <span className="text-[10px] text-[var(--text-tertiary)] font-mono ml-1">
@@ -302,7 +391,7 @@ export const Sidebar: React.FC<Props> = ({
                   </span>
                 </div>
 
-                {/* macOS Rounded Item Pill */}
+                {/* macOS Rounded Item Pill - Right-Clickable */}
                 {!isGroupCollapsed && (
                   <div className="space-y-0.5 pl-1.5">
                     {groupHosts.map((host) => {
@@ -311,6 +400,7 @@ export const Sidebar: React.FC<Props> = ({
                         <div
                           key={host.id}
                           onDoubleClick={() => onConnect(host)}
+                          onContextMenu={(e) => handleHostContextMenu(e, host)}
                           className="group relative flex items-center justify-between px-2.5 py-1.5 text-xs rounded-[7px] hover:bg-[var(--hover-item)] cursor-pointer transition active:scale-[0.98]"
                         >
                           <div
@@ -318,7 +408,7 @@ export const Sidebar: React.FC<Props> = ({
                             onClick={() => onConnect(host)}
                           >
                             <div
-                              title={isConnected ? "已建立连接 (双击重新打开会话)" : "双击打开终端连接"}
+                              title={isConnected ? t("sidebar.connectedBadge") : t("sidebar.menu.connect")}
                               className="relative flex-shrink-0"
                             >
                               <Server
@@ -329,7 +419,7 @@ export const Sidebar: React.FC<Props> = ({
                               />
                               {/* Requirement 3: Only display green dot on actively connected servers! */}
                               {isConnected && (
-                                <span title="当前处于活跃连接状态" className="absolute -bottom-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse ring-1 ring-[var(--bg-app)]" />
+                                <span title={t("sidebar.connectedBadge")} className="absolute -bottom-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse ring-1 ring-[var(--bg-app)]" />
                               )}
                             </div>
                             <div className="truncate flex-1">
@@ -338,7 +428,7 @@ export const Sidebar: React.FC<Props> = ({
                                   {host.name}
                                 </span>
                                 {host.has_password && (
-                                  <span title="已加密记住密码 (AES-256-GCM 硬件锁保护)" className="inline-flex items-center">
+                                  <span title={t("sidebar.passwordSaved")} className="inline-flex items-center">
                                     <Lock className="w-2.5 h-2.5 text-[var(--text-tertiary)] flex-shrink-0" />
                                   </span>
                                 )}
@@ -357,17 +447,19 @@ export const Sidebar: React.FC<Props> = ({
                                 onEdit(host);
                               }}
                               className="p-1 text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--active-item)] rounded transition"
-                              title="配置连接 (修改主机、端口及密码)"
+                              title={t("sidebar.menu.editHost")}
                             >
                               <SlidersHorizontal className="w-3 h-3" strokeWidth={1.75} />
                             </button>
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                onDelete(host.id);
+                                if (confirm(t("sidebar.menu.confirmDeleteHost", { name: host.name }))) {
+                                  onDelete(host.id);
+                                }
                               }}
                               className="p-1 text-[var(--text-secondary)] hover:text-rose-500 hover:bg-rose-500/10 rounded transition"
-                              title="移除服务器 (从侧边栏删除主机)"
+                              title={t("sidebar.menu.deleteHost")}
                             >
                               <Trash2 className="w-3 h-3" strokeWidth={1.75} />
                             </button>
@@ -393,11 +485,213 @@ export const Sidebar: React.FC<Props> = ({
       {/* Resizer Divider Handle */}
       <div
         onPointerDown={handlePointerDown}
-        title="按住左右拖拽调整侧边栏宽度"
+        title={t("sidebar.resizeWidth")}
         className="absolute top-0 right-0 w-2 h-full cursor-col-resize hover:bg-[#007AFF]/40 active:bg-[#007AFF] transition-colors z-30 select-none group flex justify-end"
       >
         <div className="w-[1px] h-full bg-[var(--border-subtle)] group-hover:bg-[#007AFF] transition-colors" />
       </div>
+
+      {/* Context Menus Popover (Host / Group / Blank) */}
+      {contextMenu && (
+        <div
+          style={{ top: `${contextMenu.y}px`, left: `${contextMenu.x}px` }}
+          className="fixed z-50 apple-card rounded-xl py-1.5 w-48 shadow-2xl text-[12px] text-[var(--text-primary)] animate-in fade-in zoom-in-95 duration-100 select-none border border-[var(--border-subtle)]"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {contextMenu.type === "host" && (
+            <>
+              <button
+                onClick={() => {
+                  onConnect(contextMenu.host);
+                  setContextMenu(null);
+                }}
+                className="w-full flex items-center space-x-2 px-3 py-1.5 hover:bg-[#007AFF] hover:text-white text-left transition"
+              >
+                <Terminal className="w-3.5 h-3.5" strokeWidth={1.75} />
+                <span>{t("sidebar.menu.connect")}</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  onEdit(contextMenu.host);
+                  setContextMenu(null);
+                }}
+                className="w-full flex items-center space-x-2 px-3 py-1.5 hover:bg-[#007AFF] hover:text-white text-left transition"
+              >
+                <SlidersHorizontal className="w-3.5 h-3.5" strokeWidth={1.75} />
+                <span>{t("sidebar.menu.editHost")}</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  onDuplicateHost?.(contextMenu.host);
+                  setContextMenu(null);
+                }}
+                className="w-full flex items-center space-x-2 px-3 py-1.5 hover:bg-[#007AFF] hover:text-white text-left transition"
+              >
+                <Copy className="w-3.5 h-3.5" strokeWidth={1.75} />
+                <span>{t("sidebar.menu.duplicateHost")}</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  const g = prompt(t("sidebar.menu.promptNewGroup"), contextMenu.host.group || "");
+                  if (g !== null) {
+                    onChangeHostGroup?.(contextMenu.host.id, g);
+                  }
+                  setContextMenu(null);
+                }}
+                className="w-full flex items-center space-x-2 px-3 py-1.5 hover:bg-[#007AFF] hover:text-white text-left transition"
+              >
+                <FolderPlus className="w-3.5 h-3.5" strokeWidth={1.75} />
+                <span>{t("sidebar.menu.changeGroup")}</span>
+              </button>
+
+              <div className="h-[1px] bg-[var(--border-subtle)] my-1" />
+
+              <button
+                onClick={() => {
+                  if (confirm(t("sidebar.menu.confirmDeleteHost", { name: contextMenu.host.name }))) {
+                    onDelete(contextMenu.host.id);
+                  }
+                  setContextMenu(null);
+                }}
+                className="w-full flex items-center space-x-2 px-3 py-1.5 hover:bg-rose-500 hover:text-white text-rose-500 text-left transition"
+              >
+                <Trash2 className="w-3.5 h-3.5" strokeWidth={1.75} />
+                <span>{t("sidebar.menu.deleteHost")}</span>
+              </button>
+            </>
+          )}
+
+          {contextMenu.type === "group" && (
+            <>
+              <button
+                onClick={() => {
+                  toggleGroup(contextMenu.groupName);
+                  setContextMenu(null);
+                }}
+                className="w-full flex items-center space-x-2 px-3 py-1.5 hover:bg-[#007AFF] hover:text-white text-left transition"
+              >
+                {collapsedGroups[contextMenu.groupName] ? (
+                  <>
+                    <FolderOpen className="w-3.5 h-3.5" strokeWidth={1.75} />
+                    <span>{t("sidebar.menu.expandGroup")}</span>
+                  </>
+                ) : (
+                  <>
+                    <Folder className="w-3.5 h-3.5" strokeWidth={1.75} />
+                    <span>{t("sidebar.menu.collapseGroup")}</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                onClick={() => {
+                  onNewHost(contextMenu.groupName === defaultGroupLabel ? undefined : contextMenu.groupName);
+                  setContextMenu(null);
+                }}
+                className="w-full flex items-center space-x-2 px-3 py-1.5 hover:bg-[#007AFF] hover:text-white text-left transition"
+              >
+                <Plus className="w-3.5 h-3.5" strokeWidth={2} />
+                <span>{t("sidebar.menu.newHostInGroup")}</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  const newName = prompt(
+                    t("sidebar.menu.promptRenameGroup", { group: contextMenu.groupName }),
+                    contextMenu.groupName
+                  );
+                  if (newName && newName.trim() && newName.trim() !== contextMenu.groupName) {
+                    onRenameGroup?.(contextMenu.groupName, newName.trim());
+                  }
+                  setContextMenu(null);
+                }}
+                className="w-full flex items-center space-x-2 px-3 py-1.5 hover:bg-[#007AFF] hover:text-white text-left transition"
+              >
+                <Edit3 className="w-3.5 h-3.5" strokeWidth={1.75} />
+                <span>{t("sidebar.menu.renameGroup")}</span>
+              </button>
+
+              <div className="h-[1px] bg-[var(--border-subtle)] my-1" />
+
+              <button
+                onClick={handleExpandAllGroups}
+                className="w-full flex items-center space-x-2 px-3 py-1.5 hover:bg-[#007AFF] hover:text-white text-left transition"
+              >
+                <FolderOpen className="w-3.5 h-3.5" strokeWidth={1.75} />
+                <span>{t("sidebar.menu.expandAllGroups")}</span>
+              </button>
+
+              <button
+                onClick={handleCollapseAllGroups}
+                className="w-full flex items-center space-x-2 px-3 py-1.5 hover:bg-[#007AFF] hover:text-white text-left transition"
+              >
+                <Folder className="w-3.5 h-3.5" strokeWidth={1.75} />
+                <span>{t("sidebar.menu.collapseAllGroups")}</span>
+              </button>
+            </>
+          )}
+
+          {contextMenu.type === "blank" && (
+            <>
+              <button
+                onClick={() => {
+                  onNewHost();
+                  setContextMenu(null);
+                }}
+                className="w-full flex items-center space-x-2 px-3 py-1.5 hover:bg-[#007AFF] hover:text-white text-left transition"
+              >
+                <Plus className="w-3.5 h-3.5" strokeWidth={2} />
+                <span>{t("sidebar.newHost")}</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  onImportFinalShell();
+                  setContextMenu(null);
+                }}
+                className="w-full flex items-center space-x-2 px-3 py-1.5 hover:bg-[#007AFF] hover:text-white text-left transition"
+              >
+                <ArrowDownToLine className="w-3.5 h-3.5" strokeWidth={1.75} />
+                <span>{t("sidebar.importFinalShell")}</span>
+              </button>
+
+              <div className="h-[1px] bg-[var(--border-subtle)] my-1" />
+
+              <button
+                onClick={handleExpandAllGroups}
+                className="w-full flex items-center space-x-2 px-3 py-1.5 hover:bg-[#007AFF] hover:text-white text-left transition"
+              >
+                <FolderOpen className="w-3.5 h-3.5" strokeWidth={1.75} />
+                <span>{t("sidebar.menu.expandAllGroups")}</span>
+              </button>
+
+              <button
+                onClick={handleCollapseAllGroups}
+                className="w-full flex items-center space-x-2 px-3 py-1.5 hover:bg-[#007AFF] hover:text-white text-left transition"
+              >
+                <Folder className="w-3.5 h-3.5" strokeWidth={1.75} />
+                <span>{t("sidebar.menu.collapseAllGroups")}</span>
+              </button>
+
+              <div className="h-[1px] bg-[var(--border-subtle)] my-1" />
+
+              <button
+                onClick={() => {
+                  onRefreshHosts?.();
+                  setContextMenu(null);
+                }}
+                className="w-full flex items-center space-x-2 px-3 py-1.5 hover:bg-[#007AFF] hover:text-white text-left transition"
+              >
+                <RotateCw className="w-3.5 h-3.5" strokeWidth={1.75} />
+                <span>{t("sidebar.menu.refreshList")}</span>
+              </button>
+            </>
+          )}
+        </div>
+      )}
     </aside>
   );
 };

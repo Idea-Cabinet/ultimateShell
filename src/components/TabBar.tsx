@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { usePointerReorder } from "../hooks/usePointerReorder";
+import { useI18n } from "../i18n";
 import { TabSession } from "../types";
 import {
   Terminal,
@@ -52,6 +53,7 @@ export const TabBar: React.FC<Props> = ({
   onNewLocalTab,
   onReorderTabs,
 }) => {
+  const { t } = useI18n();
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const prevTabsLengthRef = useRef(tabs.length);
 
@@ -113,7 +115,7 @@ export const TabBar: React.FC<Props> = ({
   const handleRename = () => {
     const tab = tabs.find((t) => t.id === contextMenu.tabId);
     if (!tab) return;
-    const newName = prompt("重命名标签页:", tab.title);
+    const newName = prompt(t("tab.renamePrompt"), tab.title);
     if (newName && newName.trim()) {
       onRenameTab(contextMenu.tabId, newName.trim());
     }
@@ -160,7 +162,7 @@ export const TabBar: React.FC<Props> = ({
                   onSelectTab(tab.id);
                 }}
                 onContextMenu={(e) => handleContextMenu(e, tab.id)}
-                title={tab.isLocal ? "本地 Shell 会话 (按住可拖拽调整顺序 / 右键打开菜单)" : `远程主机: ${tab.hostProfile?.username}@${tab.hostProfile?.host} (按住可拖拽调整顺序 / 右键打开菜单)`}
+                title={tab.isLocal ? t("tab.tooltipLocal") : t("tab.tooltipRemote", { dest: `${tab.hostProfile?.username}@${tab.hostProfile?.host}` })}
                 className={`group h-8 px-2.5 flex items-center space-x-2 text-[12px] rounded-[7px] cursor-grab active:cursor-grabbing transition max-w-[200px] min-w-[120px] relative select-none ${
                   isActive
                     ? "bg-[var(--active-tab-bg)] text-[var(--text-primary)] shadow-[var(--active-tab-shadow)] border border-[var(--border-subtle)] font-medium"
@@ -174,11 +176,11 @@ export const TabBar: React.FC<Props> = ({
                 }`}
               >
                 {tab.isLocal ? (
-                  <span title="本地 Shell 终端" className="inline-flex items-center pointer-events-none">
+                  <span title={t("tab.localTerminal")} className="inline-flex items-center pointer-events-none">
                     <Terminal className={`w-3.5 h-3.5 flex-shrink-0 ${isActive ? "text-[#30D158]" : "text-[var(--text-tertiary)]"}`} strokeWidth={1.75} />
                   </span>
                 ) : (
-                  <span title="SSH 远程云服务器终端" className="inline-flex items-center pointer-events-none">
+                  <span title={t("tab.remoteTerminal")} className="inline-flex items-center pointer-events-none">
                     <Server className={`w-3.5 h-3.5 flex-shrink-0 ${isActive ? "text-[#007AFF]" : "text-[var(--text-tertiary)]"}`} strokeWidth={1.75} />
                   </span>
                 )}
@@ -190,7 +192,7 @@ export const TabBar: React.FC<Props> = ({
                     e.stopPropagation();
                     onCloseTab(tab.id);
                   }}
-                  title="关闭标签页 (彻底杀死底层连接进程)"
+                  title={t("tab.close")}
                   className={`p-0.5 rounded-full hover:bg-[var(--hover-item)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition ${
                     isActive ? "opacity-80 hover:opacity-100" : "opacity-0 group-hover:opacity-80"
                   }`}
@@ -231,7 +233,7 @@ export const TabBar: React.FC<Props> = ({
             className="w-full flex items-center space-x-2 px-3 py-1.5 hover:bg-[#007AFF] hover:text-white text-left transition"
           >
             <RotateCw className="w-3.5 h-3.5" strokeWidth={1.75} />
-            <span>重新连接</span>
+            <span>{t("tab.reconnect")}</span>
           </button>
 
           <button
@@ -242,7 +244,7 @@ export const TabBar: React.FC<Props> = ({
             className="w-full flex items-center space-x-2 px-3 py-1.5 hover:bg-[#007AFF] hover:text-white text-left transition"
           >
             <Copy className="w-3.5 h-3.5" strokeWidth={1.75} />
-            <span>复制标签页</span>
+            <span>{t("tab.duplicate")}</span>
           </button>
 
           <button
@@ -250,7 +252,7 @@ export const TabBar: React.FC<Props> = ({
             className="w-full flex items-center space-x-2 px-3 py-1.5 hover:bg-[#007AFF] hover:text-white text-left transition"
           >
             <Edit3 className="w-3.5 h-3.5" strokeWidth={1.75} />
-            <span>重命名...</span>
+            <span>{t("tab.rename")}</span>
           </button>
 
           <div className="h-[1px] bg-[var(--border-subtle)] my-1" />
@@ -263,7 +265,7 @@ export const TabBar: React.FC<Props> = ({
             className="w-full flex items-center space-x-2 px-3 py-1.5 hover:bg-[#007AFF] hover:text-white text-left transition"
           >
             <X className="w-3.5 h-3.5" strokeWidth={1.75} />
-            <span>关闭标签页</span>
+            <span>{t("tab.close")}</span>
           </button>
 
           <button
@@ -274,7 +276,7 @@ export const TabBar: React.FC<Props> = ({
             className="w-full flex items-center space-x-2 px-3 py-1.5 hover:bg-[#007AFF] hover:text-white text-left transition"
           >
             <XCircle className="w-3.5 h-3.5" strokeWidth={1.75} />
-            <span>关闭其他标签页</span>
+            <span>{t("tab.closeOther")}</span>
           </button>
 
           <button
@@ -285,7 +287,7 @@ export const TabBar: React.FC<Props> = ({
             className="w-full flex items-center space-x-2 px-3 py-1.5 hover:bg-[#007AFF] hover:text-white text-left transition"
           >
             <ArrowRightCircle className="w-3.5 h-3.5" strokeWidth={1.75} />
-            <span>关闭右侧标签页</span>
+            <span>{t("tab.closeRight")}</span>
           </button>
         </div>
       )}

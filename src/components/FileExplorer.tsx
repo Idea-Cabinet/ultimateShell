@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { usePointerReorder } from "../hooks/usePointerReorder";
+import { useI18n } from "../i18n";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { DirResult, FileEntry, TabSession } from "../types";
@@ -155,6 +156,20 @@ export function FileExplorer({
   // Navigation History
   const [history, setHistory] = useState<string[]>(["/"]);
   const [historyIdx, setHistoryIdx] = useState<number>(0);
+
+  const { t } = useI18n();
+
+  const getColumnLabel = (id: ColumnId): string => {
+    switch (id) {
+      case "name": return t("files.col.name");
+      case "mtime": return t("files.col.mtime");
+      case "file_type": return t("files.col.type");
+      case "size": return t("files.col.size");
+      case "permissions": return t("files.col.permissions");
+      case "owner": return t("files.col.owner");
+      default: return id;
+    }
+  };
 
   // Sorting
   const [sortField, setSortField] = useState<SortField>("name");
@@ -857,7 +872,7 @@ export function FileExplorer({
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="快速筛选..."
+              placeholder={t("files.filter")}
               className="h-6 w-28 focus:w-44 transition-all pl-6 pr-5 text-[11px] bg-[var(--bg-app)] border border-[var(--border-subtle)] rounded focus:outline-none focus:border-[#007AFF]"
             />
             {searchQuery && (
@@ -931,11 +946,11 @@ export function FileExplorer({
               className="flex-shrink-0 border-r border-[var(--border-subtle)] bg-[var(--bg-sidebar)] flex flex-col overflow-hidden select-none"
             >
               <div className="p-2 text-[10.5px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider flex items-center justify-between">
-                <span>目录树 (最外层懒加载)</span>
+                <span>{t("files.tree.outermost")}</span>
                 <button
                   onClick={() => initLazyRoot(true)}
                   className="hover:text-[var(--text-primary)]"
-                  title="重新载入外层目录"
+                  title={t("files.tree.reload")}
                 >
                   <RotateCw className={`w-2.5 h-2.5 ${isTreeLoading ? "animate-spin text-[#007AFF]" : ""}`} />
                 </button>
@@ -945,20 +960,17 @@ export function FileExplorer({
                   <div className="py-8 px-2 flex flex-col items-center justify-center text-center space-y-2 text-[var(--text-tertiary)]">
                     <RotateCw className="w-4 h-4 animate-spin text-[#007AFF]" />
                     <span className="text-[11px] font-medium text-[var(--text-secondary)]">
-                      正在自动载入外层目录...
-                    </span>
-                    <span className="text-[10px] text-[var(--text-tertiary)]">
-                      按需智能懒加载
+                      {t("files.tree.loading")}
                     </span>
                   </div>
                 ) : rootNodes.length === 0 ? (
                   <div className="py-6 px-3 text-center space-y-2">
-                    <div className="text-[11px] text-[var(--text-tertiary)]">未获取到外层目录</div>
+                    <div className="text-[11px] text-[var(--text-tertiary)]">{t("files.tree.empty")}</div>
                     <button
                       onClick={() => initLazyRoot(true)}
                       className="px-2.5 py-1 text-[11px] rounded bg-[var(--hover-item)] hover:bg-[#007AFF] hover:text-white transition active:scale-95 text-[var(--text-secondary)] border border-[var(--border-subtle)]"
                     >
-                      重新载入
+                      {t("files.tree.reload")}
                     </button>
                   </div>
                 ) : (
@@ -980,9 +992,9 @@ export function FileExplorer({
           {errorMsg ? (
             <div className="flex-1 flex flex-col items-center justify-center py-16 px-6 text-center select-none">
               <FolderOpen className="w-10 h-10 text-[var(--text-tertiary)] opacity-35 mb-3 stroke-1" />
-              <div className="text-[13px] font-medium text-[var(--text-secondary)]">此目录暂无可显示项</div>
+              <div className="text-[13px] font-medium text-[var(--text-secondary)]">{t("files.emptyTitle")}</div>
               <div className="text-[11.5px] text-[var(--text-tertiary)] mt-1 max-w-xs leading-relaxed">
-                当前目录为空或暂无读取权限
+                {t("files.emptySubtitle")}
               </div>
               <div className="flex items-center space-x-2 mt-4">
                 {parentPath && parentPath !== currentPath && (
@@ -993,7 +1005,7 @@ export function FileExplorer({
                     }}
                     className="px-3 py-1 bg-[var(--hover-item)] hover:bg-[var(--border-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] rounded text-[11.5px] transition-colors"
                   >
-                    返回上一级
+                    {t("files.goUp")}
                   </button>
                 )}
                 <button
@@ -1003,7 +1015,7 @@ export function FileExplorer({
                   }}
                   className="px-3 py-1 bg-[#007AFF] text-white hover:bg-[#0062CC] rounded text-[11.5px] transition-colors"
                 >
-                  返回根目录 (/)
+                  {t("files.goRoot")}
                 </button>
               </div>
             </div>
@@ -1037,7 +1049,7 @@ export function FileExplorer({
                         if (col.sortable) handleSort(col.id as SortField);
                       }}
                     >
-                      <span className="truncate select-none font-medium pointer-events-none">{col.label}</span>
+                      <span className="truncate select-none font-medium pointer-events-none">{getColumnLabel(col.id)}</span>
                       {col.sortable && sortField === col.id && (
                         <span className="ml-1 text-[10px] text-[#007AFF] font-bold flex-shrink-0 pointer-events-none">
                           {sortDirection === "asc" ? "↑" : "↓"}
@@ -1069,12 +1081,12 @@ export function FileExplorer({
                 {loading && filteredEntries.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-12 text-[var(--text-tertiary)] text-[12px]">
                     <RotateCw className="w-6 h-6 animate-spin text-[#007AFF] mb-2" />
-                    <span>正在按需加载目录...</span>
+                    <span>{t("common.loading")}</span>
                   </div>
                 ) : filteredEntries.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-12 text-[var(--text-tertiary)] text-[12px]">
                     <Folder className="w-8 h-8 opacity-40 mb-2 stroke-1" />
-                    <span>{searchQuery ? "未匹配到任何文件" : "此文件夹为空"}</span>
+                    <span>{searchQuery ? t("files.noMatch") : t("files.folderEmpty")}</span>
                   </div>
                 ) : (
                   filteredEntries.map((entry) => {
@@ -1121,12 +1133,12 @@ export function FileExplorer({
       <div className="h-6 bg-[var(--bg-card)] border-t border-[var(--border-subtle)] px-3 flex items-center justify-between text-[11px] text-[var(--text-tertiary)] select-none">
         <div className="flex items-center space-x-3 truncate">
           <span>
-            共 {totalCount} 项 ({totalDirs} 个文件夹, {totalFiles} 个文件)
+            {t("files.itemsCount", { total: totalCount, dirs: totalDirs, files: totalFiles })}
           </span>
 
           {/* Current Active User Badge with subtle color distinction */}
           <div className="flex items-center space-x-1.5 pl-1.5 border-l border-[var(--border-subtle)]">
-            <span className="text-[var(--text-tertiary)]">用户:</span>
+            <span className="text-[var(--text-tertiary)]">{t("status.user")}</span>
             <span
               title={
                 detectedUser === "root"

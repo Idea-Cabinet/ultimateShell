@@ -3,13 +3,14 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { HostProfile, TabSession } from "./types";
 import { useTheme } from "./hooks/useTheme";
+import { useI18n } from "./i18n";
 import { Sidebar } from "./components/Sidebar";
 import { TabBar } from "./components/TabBar";
 import { TerminalView } from "./components/TerminalView";
 import { HostModal } from "./components/HostModal";
 import { OpsDrawer, DrawerTab } from "./components/OpsDrawer";
 import { CommandAssistant } from "./components/CommandAssistant";
-import { Folder, KeyRound, ShieldCheck, Sun, Moon, Monitor, Activity, HardDrive, Terminal } from "lucide-react";
+import { Folder, KeyRound, ShieldCheck, Sun, Moon, Monitor, Activity, HardDrive, Terminal, Globe } from "lucide-react";
 import "./App.css";
 
 interface PasswordUpdateEvent {
@@ -20,6 +21,7 @@ interface PasswordUpdateEvent {
 
 export function App() {
   const { themeMode, setThemeMode, resolvedTheme } = useTheme();
+  const { t, lang, toggleLang } = useI18n();
 
   const [hosts, setHosts] = useState<HostProfile[]>([]);
   const [tabs, setTabs] = useState<TabSession[]>([]);
@@ -308,6 +310,46 @@ export function App() {
     }
   };
 
+  const handleDuplicateHost = async (host: HostProfile) => {
+    try {
+      const newHost: HostProfile = {
+        ...host,
+        id: `host-${Date.now()}`,
+        name: `${host.name} (副本)`,
+        create_time: Date.now(),
+        access_time: Date.now(),
+      };
+      let pwd: string | undefined = undefined;
+      if (host.has_password) {
+        pwd = (await invoke<string | null>("get_host_password", { hostId: host.id })) || undefined;
+      }
+      await invoke("save_host", { host: newHost, password: pwd });
+      await refreshHosts();
+    } catch (err) {
+      console.error(`复制主机失败: ${err}`);
+    }
+  };
+
+  const handleChangeHostGroup = async (hostId: string, newGroup: string) => {
+    const target = hosts.find((h) => h.id === hostId);
+    if (!target) return;
+    const updated = { ...target, group: newGroup.trim() || undefined };
+    await invoke("save_host", { host: updated });
+    await refreshHosts();
+  };
+
+  const handleRenameGroup = async (oldGroup: string, newGroup: string) => {
+    const trimmed = newGroup.trim();
+    if (!trimmed || trimmed === oldGroup) return;
+    for (const h of hosts) {
+      const g = h.group || "默认分组";
+      if (g === oldGroup) {
+        await invoke("save_host", { host: { ...h, group: trimmed } });
+      }
+    }
+    await refreshHosts();
+  };
+
   const handleDeleteHost = async (id: string) => {
     try {
       await invoke("delete_host", { id });
@@ -357,10 +399,21 @@ export function App() {
           setIsModalOpen(true);
         }}
         onDelete={handleDeleteHost}
-        onNewHost={() => {
-          setEditingHost(null);
+        onNewHost={(initialGroup?: string) => {
+          setEditingHost(initialGroup ? {
+            id: "",
+            name: "",
+            host: "",
+            port: 22,
+            username: "root",
+            group: initialGroup,
+          } : null);
           setIsModalOpen(true);
         }}
+        onDuplicateHost={handleDuplicateHost}
+        onChangeHostGroup={handleChangeHostGroup}
+        onRenameGroup={handleRenameGroup}
+        onRefreshHosts={refreshHosts}
         onImportFinalShell={handleImportFinalShell}
         onRunQuickCommand={handleRunQuickCommand}
         activeSession={activeTab}
@@ -539,7 +592,7 @@ export function App() {
               title="查看与管理进程（支持按 CPU / 内存排序、结束进程）"
             >
               <Activity className="w-3 h-3 text-[#30D158]" />
-              <span>进程</span>
+              <span>{t("status.processes")}</span>
             </button>
 
             {/* Toggle Disk Partitions Tab */}
@@ -563,7 +616,7 @@ export function App() {
               title="查看各挂载点磁盘容量、可用空间及占比"
             >
               <HardDrive className="w-3 h-3 text-amber-500" />
-              <span>磁盘</span>
+              <span>{t("status.disks")}</span>
             </button>
 
             {/* Toggle Command Assistant Bar */}
@@ -581,14 +634,25 @@ export function App() {
               title="独立命令输入辅助栏（智能模版、参数填写、历史记录）"
             >
               <Terminal className="w-3 h-3 text-purple-500" />
-              <span>命令辅助</span>
+              <span>{t("status.commands")}</span>
             </button>
           </div>
 
           <div className="flex items-center space-x-2 text-[10.5px] flex-shrink-0">
             <span title="当前标签栏中打开的所有终端会话总数" className="cursor-default pr-1">
-              {tabs.length} 个会话
+              {tabs.length} {lang === "zh-CN" ? "个会话" : "tabs"}
             </span>
+
+            {/* Language Switcher Button */}
+            <button
+              onClick={toggleLang}
+              title={t("status.lang")}
+              className="px-1.5 py-0.5 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-all active:scale-95 flex items-center space-x-1 font-mono text-[10px] font-semibold border border-[var(--border-subtle)]"
+            >
+              <Globe className="w-3 h-3 text-[#007AFF]" />
+              <span>{lang === "zh-CN" ? "中" : "EN"}</span>
+            </button>
+
             {/* Theme Toggle Button: Cycles System -> Light -> Dark -> System */}
             <button
               onClick={() => {
