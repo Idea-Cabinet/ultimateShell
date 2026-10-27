@@ -110,8 +110,11 @@ export function App() {
   };
 
   // Vertical resize handle between terminal and Ops Drawer
+  const [isDrawerDragging, setIsDrawerDragging] = useState<boolean>(false);
+
   const handleStartDrawerResize = (e: React.MouseEvent) => {
     e.preventDefault();
+    setIsDrawerDragging(true);
     const startY = e.clientY;
     const startH = drawerHeight;
 
@@ -123,6 +126,7 @@ export function App() {
     };
 
     const onMouseUp = () => {
+      setIsDrawerDragging(false);
       window.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("mouseup", onMouseUp);
     };
@@ -584,15 +588,25 @@ export function App() {
         </div>
 
         {/* Command Assistant Bar (High priority feature: quick parameterized cmds, history, run) */}
-        {activeTab && isCommandAssistantOpen && (
-          <CommandAssistant
-            session={activeTab}
-            onSendToTerminal={handleRunQuickCommand}
-            onClose={() => {
-              setIsCommandAssistantOpen(false);
-              localStorage.setItem("ultimateshell_cmd_assistant_open", "false");
-            }}
-          />
+        {activeTab && (
+          <div
+            className={`grid transition-[grid-template-rows,opacity] duration-150 ease-[var(--ease-drawer)] ${
+              isCommandAssistantOpen
+                ? "grid-rows-[1fr] opacity-100"
+                : "grid-rows-[0fr] opacity-0 pointer-events-none"
+            }`}
+          >
+            <div className="overflow-hidden">
+              <CommandAssistant
+                session={activeTab}
+                onSendToTerminal={handleRunQuickCommand}
+                onClose={() => {
+                  setIsCommandAssistantOpen(false);
+                  localStorage.setItem("ultimateshell_cmd_assistant_open", "false");
+                }}
+              />
+            </div>
+          </div>
         )}
 
         {/* Resizer Handle between Terminal and Ops Drawer */}
@@ -614,6 +628,7 @@ export function App() {
             height={drawerHeight}
             isOpen={isOpsDrawerOpen}
             isMaximized={isDrawerMaximized}
+            isDragging={isDrawerDragging}
             activeTab={drawerActiveTab}
             onTabChange={(tab) => {
               setDrawerActiveTab(tab);

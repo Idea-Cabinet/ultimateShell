@@ -3,6 +3,10 @@
 
 /* Emil Kowalski Design Engineering & Animation Tokens */
 :root {
+  /* Keep the native controls centered at y=24 in tauri.conf.json. */
+  --app-titlebar-height: 48px;
+  --app-titlebar-controls-width: 84px;
+
   --apple-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", sans-serif;
   --apple-mono: "SF Mono", Menlo, Monaco, Consolas, monospace;
 
@@ -168,4 +172,15 @@ button:active, [role="button"]:active, .apple-clickable:active {
 .xterm .xterm-viewport {
   background-color: var(--bg-terminal);
   border-radius: 6px;
+}
+
+/* Shared by the sidebar header and session tabs, including short windows. */
+.app-titlebar {
+  height: var(--app-titlebar-height);
+  min-height: var(--app-titlebar-height);
+  flex-shrink: 0;
+}
+
+.app-titlebar-controls {
+  padding-left: var(--app-titlebar-controls-width);
 }

@@ -240,24 +240,28 @@ export const Sidebar: React.FC<Props> = ({
     groups[g].push(h);
   });
 
-  if (isCollapsed) return null;
-
   return (
     <aside
       onMouseEnter={handleSidebarMouseEnter}
       onMouseLeave={handleSidebarMouseLeave}
-      style={{ width: `${width}px` }}
-      className={`relative h-full apple-vibrancy-sidebar border-r border-[var(--border-subtle)] flex flex-col select-none text-[var(--text-primary)] z-20 flex-shrink-0 ${
-        isDragging ? "" : "transition-[width] duration-150 ease-[var(--ease-drawer)]"
+      style={{ width: isCollapsed ? 0 : `${width}px` }}
+      className={`relative h-full apple-vibrancy-sidebar flex flex-col select-none text-[var(--text-primary)] z-20 flex-shrink-0 overflow-hidden ${
+        isCollapsed
+          ? "border-r-0 opacity-0 pointer-events-none"
+          : "border-r border-[var(--border-subtle)] opacity-100"
+      } ${
+        isDragging
+          ? ""
+          : "transition-[width,opacity] duration-160 ease-[var(--ease-drawer)]"
       }`}
     >
+      <div style={{ width: `${width}px` }} className="h-full flex flex-col flex-shrink-0 min-w-[200px]">
       {/* macOS Unified Titlebar Drag Region & Traffic Lights clearance */}
       <div
         data-tauri-drag-region
-        className="h-12 flex items-center justify-between px-3 pl-[84px] border-b border-[var(--border-subtle)] select-none flex-shrink-0"
+        className="app-titlebar app-titlebar-controls flex items-center justify-between px-3 border-b border-[var(--border-subtle)] select-none flex-shrink-0"
       >
-        <div className="flex items-center space-x-2 truncate">
-          <Terminal className="w-3.5 h-3.5 text-[var(--text-secondary)] flex-shrink-0" strokeWidth={1.75} />
+        <div className="flex min-w-0 items-center truncate">
           <span className="text-[13px] font-semibold tracking-[-0.01em] text-[var(--text-primary)] truncate leading-none">
             {t("app.title")}
           </span>
@@ -368,7 +372,7 @@ export const Sidebar: React.FC<Props> = ({
                 >
                   <div className="flex items-center space-x-1.5 truncate">
                     <ChevronRight
-                      className={`w-3 h-3 text-[var(--text-tertiary)] transition-transform duration-200 ${
+                      className={`w-3 h-3 text-[var(--text-tertiary)] transition-transform duration-150 ease-[var(--ease-drawer)] ${
                         isGroupCollapsed ? "" : "rotate-90 text-[var(--text-secondary)]"
                       }`}
                       strokeWidth={2}
@@ -385,9 +389,15 @@ export const Sidebar: React.FC<Props> = ({
                   </span>
                 </div>
 
-                {/* macOS Rounded Item Pill - Right-Clickable */}
-                {!isGroupCollapsed && (
-                  <div className="space-y-0.5 pl-1.5">
+                {/* macOS Rounded Item Pill - Animated Accordion */}
+                <div
+                  className={`grid transition-[grid-template-rows,opacity] duration-150 ease-[var(--ease-drawer)] ${
+                    isGroupCollapsed
+                      ? "grid-rows-[0fr] opacity-0 pointer-events-none"
+                      : "grid-rows-[1fr] opacity-100"
+                  }`}
+                >
+                  <div className="overflow-hidden space-y-0.5 pl-1.5">
                     {groupHosts.map((host) => {
                       const isConnected = connectedHostIds.has(host.id);
                       return (
@@ -462,7 +472,7 @@ export const Sidebar: React.FC<Props> = ({
                       );
                     })}
                   </div>
-                )}
+                </div>
               </div>
             );
           })
@@ -475,15 +485,18 @@ export const Sidebar: React.FC<Props> = ({
         height={perfHeight}
         onHeightChange={setPerfHeight}
       />
+      </div>
 
       {/* Resizer Divider Handle */}
-      <div
-        onPointerDown={handlePointerDown}
-        title={t("sidebar.resizeWidth")}
-        className="absolute top-0 right-0 w-2 h-full cursor-col-resize hover:bg-[#007AFF]/40 active:bg-[#007AFF] transition-colors z-30 select-none group flex justify-end"
-      >
-        <div className="w-[1px] h-full bg-[var(--border-subtle)] group-hover:bg-[#007AFF] transition-colors" />
-      </div>
+      {!isCollapsed && (
+        <div
+          onPointerDown={handlePointerDown}
+          title={t("sidebar.resizeWidth")}
+          className="absolute top-0 right-0 w-2 h-full cursor-col-resize hover:bg-[#007AFF]/40 active:bg-[#007AFF] transition-colors z-30 select-none group flex justify-end"
+        >
+          <div className="w-[1px] h-full bg-[var(--border-subtle)] group-hover:bg-[#007AFF] transition-colors" />
+        </div>
+      )}
 
       {/* Context Menus Popover (Host / Group / Blank) */}
       {contextMenu && (
