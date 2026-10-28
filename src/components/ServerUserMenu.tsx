@@ -140,8 +140,18 @@ export const ServerUserMenu: React.FC<Props> = ({
       return;
     }
 
-    // If current user is root, switching to any user is passwordless in Linux/Unix!
-    if (effectiveUser === "root") {
+    const baseUser = hostProfile?.username || (isLocal ? "local" : "root");
+    const isBaseRoot = !isLocal && (!hostProfile?.username || hostProfile.username === "root");
+
+    // Check if session has root capabilities (e.g. started as root or had root in session stack)
+    let isRootCapable = isBaseRoot || effectiveUser === "root";
+    if (!isRootCapable && sessionId) {
+      isRootCapable = await invoke<boolean>("is_session_root_capable", { sessionId }).catch(() => false);
+    }
+
+    // If session is root-capable OR returning to the base connection user:
+    // The switch is completely passwordless via root privilege or subshell exit (e.g. root -> user1 -> user2)!
+    if (isRootCapable || targetUser === baseUser) {
       try {
         await invoke("switch_session_user", {
           sessionId,

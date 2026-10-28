@@ -109,6 +109,11 @@ fn get_session_user(pty_mgr: State<PtyManager>, session_id: String) -> String {
 }
 
 #[tauri::command]
+fn is_session_root_capable(pty_mgr: State<PtyManager>, session_id: String) -> bool {
+    pty_mgr.is_root_capable(&session_id)
+}
+
+#[tauri::command]
 async fn get_session_stats(pty_mgr: State<'_, PtyManager>, session_id: String) -> Result<(String, usize), String> {
     let mgr = pty_mgr.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -395,6 +400,7 @@ pub fn run() {
             switch_to_ascii_input,
             get_session_stats,
             get_session_user,
+            is_session_root_capable,
             get_system_perf,
             get_process_list,
             kill_process,

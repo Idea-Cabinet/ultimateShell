@@ -26,6 +26,7 @@ pub struct PtySession {
     pub opts: SpawnOptions,
     pub password_tracker: Option<Arc<Mutex<PasswordTracker>>>,
     pub active_user: Arc<Mutex<String>>,
+    pub had_root: Arc<Mutex<bool>>,
 }
 
 fn extract_prompt_username(chunk: &str) -> Option<String> {
@@ -177,6 +178,10 @@ impl PtyManager {
         let active_user = Arc::new(Mutex::new(initial_user));
         let active_user_clone = Arc::clone(&active_user);
 
+        let is_base_root = !opts.is_local && opts.username.as_deref().unwrap_or("root") == "root";
+        let had_root = Arc::new(Mutex::new(is_base_root));
+        let had_root_clone = Arc::clone(&had_root);
+
         let writer_clone = Arc::clone(&writer);
 
         // Channel decouples raw PTY reads from IPC batching
@@ -217,6 +222,11 @@ impl PtyManager {
                 let mut is_login_success = false;
 
                 if let Some(user) = extract_prompt_username(&chunk) {
+                    if user == "root" {
+                        if let Ok(mut hr) = had_root_clone.lock() {
+                            *hr = true;
+                        }
+                    }
                     let mut emit_user = false;
                     if let Ok(mut lock) = active_user_clone.lock() {
                         if *lock != user {
@@ -317,6 +327,7 @@ impl PtyManager {
                 opts: opts.clone(),
                 password_tracker: tracker,
                 active_user,
+                had_root,
             },
         );
 
@@ -333,6 +344,26 @@ impl PtyManager {
         String::new()
     }
 
+    pub fn is_root_capable(&self, session_id: &str) -> bool {
+        let sessions = self.sessions.lock().unwrap();
+        if let Some(session) = sessions.get(session_id) {
+            if !session.is_local && session.opts.username.as_deref().unwrap_or("root") == "root" {
+                return true;
+            }
+            if let Ok(hr) = session.had_root.lock() {
+                if *hr {
+                    return true;
+                }
+            }
+            if let Ok(u) = session.active_user.lock() {
+                if *u == "root" {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     pub fn switch_user(
         &self,
         session_id: &str,
@@ -341,6 +372,53 @@ impl PtyManager {
     ) -> Result<(), String> {
         let sessions = self.sessions.lock().unwrap();
         if let Some(session) = sessions.get(session_id) {
+            let cur_user = session.active_user.lock().map(|g| g.clone()).unwrap_or_default();
+            let base_is_root = (!session.is_local && session.opts.username.as_deref().unwrap_or("root") == "root")
+                || session.had_root.lock().map(|h| *h).unwrap_or(false);
+
+            if cur_user == target_user {
+                return Ok(());
+            }
+
+            // Case A: Root-capable session (e.g. root -> user1 -> user2 -> root ...)
+            // Completely passwordless via root privilege or subshell exit!
+            if base_is_root {
+                if cur_user == "root" {
+                    // Currently at root: simple su to target user
+                    let cmd = format!("su - {}\n", target_user);
+                    let mut writer = session.writer.lock().map_err(|e| e.to_string())?;
+                    writer.write_all(cmd.as_bytes()).map_err(|e| e.to_string())?;
+                    writer.flush().map_err(|e| e.to_string())?;
+                    return Ok(());
+                } else if target_user == "root" {
+                    // Currently in unprivileged subshell (user1), returning to root: just exit!
+                    let mut writer = session.writer.lock().map_err(|e| e.to_string())?;
+                    writer.write_all(b"exit\n").map_err(|e| e.to_string())?;
+                    writer.flush().map_err(|e| e.to_string())?;
+                    return Ok(());
+                } else {
+                    // Currently in user1, switching to user2:
+                    // Exit user1 subshell back to root, then su - user2 under root!
+                    let writer_clone = Arc::clone(&session.writer);
+                    let target = target_user.to_string();
+                    thread::spawn(move || {
+                        if let Ok(mut writer) = writer_clone.lock() {
+                            let _ = writer.write_all(b"exit\n");
+                            let _ = writer.flush();
+                        }
+                        // Allow subshell to exit cleanly and parent root shell to restore
+                        thread::sleep(std::time::Duration::from_millis(120));
+                        if let Ok(mut writer) = writer_clone.lock() {
+                            let cmd = format!("su - {}\n", target);
+                            let _ = writer.write_all(cmd.as_bytes());
+                            let _ = writer.flush();
+                        }
+                    });
+                    return Ok(());
+                }
+            }
+
+            // Case B: Non-root session (local or unprivileged base connection)
             let cmd = if target_user == "root" {
                 "su -\n".to_string()
             } else {
