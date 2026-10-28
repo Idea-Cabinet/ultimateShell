@@ -140,3 +140,13 @@ pub fn get_password(host_id: &str) -> Option<String> {
     let enc = creds.get(host_id)?;
     decrypt_secret(enc).ok()
 }
+
+pub fn delete_password(host_id: &str) -> Result<(), String> {
+    let mut creds = load_credentials();
+    if creds.remove(host_id).is_some() {
+        let path = get_vault_path();
+        let json = serde_json::to_string_pretty(&creds).map_err(|e| e.to_string())?;
+        fs::write(&path, json).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}

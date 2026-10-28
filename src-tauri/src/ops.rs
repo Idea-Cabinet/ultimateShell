@@ -24,6 +24,18 @@ pub struct DiskPartition {
     pub use_percent: f64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerUser {
+    pub username: String,
+    pub uid: u32,
+    pub gid: u32,
+    pub home: String,
+    pub shell: String,
+    pub is_root: bool,
+    pub is_login_user: bool,
+    pub has_password: bool,
+}
+
 // Module for clean string serialization
 mod string_clean {
     pub type SafeString = String;
@@ -233,4 +245,157 @@ pub fn get_disks(pool: &SftpPool, opts: &SpawnOptions) -> Result<Vec<DiskPartiti
     }
 
     Ok(partitions)
+}
+
+pub fn get_server_users(
+    pool: &SftpPool,
+    opts: &SpawnOptions,
+) -> Result<Vec<ServerUser>, String> {
+    let raw_passwd = if opts.is_local {
+        #[cfg(target_os = "macos")]
+        {
+            let res = std::process::Command::new("sh")
+                .arg("-c")
+                .arg("cat /etc/passwd 2>/dev/null; dscl . -list /Users UniqueID 2>/dev/null | awk '$2 >= 500 {print $1\":\"$2}'")
+                .output()
+                .map_err(|e| format!("读取本地用户失败: {}", e))?;
+            String::from_utf8_lossy(&res.stdout).to_string()
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            std::fs::read_to_string("/etc/passwd").unwrap_or_default()
+        }
+    } else {
+        let sess_arc = pool.get_or_connect(opts)?;
+        let sess = sess_arc.lock().map_err(|e| e.to_string())?;
+        let mut channel = match sess.channel_session() {
+            Ok(c) => c,
+            Err(e) => {
+                drop(sess);
+                pool.invalidate(&opts.session_id);
+                return Err(format!("无法创建 SSH 通道: {}", e));
+            }
+        };
+
+        if let Err(e) = channel.exec("cat /etc/passwd 2>/dev/null || getent passwd") {
+            drop(channel);
+            drop(sess);
+            pool.invalidate(&opts.session_id);
+            return Err(format!("无法在远程执行获取用户命令: {}", e));
+        }
+
+        let mut s = String::new();
+        channel.read_to_string(&mut s).ok();
+        channel.wait_close().ok();
+        s
+    };
+
+    let mut users: Vec<ServerUser> = Vec::new();
+    let host_id = opts.host_id.as_deref().unwrap_or("");
+
+    for line in raw_passwd.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        let parts: Vec<&str> = line.split(':').collect();
+        if parts.len() >= 2 {
+            let username = parts[0].trim().to_string();
+            if username.is_empty() || username.starts_with('_') && !opts.is_local {
+                continue;
+            }
+
+            if users.iter().any(|u| u.username == username) {
+                continue;
+            }
+
+            let uid = if parts.len() >= 3 {
+                parts[2].trim().parse::<u32>().unwrap_or(9999)
+            } else if parts.len() == 2 {
+                parts[1].trim().parse::<u32>().unwrap_or(9999)
+            } else {
+                9999
+            };
+
+            let gid = if parts.len() >= 4 {
+                parts[3].trim().parse::<u32>().unwrap_or(uid)
+            } else {
+                uid
+            };
+
+            let home = if parts.len() >= 6 {
+                parts[5].trim().to_string()
+            } else {
+                format!("/home/{}", username)
+            };
+
+            let shell = if parts.len() >= 7 {
+                parts[6].trim().to_string()
+            } else {
+                "/bin/bash".to_string()
+            };
+
+            let is_root = uid == 0 || username == "root";
+            let is_non_login = shell.ends_with("/nologin")
+                || shell.ends_with("/false")
+                || shell.ends_with("/sync")
+                || shell.ends_with("/halt")
+                || shell.ends_with("/shutdown");
+            let is_login_user = is_root || (!is_non_login && (uid >= 500 || shell.contains("sh")));
+
+            let has_password = if !host_id.is_empty() {
+                let user_key = format!("{}:user:{}", host_id, username);
+                crate::vault::get_password(&user_key).is_some()
+                    || (opts.username.as_deref() == Some(&username)
+                        && crate::vault::get_password(host_id).is_some())
+            } else {
+                false
+            };
+
+            users.push(ServerUser {
+                username,
+                uid,
+                gid,
+                home,
+                shell,
+                is_root,
+                is_login_user,
+                has_password,
+            });
+        }
+    }
+
+    // Always ensure root is in the list
+    if !users.iter().any(|u| u.username == "root") {
+        let has_root_pwd = if !host_id.is_empty() {
+            crate::vault::get_password(&format!("{}:user:root", host_id)).is_some()
+                || (opts.username.as_deref() == Some("root") && crate::vault::get_password(host_id).is_some())
+        } else {
+            false
+        };
+        users.push(ServerUser {
+            username: "root".to_string(),
+            uid: 0,
+            gid: 0,
+            home: "/root".to_string(),
+            shell: "/bin/bash".to_string(),
+            is_root: true,
+            is_login_user: true,
+            has_password: has_root_pwd,
+        });
+    }
+
+    // Sort: 1. root first, 2. login users, 3. other users
+    users.sort_by(|a, b| {
+        if a.is_root != b.is_root {
+            return b.is_root.cmp(&a.is_root);
+        }
+        if a.is_login_user != b.is_login_user {
+            return b.is_login_user.cmp(&a.is_login_user);
+        }
+        a.username.cmp(&b.username)
+    });
+
+    Ok(users)
 }

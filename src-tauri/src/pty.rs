@@ -13,6 +13,7 @@ use crate::ssh_auth::PasswordTracker;
 pub struct PasswordUpdatePayload {
     pub host_id: String,
     pub host_name: String,
+    pub username: Option<String>,
     pub new_password: String,
 }
 
@@ -216,11 +217,36 @@ impl PtyManager {
                 let mut is_login_success = false;
 
                 if let Some(user) = extract_prompt_username(&chunk) {
+                    let mut emit_user = false;
                     if let Ok(mut lock) = active_user_clone.lock() {
                         if *lock != user {
                             *lock = user.clone();
-                            let user_event = format!("pty-user-{}", sid_clone);
-                            let _ = app_clone.emit(&user_event, user);
+                            emit_user = true;
+                        }
+                    }
+                    if emit_user {
+                        let user_event = format!("pty-user-{}", sid_clone);
+                        let _ = app_clone.emit(&user_event, user.clone());
+
+                        // Detect if password was used/updated during su user switch
+                        if let Some(ref t) = tracker_clone {
+                            if let Ok(mut lock) = t.lock() {
+                                if let Some(tent) = lock.tentative_password.take() {
+                                    if !tent.trim().is_empty() {
+                                        let target = lock.target_switch_user.take().unwrap_or_else(|| user.clone());
+                                        let payload = PasswordUpdatePayload {
+                                            host_id: lock.host_id.clone().unwrap_or_default(),
+                                            host_name: lock.host_name.clone().unwrap_or_else(|| "服务器".to_string()),
+                                            username: Some(target),
+                                            new_password: tent,
+                                        };
+                                        let _ = app_clone.emit("ssh-password-update-prompt", payload);
+                                    }
+                                }
+                                lock.is_tracking = false;
+                                lock.target_switch_user = None;
+                                lock.auto_switch_password = None;
+                            }
                         }
                     }
                 }
@@ -253,6 +279,7 @@ impl PtyManager {
                                     to_emit = Some(PasswordUpdatePayload {
                                         host_id: lock.host_id.clone().unwrap_or_default(),
                                         host_name: lock.host_name.clone().unwrap_or_else(|| "服务器".to_string()),
+                                        username: None,
                                         new_password: tent.clone(),
                                     });
                                 }
@@ -304,6 +331,39 @@ impl PtyManager {
             }
         }
         "unknown".to_string()
+    }
+
+    pub fn switch_user(
+        &self,
+        session_id: &str,
+        target_user: &str,
+        password: Option<String>,
+    ) -> Result<(), String> {
+        let sessions = self.sessions.lock().unwrap();
+        if let Some(session) = sessions.get(session_id) {
+            let cmd = if target_user == "root" {
+                "su -\n".to_string()
+            } else {
+                format!("su - {}\n", target_user)
+            };
+
+            if let Some(ref t) = session.password_tracker {
+                if let Ok(mut lock) = t.lock() {
+                    lock.target_switch_user = Some(target_user.to_string());
+                    if let Some(ref pwd) = password {
+                        lock.auto_switch_password = Some(pwd.clone());
+                    }
+                    lock.is_tracking = true;
+                }
+            }
+
+            let mut writer = session.writer.lock().map_err(|e| e.to_string())?;
+            writer.write_all(cmd.as_bytes()).map_err(|e| e.to_string())?;
+            writer.flush().map_err(|e| e.to_string())?;
+            Ok(())
+        } else {
+            Err("会话不存在".to_string())
+        }
     }
 
     pub fn get_opts(&self, session_id: &str) -> Option<SpawnOptions> {

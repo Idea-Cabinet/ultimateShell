@@ -12,12 +12,14 @@ import { HostModal } from "./components/HostModal";
 import { SettingsModal } from "./components/SettingsModal";
 import { OpsDrawer, DrawerTab } from "./components/OpsDrawer";
 import { CommandAssistant } from "./components/CommandAssistant";
+import { ServerUserMenu } from "./components/ServerUserMenu";
 import { Folder, KeyRound, ShieldCheck, Sun, Moon, Monitor, Activity, HardDrive, Terminal, Globe, Settings, PanelLeft, PanelLeftClose } from "lucide-react";
 import "./App.css";
 
 interface PasswordUpdateEvent {
   host_id: string;
   host_name: string;
+  username?: string;
   new_password: string;
 }
 
@@ -94,10 +96,18 @@ export function App() {
   const handleAcceptPasswordUpdate = async () => {
     if (!passwordPrompt) return;
     try {
-      await invoke("save_host_password", {
-        hostId: passwordPrompt.host_id,
-        password: passwordPrompt.new_password,
-      });
+      if (passwordPrompt.username) {
+        await invoke("save_server_user_password", {
+          hostId: passwordPrompt.host_id,
+          username: passwordPrompt.username,
+          password: passwordPrompt.new_password,
+        });
+      } else {
+        await invoke("save_host_password", {
+          hostId: passwordPrompt.host_id,
+          password: passwordPrompt.new_password,
+        });
+      }
       await refreshHosts();
       setPasswordPrompt(null);
     } catch (err) {
@@ -724,31 +734,15 @@ export function App() {
               <span>{dirStats.path}</span>
               <span className="text-[var(--text-tertiary)]">·</span>
               <span>{dirStats.fileCount} 项</span>
-              {activeUser && (
-                <>
-                  <span className="text-[var(--text-tertiary)]">·</span>
-                  <span
-                    title={
-                      activeUser === "root"
-                        ? "当前终端身份: root (超级管理员特权)"
-                        : `当前终端身份: ${activeUser} (普通权限用户)`
-                    }
-                    className={`px-1 rounded text-[9.5px] font-mono font-medium border flex items-center space-x-1 ${
-                      activeUser === "root"
-                        ? "bg-rose-500/15 text-rose-500 border-rose-500/30"
-                        : "bg-[#007AFF]/15 text-[#007AFF] border-[#007AFF]/30"
-                    }`}
-                  >
-                    <span
-                      className={`w-1 h-1 rounded-full ${
-                        activeUser === "root" ? "bg-rose-500" : "bg-[#007AFF]"
-                      }`}
-                    />
-                    <span>{activeUser}</span>
-                  </span>
-                </>
-              )}
             </button>
+
+            {/* Server User Switching Dropdown Menu */}
+            <ServerUserMenu
+              sessionId={activeTabId}
+              hostProfile={activeTab?.hostProfile}
+              isLocal={activeTab?.isLocal ?? true}
+              currentUser={activeUser}
+            />
 
             {/* Toggle Process Manager Tab */}
             <button
@@ -887,11 +881,27 @@ export function App() {
                 <KeyRound className="w-5 h-5" />
               </div>
               <div className="flex-1 min-w-0">
-                <div className="text-[14px] font-semibold tracking-tight">更新服务器登录密码？</div>
+                <div className="text-[14px] font-semibold tracking-tight">
+                  {passwordPrompt.username
+                    ? `更新用户「${passwordPrompt.username}」的登录密码？`
+                    : "更新服务器登录密码？"}
+                </div>
                 <div className="text-[12px] text-[var(--text-secondary)] mt-1.5 leading-relaxed">
-                  检测到你已通过新密码成功登录「
-                  <span className="font-medium text-[var(--text-primary)]">{passwordPrompt.host_name}</span>
-                  」。是否将新密码加密更新到本地硬件保险库（AES-256-GCM 加密），以便下次免密自动连接？
+                  {passwordPrompt.username ? (
+                    <>
+                      检测到在主机「
+                      <span className="font-medium text-[var(--text-primary)]">{passwordPrompt.host_name}</span>
+                      」上已成功切换至用户「
+                      <span className="font-semibold text-[#007AFF]">{passwordPrompt.username}</span>
+                      」。是否将该密码加密保存至本地硬件保险库（AES-256-GCM 加密），以便下次一键免密切换？
+                    </>
+                  ) : (
+                    <>
+                      检测到你已通过新密码成功登录「
+                      <span className="font-medium text-[var(--text-primary)]">{passwordPrompt.host_name}</span>
+                      」。是否将新密码加密更新到本地硬件保险库（AES-256-GCM 加密），以便下次免密自动连接？
+                    </>
+                  )}
                 </div>
               </div>
             </div>

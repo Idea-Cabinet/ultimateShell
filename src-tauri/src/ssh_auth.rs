@@ -8,6 +8,8 @@ pub struct PasswordTracker {
     pub initial_password: Option<String>,
     pub host_id: Option<String>,
     pub host_name: Option<String>,
+    pub target_switch_user: Option<String>,
+    pub auto_switch_password: Option<String>,
     output: String,
     automatic_attempted: bool,
     authenticated: bool,
@@ -60,7 +62,16 @@ impl PasswordTracker {
     }
 
     pub fn observe_output(&mut self, chunk: &str) -> Option<String> {
-        if self.authenticated {
+        if self.authenticated && self.target_switch_user.is_none() && !self.is_tracking {
+            let lower = chunk.to_lowercase();
+            let prompt = lower.trim_end();
+            if prompt.ends_with("password:") || prompt.ends_with("密码:") || prompt.ends_with("密码：") {
+                self.output.clear();
+                self.current_input.clear();
+                self.tentative_password = None;
+                self.is_tracking = true;
+                return None;
+            }
             return None;
         }
         self.output.push_str(chunk);
@@ -93,6 +104,10 @@ impl PasswordTracker {
             self.current_input.clear();
             self.tentative_password = None;
             self.is_tracking = true;
+            if let Some(pwd) = self.auto_switch_password.take() {
+                self.is_tracking = false;
+                return Some(pwd);
+            }
             if !self.automatic_attempted {
                 self.automatic_attempted = true;
                 if let Some(password) = self.initial_password.clone() {

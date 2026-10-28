@@ -183,6 +183,50 @@ fn get_host_password(host_id: String) -> Option<String> {
 }
 
 #[tauri::command]
+async fn get_server_users(
+    pty_mgr: State<'_, PtyManager>,
+    sftp_pool: State<'_, SftpPool>,
+    session_id: String,
+) -> Result<Vec<ops::ServerUser>, String> {
+    let opts = pty_mgr
+        .get_opts(&session_id)
+        .ok_or_else(|| "会话不存在或已关闭".to_string())?;
+
+    let pool = sftp_pool.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || ops::get_server_users(&pool, &opts))
+        .await
+        .map_err(|e| format!("异步执行错误: {}", e))?
+}
+
+#[tauri::command]
+fn save_server_user_password(host_id: String, username: String, password: String) -> Result<(), String> {
+    let key = format!("{}:user:{}", host_id, username);
+    vault::save_password(&key, &password)
+}
+
+#[tauri::command]
+fn get_server_user_password(host_id: String, username: String) -> Option<String> {
+    let key = format!("{}:user:{}", host_id, username);
+    vault::get_password(&key)
+}
+
+#[tauri::command]
+fn delete_server_user_password(host_id: String, username: String) -> Result<(), String> {
+    let key = format!("{}:user:{}", host_id, username);
+    vault::delete_password(&key)
+}
+
+#[tauri::command]
+fn switch_session_user(
+    pty_mgr: State<PtyManager>,
+    session_id: String,
+    target_user: String,
+    password: Option<String>,
+) -> Result<(), String> {
+    pty_mgr.switch_user(&session_id, &target_user, password)
+}
+
+#[tauri::command]
 async fn get_system_perf(
     pty_mgr: State<'_, PtyManager>,
     sftp_pool: State<'_, SftpPool>,
@@ -361,6 +405,11 @@ pub fn run() {
             delete_host,
             save_host_password,
             get_host_password,
+            get_server_users,
+            save_server_user_password,
+            get_server_user_password,
+            delete_server_user_password,
+            switch_session_user,
             fs_list_dir,
             fs_read_preview,
         ])

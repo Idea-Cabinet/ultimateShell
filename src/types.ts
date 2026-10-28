@@ -79,3 +79,14 @@ export interface DiskPartition {
   avail: string;
   use_percent: number;
 }
+
+export interface ServerUser {
+  username: string;
+  uid: number;
+  gid: number;
+  home: string;
+  shell: string;
+  is_root: boolean;
+  is_login_user: boolean;
+  has_password: boolean;
+}
