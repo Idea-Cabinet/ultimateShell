@@ -132,9 +132,27 @@ impl SftpPool {
 
         let mut authed = false;
         // 1. Try identity file
-        if let Some(ref key_path) = opts.identity_file {
-            if !key_path.trim().is_empty() {
-                if sess.userauth_pubkey_file(user, None, Path::new(key_path), None).is_ok() {
+        if let Some(ref kp) = opts.identity_file {
+            let s = kp.trim();
+            if !s.is_empty() {
+                let resolved_path = if s.starts_with("~/") {
+                    if let Ok(home) = std::env::var("HOME") {
+                        std::path::PathBuf::from(home).join(&s[2..])
+                    } else {
+                        std::path::PathBuf::from(s)
+                    }
+                } else {
+                    std::path::PathBuf::from(s)
+                };
+
+                let pub_path = resolved_path.with_extension("pub");
+                let pub_ref = if pub_path.exists() {
+                    Some(pub_path.as_path())
+                } else {
+                    None
+                };
+
+                if sess.userauth_pubkey_file(user, pub_ref, resolved_path.as_path(), None).is_ok() {
                     authed = true;
                 }
             }

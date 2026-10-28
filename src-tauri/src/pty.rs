@@ -123,9 +123,19 @@ impl PtyManager {
             c.arg(port.to_string());
 
             if let Some(ref key_path) = opts.identity_file {
-                if !key_path.trim().is_empty() {
+                let s = key_path.trim();
+                if !s.is_empty() {
+                    let resolved_key = if s.starts_with("~/") {
+                        if let Ok(home) = std::env::var("HOME") {
+                            format!("{}/{}", home, &s[2..])
+                        } else {
+                            s.to_string()
+                        }
+                    } else {
+                        s.to_string()
+                    };
                     c.arg("-i");
-                    c.arg(key_path);
+                    c.arg(resolved_key);
                 }
             }
 
