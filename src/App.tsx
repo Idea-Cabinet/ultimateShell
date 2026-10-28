@@ -15,7 +15,7 @@ import { CommandAssistant } from "./components/CommandAssistant";
 import { ServerUserMenu } from "./components/ServerUserMenu";
 import { TransferProvider, useTransferManager } from "./context/TransferContext";
 import { TransferManagerModal } from "./components/TransferManagerModal";
-import { Folder, KeyRound, ShieldCheck, Sun, Moon, Monitor, Activity, HardDrive, Terminal, Globe, Settings, PanelLeft, PanelLeftClose, ArrowUpDown, Network, Server } from "lucide-react";
+import { Folder, KeyRound, ShieldCheck, Sun, Moon, Monitor, Activity, HardDrive, Terminal, Globe, Settings, PanelLeft, PanelLeftClose, ArrowUpDown, Network, Server, Workflow } from "lucide-react";
 import "./App.css";
 
 interface PasswordUpdateEvent {
@@ -908,6 +908,30 @@ function AppContent() {
               <span>服务</span>
             </button>
 
+            {/* Toggle SSH Tunnels Tab */}
+            <button
+              onClick={() => {
+                if (isOpsDrawerOpen && drawerActiveTab === "tunnels") {
+                  setIsOpsDrawerOpen(false);
+                  localStorage.setItem("ultimateshell_drawer_open", "false");
+                } else {
+                  setIsOpsDrawerOpen(true);
+                  setDrawerActiveTab("tunnels");
+                  localStorage.setItem("ultimateshell_drawer_open", "true");
+                  localStorage.setItem("ultimateshell_drawer_tab", "tunnels");
+                }
+              }}
+              className={`flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] border transition-all flex-shrink-0 ${
+                isOpsDrawerOpen && drawerActiveTab === "tunnels"
+                  ? "bg-emerald-500/15 text-emerald-500 border-emerald-500/40 font-medium"
+                  : "bg-[var(--hover-item)] text-[var(--text-secondary)] border-[var(--border-subtle)] hover:border-[var(--border-strong)]"
+              }`}
+              title="SSH 端口转发与隧道管理（本地打洞 -L、内网穿透 -R、动态 SOCKS5 代理 -D）"
+            >
+              <Workflow className="w-3 h-3 text-emerald-500" />
+              <span>隧道</span>
+            </button>
+
             {/* Toggle Command Assistant Bar */}
             <button
               onClick={() => {
@@ -1068,6 +1092,7 @@ function AppContent() {
         onClose={() => setIsModalOpen(false)}
         onSave={handleSaveHost}
         initialHost={editingHost}
+        availableHosts={hosts}
       />
 
       {/* Preferences & Settings Modal */}

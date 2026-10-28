@@ -8,6 +8,7 @@ mod ssh_auth;
 mod sftp;
 mod transfer;
 mod vault;
+mod tunnel;
 
 use hosts::{load_hosts, save_hosts, HostProfile};
 use ops::{DiskPartition, ProcessEntry};
@@ -15,6 +16,7 @@ use perf::{PerfManager, SystemPerfStats};
 use pty::{PtyManager, SpawnOptions};
 use sftp::{DirResult, SftpPool};
 use transfer::TransferState;
+use tunnel::{TunnelEntry, TunnelManager};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -51,8 +53,10 @@ fn pty_resize(
 fn pty_close(
     pty_mgr: State<PtyManager>,
     sftp_pool: State<SftpPool>,
+    tunnel_mgr: State<TunnelManager>,
     session_id: String,
 ) -> Result<(), String> {
+    tunnel_mgr.cleanup_session(&session_id);
     sftp_pool.close(&session_id);
     pty_mgr.close(&session_id)
 }
@@ -677,18 +681,53 @@ async fn systemd_service_status(
         .map_err(|e| format!("异步执行错误: {}", e))?
 }
 
+#[tauri::command]
+async fn tunnel_start(
+    tunnel_mgr: State<'_, TunnelManager>,
+    pty_mgr: State<'_, PtyManager>,
+    entry: TunnelEntry,
+    session_id: String,
+) -> Result<TunnelEntry, String> {
+    let opts = pty_mgr
+        .get_opts(&session_id)
+        .ok_or_else(|| "会话不存在或已关闭".to_string())?;
+
+    let mgr = tunnel_mgr.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || mgr.start_tunnel(entry, &opts))
+        .await
+        .map_err(|e| format!("异步执行错误: {}", e))?
+}
+
+#[tauri::command]
+fn tunnel_stop(
+    tunnel_mgr: State<'_, TunnelManager>,
+    tunnel_id: String,
+) -> Result<(), String> {
+    tunnel_mgr.stop_tunnel(&tunnel_id)
+}
+
+#[tauri::command]
+fn tunnel_list(
+    tunnel_mgr: State<'_, TunnelManager>,
+    session_id: Option<String>,
+) -> Result<Vec<TunnelEntry>, String> {
+    Ok(tunnel_mgr.list_tunnels(session_id.as_deref()))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let pty_mgr = PtyManager::new();
     let sftp_pool = SftpPool::new();
     let perf_mgr = PerfManager::new();
     let transfer_state = TransferState::new();
+    let tunnel_mgr = TunnelManager::new();
 
     tauri::Builder::default()
         .manage(pty_mgr)
         .manage(sftp_pool)
         .manage(perf_mgr)
         .manage(transfer_state)
+        .manage(tunnel_mgr)
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
@@ -816,6 +855,9 @@ pub fn run() {
             get_systemd_services,
             systemd_control_service,
             systemd_service_status,
+            tunnel_start,
+            tunnel_stop,
+            tunnel_list,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

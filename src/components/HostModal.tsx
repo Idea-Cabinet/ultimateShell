@@ -10,9 +10,10 @@ interface Props {
   onClose: () => void;
   onSave: (host: HostProfile, password?: string) => void;
   initialHost?: HostProfile | null;
+  availableHosts?: HostProfile[];
 }
 
-export const HostModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialHost }) => {
+export const HostModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialHost, availableHosts = [] }) => {
   const { t } = useI18n();
   const [formData, setFormData] = useState<HostProfile>({
     id: "",
@@ -23,6 +24,9 @@ export const HostModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialHos
     group: "",
     description: "",
     identity_file: "",
+    proxy_type: "none",
+    jump_host_id: "",
+    proxy_url: "",
   });
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -66,6 +70,9 @@ export const HostModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialHos
         group: "",
         description: "",
         identity_file: "",
+        proxy_type: "none",
+        jump_host_id: "",
+        proxy_url: "",
       });
       setPassword("");
     }
@@ -104,8 +111,8 @@ export const HostModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialHos
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 backdrop-blur-md">
-      <div className="apple-card apple-modal-enter rounded-2xl w-[460px] overflow-hidden text-sm text-[var(--text-primary)]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 backdrop-blur-md p-4">
+      <div className="apple-card apple-modal-enter rounded-2xl w-[480px] max-h-[90vh] overflow-y-auto text-sm text-[var(--text-primary)] shadow-2xl">
         {/* Sheet Header */}
         <div className="flex items-center justify-between px-6 pt-5 pb-3">
           <div className="flex items-center space-x-2.5">
@@ -267,6 +274,91 @@ export const HostModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialHos
                 <span>{t("modal.host.selectFile")}</span>
               </button>
             </div>
+          </div>
+
+          {/* Network Proxy & Bastion Host Section */}
+          <div className="pt-2 border-t border-[var(--border-subtle)] space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-[11px] font-medium text-[var(--text-secondary)]">
+                网络拓扑与代理 (Proxy / Bastion)
+              </label>
+              <span className="text-[10px] text-[var(--text-tertiary)]">
+                {formData.proxy_type === "jump" ? "经跳板机跳转" : formData.proxy_type === "proxy" ? "经本地代理中转" : "直连目标主机"}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-3 gap-1.5 p-1 bg-[var(--input-bg)] rounded-[8px] border border-[var(--border-subtle)] text-[11px]">
+              <button
+                type="button"
+                onClick={() => setFormData({ ...formData, proxy_type: "none" })}
+                className={`py-1 rounded-[6px] transition font-medium ${
+                  (formData.proxy_type || "none") === "none"
+                    ? "bg-[#007AFF] text-white shadow-xs"
+                    : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                }`}
+              >
+                直连 (默认)
+              </button>
+              <button
+                type="button"
+                onClick={() => setFormData({ ...formData, proxy_type: "jump" })}
+                className={`py-1 rounded-[6px] transition font-medium ${
+                  formData.proxy_type === "jump"
+                    ? "bg-[#007AFF] text-white shadow-xs"
+                    : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                }`}
+              >
+                跳板机 (Jump)
+              </button>
+              <button
+                type="button"
+                onClick={() => setFormData({ ...formData, proxy_type: "proxy" })}
+                className={`py-1 rounded-[6px] transition font-medium ${
+                  formData.proxy_type === "proxy"
+                    ? "bg-[#007AFF] text-white shadow-xs"
+                    : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                }`}
+              >
+                前置代理
+              </button>
+            </div>
+
+            {formData.proxy_type === "jump" && (
+              <div className="animate-in fade-in duration-150 pt-1">
+                <label className="block text-[10.5px] text-[var(--text-secondary)] mb-1">
+                  选择已有跳板机 (ProxyJump)
+                </label>
+                <select
+                  value={formData.jump_host_id || ""}
+                  onChange={(e) => setFormData({ ...formData, jump_host_id: e.target.value })}
+                  className="w-full px-3 py-1.5 bg-[var(--input-bg)] border border-[var(--border-subtle)] rounded-[8px] text-[12px] text-[var(--text-primary)] focus:outline-none focus:border-[#007AFF]"
+                >
+                  <option value="">-- 请选择跳板机 --</option>
+                  {availableHosts
+                    ?.filter((h) => h.id !== formData.id)
+                    .map((h) => (
+                      <option key={h.id} value={h.id}>
+                        {h.name} ({h.username}@{h.host}:{h.port})
+                      </option>
+                    ))}
+                </select>
+              </div>
+            )}
+
+            {formData.proxy_type === "proxy" && (
+              <div className="animate-in fade-in duration-150 pt-1">
+                <label className="block text-[10.5px] text-[var(--text-secondary)] mb-1">
+                  本地客户端代理地址 (支持 SOCKS5 / HTTP)
+                </label>
+                <input
+                  type="text"
+                  placeholder="例如: socks5://127.0.0.1:7890 或 127.0.0.1:1080"
+                  value={formData.proxy_url || ""}
+                  onChange={(e) => setFormData({ ...formData, proxy_url: e.target.value })}
+                  className="w-full px-3 py-1.5 bg-[var(--input-bg)] border border-[var(--border-subtle)] rounded-[8px] text-[12px] text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none focus:border-[#007AFF] font-mono"
+                />
+              </div>
+            )}
           </div>
 
           <div>

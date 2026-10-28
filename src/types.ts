@@ -1,3 +1,5 @@
+export type ProxyType = "none" | "jump" | "proxy";
+
 export interface HostProfile {
   id: string;
   name: string;
@@ -10,6 +12,23 @@ export interface HostProfile {
   create_time?: number;
   access_time?: number;
   has_password?: boolean;
+  proxy_type?: ProxyType;
+  jump_host_id?: string;
+  proxy_url?: string;
+}
+
+export type TunnelType = "local" | "remote" | "dynamic";
+
+export interface TunnelEntry {
+  id: string;
+  session_id: string;
+  tunnel_type: TunnelType;
+  local_port: number;
+  remote_host: string;
+  remote_port: number;
+  status: "active" | "stopped" | "error";
+  description: string;
+  error_msg?: string;
 }
 
 export function isDefaultGroup(group?: string | null): boolean {

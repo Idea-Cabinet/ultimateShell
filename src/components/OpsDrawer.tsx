@@ -5,8 +5,9 @@ import { ProcessManager } from "./ProcessManager";
 import { DiskMountManager } from "./DiskMountManager";
 import { PortManager } from "./PortManager";
 import { ServiceManager } from "./ServiceManager";
+import { TunnelManager } from "./TunnelManager";
 
-export type DrawerTab = "files" | "processes" | "disks" | "ports" | "services";
+export type DrawerTab = "files" | "processes" | "disks" | "ports" | "services" | "tunnels";
 
 interface Props {
   session: TabSession;
@@ -93,6 +94,15 @@ export const OpsDrawer: React.FC<Props> = ({
           <ServiceManager
             session={session}
             onSendToTerminal={onSendToTerminal}
+            isMaximized={isMaximized}
+            onToggleMaximize={onToggleMaximize}
+            onClose={onClose}
+          />
+        )}
+
+        {activeTab === "tunnels" && (
+          <TunnelManager
+            session={session}
             isMaximized={isMaximized}
             onToggleMaximize={onToggleMaximize}
             onClose={onClose}

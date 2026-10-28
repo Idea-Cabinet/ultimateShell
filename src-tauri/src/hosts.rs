@@ -15,6 +15,12 @@ pub struct HostProfile {
     pub create_time: Option<u64>,
     pub access_time: Option<u64>,
     pub has_password: Option<bool>,
+    #[serde(default)]
+    pub proxy_type: Option<String>,
+    #[serde(default)]
+    pub jump_host_id: Option<String>,
+    #[serde(default)]
+    pub proxy_url: Option<String>,
 }
 
 fn get_storage_path() -> PathBuf {

@@ -62,6 +62,12 @@ pub struct SpawnOptions {
     pub port: Option<u16>,
     pub username: Option<String>,
     pub identity_file: Option<String>,
+    #[serde(default)]
+    pub proxy_type: Option<String>,
+    #[serde(default)]
+    pub jump_host_id: Option<String>,
+    #[serde(default)]
+    pub proxy_url: Option<String>,
     pub cols: Option<u16>,
     pub rows: Option<u16>,
 }
@@ -136,6 +142,60 @@ impl PtyManager {
                     };
                     c.arg("-i");
                     c.arg(resolved_key);
+                }
+            }
+
+            // 3. Proxy handling: Jump Host (ProxyJump) or Client Proxy (ProxyCommand)
+            if let Some(ref ptype) = opts.proxy_type {
+                if ptype == "jump" {
+                    if let Some(ref jid) = opts.jump_host_id {
+                        let all_hosts = crate::hosts::load_hosts();
+                        if let Some(jh) = all_hosts.iter().find(|h| &h.id == jid) {
+                            if let Some(ref jkey) = jh.identity_file {
+                                let s = jkey.trim();
+                                if !s.is_empty() {
+                                    let resolved_jkey = if s.starts_with("~/") {
+                                        if let Ok(home) = std::env::var("HOME") {
+                                            format!("{}/{}", home, &s[2..])
+                                        } else {
+                                            s.to_string()
+                                        }
+                                    } else {
+                                        s.to_string()
+                                    };
+                                    c.arg("-o");
+                                    c.arg(format!(
+                                        "ProxyCommand=ssh -i {} -p {} -W %h:%p {}@{}",
+                                        resolved_jkey, jh.port, jh.username, jh.host
+                                    ));
+                                } else {
+                                    c.arg("-J");
+                                    c.arg(format!("{}@{}:{}", jh.username, jh.host, jh.port));
+                                }
+                            } else {
+                                c.arg("-J");
+                                c.arg(format!("{}@{}:{}", jh.username, jh.host, jh.port));
+                            }
+                        }
+                    }
+                } else if ptype == "proxy" {
+                    if let Some(ref purl) = opts.proxy_url {
+                        let p = purl.trim();
+                        if !p.is_empty() {
+                            let (is_http, raw_addr) = if p.starts_with("http://") {
+                                (true, p.trim_start_matches("http://"))
+                            } else if p.starts_with("socks5://") {
+                                (false, p.trim_start_matches("socks5://"))
+                            } else if p.starts_with("socks5h://") {
+                                (false, p.trim_start_matches("socks5h://"))
+                            } else {
+                                (false, p)
+                            };
+                            let proto = if is_http { "connect" } else { "5" };
+                            c.arg("-o");
+                            c.arg(format!("ProxyCommand=nc -X {} -x {} %h %p", proto, raw_addr));
+                        }
+                    }
                 }
             }
 
