@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import {
   Terminal,
@@ -10,6 +10,9 @@ import {
   Play,
   ChevronDown,
   Search,
+  Trash2,
+  Copy,
+  Check,
 } from "lucide-react";
 import { TabSession } from "../types";
 import { useI18n } from "../i18n";
@@ -165,6 +168,18 @@ export const CommandAssistant: React.FC<Props> = ({ session: _session, isOpen = 
 
   const [historyIdx, setHistoryIdx] = useState<number>(-1);
   const [showHistoryDropdown, setShowHistoryDropdown] = useState(false);
+  const [historySearch, setHistorySearch] = useState("");
+  const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
+  const [historyPopupPos, setHistoryPopupPos] = useState<{
+    top?: number;
+    bottom?: number;
+    left?: number;
+    right?: number;
+  }>({});
+
+  const historyBtnRef = useRef<HTMLButtonElement>(null);
+  const historyDropdownRef = useRef<HTMLDivElement>(null);
+
   const [showTemplatesModal, setShowTemplatesModal] = useState(false);
   const [modalFilter, setModalFilter] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("ALL");
@@ -174,6 +189,96 @@ export const CommandAssistant: React.FC<Props> = ({ session: _session, isOpen = 
   const [paramValues, setParamValues] = useState<Record<string, string>>({});
 
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const updateHistoryPosition = () => {
+    if (!historyBtnRef.current) return;
+    const rect = historyBtnRef.current.getBoundingClientRect();
+    const spaceAbove = rect.top;
+    const spaceBelow = window.innerHeight - rect.bottom;
+
+    if (spaceAbove >= 240 || spaceAbove >= spaceBelow) {
+      setHistoryPopupPos({
+        bottom: Math.max(8, window.innerHeight - rect.top + 8),
+        right: Math.max(12, window.innerWidth - rect.right),
+      });
+    } else {
+      setHistoryPopupPos({
+        top: Math.max(8, rect.bottom + 8),
+        right: Math.max(12, window.innerWidth - rect.right),
+      });
+    }
+  };
+
+  const toggleHistoryDropdown = () => {
+    if (!showHistoryDropdown) {
+      updateHistoryPosition();
+      setHistorySearch("");
+      setShowHistoryDropdown(true);
+    } else {
+      setShowHistoryDropdown(false);
+    }
+  };
+
+  // Close history on click outside, Esc key, and handle resize/scroll
+  useEffect(() => {
+    if (!showHistoryDropdown) return;
+    updateHistoryPosition();
+
+    const handlePointerDown = (e: MouseEvent | TouchEvent) => {
+      const target = e.target as Node;
+      if (
+        historyDropdownRef.current &&
+        !historyDropdownRef.current.contains(target) &&
+        historyBtnRef.current &&
+        !historyBtnRef.current.contains(target)
+      ) {
+        setShowHistoryDropdown(false);
+      }
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setShowHistoryDropdown(false);
+      }
+    };
+
+    const handleResizeOrScroll = () => {
+      updateHistoryPosition();
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("resize", handleResizeOrScroll);
+    window.addEventListener("scroll", handleResizeOrScroll, true);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("resize", handleResizeOrScroll);
+      window.removeEventListener("scroll", handleResizeOrScroll, true);
+    };
+  }, [showHistoryDropdown]);
+
+  const filteredHistory = useMemo(() => {
+    return history
+      .map((cmd, originalIndex) => ({ cmd, originalIndex }))
+      .filter(({ cmd }) =>
+        !historySearch.trim() || cmd.toLowerCase().includes(historySearch.toLowerCase().trim())
+      );
+  }, [history, historySearch]);
+
+  const handleDeleteHistoryItem = (indexToDelete: number) => {
+    setHistory((prev) => {
+      const updated = prev.filter((_, idx) => idx !== indexToDelete);
+      localStorage.setItem("ultimateshell_cmd_history", JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  const handleCopyHistoryItem = (cmd: string, idx: number) => {
+    navigator.clipboard.writeText(cmd);
+    setCopiedIdx(idx);
+    setTimeout(() => setCopiedIdx(null), 1500);
+  };
 
   // Focus input on open
   useEffect(() => {
@@ -336,69 +441,22 @@ export const CommandAssistant: React.FC<Props> = ({ session: _session, isOpen = 
           )}
 
           {/* History Button */}
-          <div className="relative">
-            <button
-              onClick={() => setShowHistoryDropdown(!showHistoryDropdown)}
-              className={`p-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition flex items-center space-x-0.5 ${
-                showHistoryDropdown ? "bg-[var(--hover-item)] text-[#007AFF]" : ""
+          <button
+            ref={historyBtnRef}
+            type="button"
+            onClick={toggleHistoryDropdown}
+            className={`p-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition flex items-center space-x-0.5 cursor-pointer ${
+              showHistoryDropdown ? "bg-[var(--hover-item)] text-[#007AFF]" : ""
+            }`}
+            title={t("cmd.historyTip")}
+          >
+            <Clock className="w-3.5 h-3.5" />
+            <ChevronDown
+              className={`w-2.5 h-2.5 transition-transform duration-150 ${
+                showHistoryDropdown ? "rotate-180" : ""
               }`}
-              title={t("cmd.historyTip")}
-            >
-              <Clock className="w-3 h-3" />
-              <ChevronDown className="w-2.5 h-2.5" />
-            </button>
-
-            {/* History Dropdown Menu */}
-            {showHistoryDropdown && (
-              <div
-                className="absolute right-0 bottom-7 z-50 w-72 max-h-56 overflow-y-auto bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-xl shadow-2xl p-1 text-[11.5px] font-mono apple-vibrancy-popover animate-in fade-in zoom-in-95 duration-100"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="px-2 py-1 text-[10px] font-sans font-semibold text-[var(--text-tertiary)] uppercase flex justify-between items-center border-b border-[var(--border-subtle)]/50">
-                  <span>{t("cmd.historyTitle")} ({history.length})</span>
-                  <button
-                    onClick={() => {
-                      setHistory([]);
-                      localStorage.removeItem("ultimateshell_cmd_history");
-                      setShowHistoryDropdown(false);
-                    }}
-                    className="text-rose-500 hover:underline"
-                  >
-                    {t("cmd.historyClear")}
-                  </button>
-                </div>
-                {history.length === 0 ? (
-                  <div className="p-3 text-center text-[var(--text-tertiary)] font-sans">
-                    {t("cmd.historyEmpty")}
-                  </div>
-                ) : (
-                  history.map((cmd, i) => (
-                    <div
-                      key={i}
-                      onClick={() => {
-                        setInputCmd(cmd);
-                        setShowHistoryDropdown(false);
-                        inputRef.current?.focus();
-                      }}
-                      className="px-2 py-1.5 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer truncate flex items-center justify-between group"
-                    >
-                      <span className="truncate">{cmd}</span>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          executeCommand(cmd);
-                        }}
-                        className="opacity-0 group-hover:opacity-100 p-0.5 rounded bg-[#007AFF] text-white hover:bg-[#0062CC] ml-1 flex-shrink-0"
-                        title={t("cmd.runNow")}
-                      >
-                        <Play className="w-2.5 h-2.5" />
-                      </button>
-                    </div>
-                  ))
-                )}
-              </div>
-            )}
-          </div>
+            />
+          </button>
         </div>
 
         {/* Templates Library Button */}
@@ -435,6 +493,146 @@ export const CommandAssistant: React.FC<Props> = ({ session: _session, isOpen = 
           <X className="w-3.5 h-3.5" />
         </button>
       </div>
+
+      {/* History Dropdown Menu (Rendered to document.body to prevent height collapse & z-index clipping) */}
+      {showHistoryDropdown &&
+        createPortal(
+          <div
+            ref={historyDropdownRef}
+            style={{
+              position: "fixed",
+              bottom: historyPopupPos.bottom,
+              top: historyPopupPos.top,
+              right: historyPopupPos.right,
+              zIndex: 99999,
+            }}
+            className="w-80 sm:w-96 max-h-[380px] min-h-[140px] flex flex-col bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-xl shadow-2xl p-2 text-[11.5px] font-mono apple-vibrancy-popover animate-in fade-in zoom-in-95 duration-100 select-none"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="px-2 py-1.5 text-[11px] font-sans font-semibold text-[var(--text-tertiary)] flex justify-between items-center border-b border-[var(--border-subtle)]/60 flex-shrink-0">
+              <div className="flex items-center space-x-1.5">
+                <Clock className="w-3.5 h-3.5 text-[#007AFF]" />
+                <span className="text-[var(--text-primary)] font-medium">
+                  {t("cmd.historyTitle")}
+                </span>
+                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-[var(--hover-item)] text-[var(--text-secondary)] font-mono">
+                  {history.length}
+                </span>
+              </div>
+              {history.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setHistory([]);
+                    localStorage.removeItem("ultimateshell_cmd_history");
+                    setShowHistoryDropdown(false);
+                  }}
+                  className="text-rose-500 hover:text-rose-600 hover:underline flex items-center space-x-1 text-[11px] transition cursor-pointer"
+                >
+                  <Trash2 className="w-3 h-3" />
+                  <span>{t("cmd.historyClear")}</span>
+                </button>
+              )}
+            </div>
+
+            {/* Filter / Search input if history has items */}
+            {history.length > 3 && (
+              <div className="pt-2 px-1 pb-1 flex-shrink-0">
+                <div className="relative flex items-center">
+                  <Search className="w-3 h-3 text-[var(--text-tertiary)] absolute left-2 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={historySearch}
+                    onChange={(e) => setHistorySearch(e.target.value)}
+                    placeholder="搜索历史命令..."
+                    className="w-full pl-6 pr-2 py-1 bg-[var(--input-bg)] border border-[var(--border-subtle)] focus:border-[#007AFF] rounded-md text-[11px] font-mono text-[var(--text-primary)] placeholder-[var(--text-tertiary)] outline-none"
+                  />
+                  {historySearch && (
+                    <button
+                      type="button"
+                      onClick={() => setHistorySearch("")}
+                      className="absolute right-1.5 p-0.5 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
+                    >
+                      <X className="w-2.5 h-2.5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* History Items List */}
+            <div className="flex-1 overflow-y-auto min-h-0 py-1 space-y-0.5 no-scrollbar">
+              {filteredHistory.length === 0 ? (
+                <div className="py-7 text-center text-[var(--text-tertiary)] font-sans flex flex-col items-center justify-center space-y-1">
+                  <Clock className="w-6 h-6 opacity-30" />
+                  <span>{historySearch ? "无匹配的历史命令" : t("cmd.historyEmpty")}</span>
+                </div>
+              ) : (
+                filteredHistory.map(({ cmd, originalIndex }) => (
+                  <div
+                    key={originalIndex}
+                    onClick={() => {
+                      setInputCmd(cmd);
+                      setShowHistoryDropdown(false);
+                      inputRef.current?.focus();
+                    }}
+                    title="点击填充到输入框"
+                    className="px-2 py-1.5 rounded-lg hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer flex items-center justify-between group transition-colors"
+                  >
+                    <span
+                      className="truncate flex-1 font-mono text-[11px] pr-2 select-text"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {cmd}
+                    </span>
+                    <div className="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleCopyHistoryItem(cmd, originalIndex);
+                        }}
+                        className="p-1 rounded text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-card)] transition cursor-pointer"
+                        title="复制命令"
+                      >
+                        {copiedIdx === originalIndex ? (
+                          <Check className="w-3 h-3 text-emerald-500" />
+                        ) : (
+                          <Copy className="w-3 h-3" />
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteHistoryItem(originalIndex);
+                        }}
+                        className="p-1 rounded text-[var(--text-tertiary)] hover:text-rose-500 hover:bg-[var(--bg-card)] transition cursor-pointer"
+                        title="删除此条记录"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          executeCommand(cmd);
+                          setShowHistoryDropdown(false);
+                        }}
+                        className="p-1 rounded bg-[#007AFF] text-white hover:bg-[#0062CC] transition flex items-center space-x-0.5 cursor-pointer"
+                        title={t("cmd.runNow")}
+                      >
+                        <Play className="w-2.5 h-2.5" />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>,
+          document.body
+        )}
 
       {/* Templates Library Modal (Rendered to document.body to avoid being covered by sidebar) */}
       {showTemplatesModal &&

@@ -709,7 +709,7 @@ function AppContent() {
                 : "grid-rows-[0fr] opacity-0 pointer-events-none"
             }`}
           >
-            <div className="overflow-hidden">
+            <div className={isCommandAssistantOpen ? "overflow-visible" : "overflow-hidden"}>
               <CommandAssistant
                 session={activeTab}
                 onSendToTerminal={handleRunQuickCommand}
