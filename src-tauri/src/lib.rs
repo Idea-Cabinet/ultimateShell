@@ -6,6 +6,7 @@ mod perf;
 mod pty;
 mod ssh_auth;
 mod sftp;
+mod transfer;
 mod vault;
 
 use hosts::{load_hosts, save_hosts, HostProfile};
@@ -13,6 +14,7 @@ use ops::{DiskPartition, ProcessEntry};
 use perf::{PerfManager, SystemPerfStats};
 use pty::{PtyManager, SpawnOptions};
 use sftp::{DirResult, SftpPool};
+use transfer::TransferState;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -96,6 +98,112 @@ async fn fs_read_preview(
     })
     .await
     .map_err(|e| format!("异步执行错误: {}", e))?
+}
+
+#[tauri::command]
+async fn fs_rename(
+    pty_mgr: State<'_, PtyManager>,
+    sftp_pool: State<'_, SftpPool>,
+    session_id: String,
+    old_path: String,
+    new_path: String,
+) -> Result<(), String> {
+    let opts = pty_mgr
+        .get_opts(&session_id)
+        .ok_or_else(|| "会话不存在或已关闭".to_string())?;
+
+    let pool = sftp_pool.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        sftp::rename_file(&pool, &opts, &old_path, &new_path)
+    })
+    .await
+    .map_err(|e| format!("异步执行错误: {}", e))?
+}
+
+#[tauri::command]
+async fn fs_download_file(
+    app: AppHandle,
+    pty_mgr: State<'_, PtyManager>,
+    sftp_pool: State<'_, SftpPool>,
+    transfer_state: State<'_, TransferState>,
+    session_id: String,
+    remote_path: String,
+    local_path: String,
+    task_id: String,
+) -> Result<(), String> {
+    let opts = pty_mgr
+        .get_opts(&session_id)
+        .ok_or_else(|| "会话不存在或已关闭".to_string())?;
+
+    let pool = sftp_pool.inner().clone();
+    let cancel_flag = transfer_state.register(&task_id);
+    let t_state = transfer_state.inner().clone();
+    let tid = task_id.clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let res = sftp::download_file(
+            app,
+            &pool,
+            &opts,
+            &remote_path,
+            &local_path,
+            &tid,
+            cancel_flag,
+        );
+        t_state.remove(&tid);
+        res
+    })
+    .await
+    .map_err(|e| format!("异步执行错误: {}", e))?
+}
+
+#[tauri::command]
+async fn fs_upload_file(
+    app: AppHandle,
+    pty_mgr: State<'_, PtyManager>,
+    sftp_pool: State<'_, SftpPool>,
+    transfer_state: State<'_, TransferState>,
+    session_id: String,
+    local_path: String,
+    remote_path: String,
+    task_id: String,
+) -> Result<(), String> {
+    let opts = pty_mgr
+        .get_opts(&session_id)
+        .ok_or_else(|| "会话不存在或已关闭".to_string())?;
+
+    let pool = sftp_pool.inner().clone();
+    let cancel_flag = transfer_state.register(&task_id);
+    let t_state = transfer_state.inner().clone();
+    let tid = task_id.clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let res = sftp::upload_file(
+            app,
+            &pool,
+            &opts,
+            &local_path,
+            &remote_path,
+            &tid,
+            cancel_flag,
+        );
+        t_state.remove(&tid);
+        res
+    })
+    .await
+    .map_err(|e| format!("异步执行错误: {}", e))?
+}
+
+#[tauri::command]
+fn fs_cancel_transfer(transfer_state: State<TransferState>, task_id: String) -> bool {
+    transfer_state.cancel(&task_id)
+}
+
+#[tauri::command]
+fn fs_get_default_download_dir() -> String {
+    std::env::var("HOME")
+        .map(|h| format!("{}/Downloads", h))
+        .unwrap_or_else(|_| ".".to_string())
 }
 
 #[tauri::command]
@@ -306,11 +414,13 @@ pub fn run() {
     let pty_mgr = PtyManager::new();
     let sftp_pool = SftpPool::new();
     let perf_mgr = PerfManager::new();
+    let transfer_state = TransferState::new();
 
     tauri::Builder::default()
         .manage(pty_mgr)
         .manage(sftp_pool)
         .manage(perf_mgr)
+        .manage(transfer_state)
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
@@ -418,6 +528,11 @@ pub fn run() {
             switch_session_user,
             fs_list_dir,
             fs_read_preview,
+            fs_rename,
+            fs_download_file,
+            fs_upload_file,
+            fs_cancel_transfer,
+            fs_get_default_download_dir,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

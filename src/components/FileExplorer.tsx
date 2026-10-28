@@ -4,6 +4,8 @@ import { usePointerReorder } from "../hooks/usePointerReorder";
 import { useI18n } from "../i18n";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { open, save } from "@tauri-apps/plugin-dialog";
+import { useTransferManager } from "../context/TransferContext";
 import { DirResult, FileEntry, TabSession } from "../types";
 import {
   Folder,
@@ -31,6 +33,10 @@ import {
   X,
   HardDrive,
   Layers,
+  Upload,
+  Download,
+  Pencil,
+  ArrowUpDown,
 } from "lucide-react";
 
 interface FileExplorerProps {
@@ -291,6 +297,32 @@ export function FileExplorer({
   const [previewFile, setPreviewFile] = useState<FileEntry | null>(null);
   const [previewContent, setPreviewContent] = useState<string>("");
   const [previewLoading, setPreviewLoading] = useState<boolean>(false);
+
+  // Global Transfer Manager
+  const transferManager = useTransferManager();
+
+  // Drag & drop state for file upload
+  const [isDragOver, setIsDragOver] = useState(false);
+  const dragCounterRef = useRef(0);
+
+  // Rename states
+  const [renamingEntry, setRenamingEntry] = useState<FileEntry | null>(null);
+  const [newName, setNewName] = useState("");
+  const [renameLoading, setRenameLoading] = useState(false);
+  const renameInputRef = useRef<HTMLInputElement>(null);
+
+  // Focus rename input and select filename without extension
+  useEffect(() => {
+    if (renamingEntry && renameInputRef.current) {
+      renameInputRef.current.focus();
+      const dotIdx = renamingEntry.name.lastIndexOf(".");
+      if (dotIdx > 0 && !renamingEntry.is_dir) {
+        renameInputRef.current.setSelectionRange(0, dotIdx);
+      } else {
+        renameInputRef.current.select();
+      }
+    }
+  }, [renamingEntry]);
 
   // Context Menu
   const [contextMenu, setContextMenu] = useState<{
@@ -587,6 +619,168 @@ export function FileExplorer({
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [previewFile]);
+
+  // Download file to default Downloads folder
+  const handleDownload = async (entry: FileEntry) => {
+    try {
+      await transferManager.startDownload(
+        session.id,
+        session.title || "服务器",
+        entry.path,
+        entry.name,
+        entry.size
+      );
+    } catch (err) {
+      console.error("下载失败:", err);
+    }
+  };
+
+  // Download file with Save As... dialog
+  const handleDownloadSaveAs = async (entry: FileEntry) => {
+    try {
+      const selected = await save({
+        defaultPath: entry.name,
+        title: "另存为到本地目录",
+      });
+      if (selected) {
+        await transferManager.startDownload(
+          session.id,
+          session.title || "服务器",
+          entry.path,
+          entry.name,
+          entry.size,
+          selected
+        );
+      }
+    } catch (err) {
+      console.error("另存为失败:", err);
+    }
+  };
+
+  // Upload files via file picker dialog
+  const handleUploadClick = async () => {
+    try {
+      const selected = await open({
+        multiple: true,
+        title: `选择要上传到 ${currentPath} 的文件`,
+      });
+      if (selected) {
+        const filePaths = Array.isArray(selected) ? selected : [selected];
+        for (const localPath of filePaths) {
+          if (localPath) {
+            await transferManager.startUpload(
+              session.id,
+              session.title || "服务器",
+              localPath,
+              currentPath
+            );
+          }
+        }
+      }
+    } catch (err) {
+      console.error("打开文件选择器失败:", err);
+    }
+  };
+
+  // Confirm rename operation
+  const handleConfirmRename = async () => {
+    if (!renamingEntry || !newName.trim() || newName.trim() === renamingEntry.name) {
+      setRenamingEntry(null);
+      return;
+    }
+    const cleanNewName = newName.trim();
+    const parentDir = renamingEntry.path.substring(0, renamingEntry.path.lastIndexOf("/"));
+    const newPath = `${parentDir}/${cleanNewName}`;
+
+    setRenameLoading(true);
+    try {
+      await invoke("fs_rename", {
+        sessionId: session.id,
+        oldPath: renamingEntry.path,
+        newPath,
+      });
+      setRenamingEntry(null);
+      loadDirectory(currentPath, false);
+    } catch (err: any) {
+      alert(`重命名失败: ${typeof err === "string" ? err : err?.message || err}`);
+    } finally {
+      setRenameLoading(false);
+    }
+  };
+
+  // Drag and Drop event handlers
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current += 1;
+    if (e.dataTransfer?.types?.includes("Files")) {
+      setIsDragOver(true);
+    }
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current -= 1;
+    if (dragCounterRef.current <= 0) {
+      setIsDragOver(false);
+      dragCounterRef.current = 0;
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+    dragCounterRef.current = 0;
+
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const localPath = (file as any).path;
+        if (localPath) {
+          await transferManager.startUpload(
+            session.id,
+            session.title || "服务器",
+            localPath,
+            currentPath,
+            file.name
+          );
+        }
+      }
+    }
+  };
+
+  // Listen for Tauri window native drag-drop
+  useEffect(() => {
+    if (!isOpen) return;
+    let unlisten: (() => void) | null = null;
+    listen<{ paths: string[] }>("tauri://drag-drop", async (event) => {
+      const paths = event.payload?.paths;
+      if (paths && paths.length > 0) {
+        for (const localPath of paths) {
+          await transferManager.startUpload(
+            session.id,
+            session.title || "服务器",
+            localPath,
+            currentPath
+          );
+        }
+      }
+    }).then((fn) => {
+      unlisten = fn;
+    });
+
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [isOpen, session.id, session.title, currentPath]);
 
   // Sorting columns
   const handleSort = (field: SortField) => {
@@ -907,6 +1101,32 @@ export function FileExplorer({
             )}
           </div>
 
+          {/* Upload Button */}
+          <button
+            onClick={handleUploadClick}
+            className="px-2 py-0.8 bg-[#007AFF] hover:bg-[#0062CC] text-white rounded text-[11px] font-medium flex items-center space-x-1 transition active:scale-95 shadow-xs"
+            title="选择本地文件上传到当前目录"
+          >
+            <Upload className="w-3 h-3" />
+            <span>上传</span>
+          </button>
+
+          {/* Transfer Manager Button */}
+          <button
+            onClick={() => {
+              transferManager.setIsOpen(true);
+              transferManager.setIsCollapsed(false);
+            }}
+            className={`p-1 rounded transition-colors ${
+              transferManager.activeCount > 0
+                ? "bg-[#007AFF]/20 text-[#007AFF] animate-pulse"
+                : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--hover-item)]"
+            }`}
+            title="查看全局文件传输管理与进度"
+          >
+            <ArrowUpDown className="w-3.5 h-3.5" />
+          </button>
+
           {/* Toggle Hidden Files */}
           <button
             onClick={() => setShowHidden(!showHidden)}
@@ -1008,8 +1228,28 @@ export function FileExplorer({
           </>
         )}
 
-        {/* Right Details Explorer Table */}
-        <div className="flex-1 flex flex-col bg-[var(--bg-app)] overflow-hidden">
+        {/* Right Details Explorer Table (Supports Drag-and-Drop File Upload) */}
+        <div
+          onDragEnter={handleDragEnter}
+          onDragLeave={handleDragLeave}
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
+          className="flex-1 flex flex-col bg-[var(--bg-app)] overflow-hidden relative"
+        >
+          {/* Drag & Drop File Upload Overlay */}
+          {isDragOver && (
+            <div className="absolute inset-0 z-40 bg-[#007AFF]/12 backdrop-blur-[2px] border-2 border-dashed border-[#007AFF] rounded-lg m-1.5 flex flex-col items-center justify-center space-y-2 pointer-events-none animate-in fade-in duration-100 select-none">
+              <div className="w-12 h-12 rounded-2xl bg-[#007AFF] text-white flex items-center justify-center shadow-lg animate-bounce">
+                <Upload className="w-6 h-6" />
+              </div>
+              <div className="text-[13.5px] font-semibold text-[#007AFF]">
+                松开鼠标立即上传文件至此目录
+              </div>
+              <div className="text-[11px] font-mono text-[var(--text-secondary)] px-3 py-1 rounded bg-[var(--bg-card)] border border-[var(--border-subtle)] shadow-xs">
+                目标路径: {currentPath}
+              </div>
+            </div>
+          )}
           {errorMsg ? (
             <div className="flex-1 flex flex-col items-center justify-center py-16 px-6 text-center select-none">
               <FolderOpen className="w-10 h-10 text-[var(--text-tertiary)] opacity-35 mb-3 stroke-1" />
@@ -1256,6 +1496,46 @@ export function FileExplorer({
             </button>
           )}
 
+          {!contextMenu.entry.is_dir && (
+            <>
+              <button
+                onClick={() => {
+                  handleDownload(contextMenu.entry);
+                  setContextMenu(null);
+                }}
+                title="快速下载此文件至本地 Downloads 目录"
+                className="w-full px-3 py-1.5 text-left hover:bg-[#007AFF] hover:text-white flex items-center space-x-2 text-[var(--text-primary)]"
+              >
+                <Download className="w-3.5 h-3.5 text-emerald-500" />
+                <span>下载文件</span>
+              </button>
+              <button
+                onClick={() => {
+                  handleDownloadSaveAs(contextMenu.entry);
+                  setContextMenu(null);
+                }}
+                title="选择本地保存目录并下载"
+                className="w-full px-3 py-1.5 text-left hover:bg-[#007AFF] hover:text-white flex items-center space-x-2 text-[var(--text-primary)]"
+              >
+                <Download className="w-3.5 h-3.5 opacity-70" />
+                <span>另存为...</span>
+              </button>
+            </>
+          )}
+
+          <button
+            onClick={() => {
+              setRenamingEntry(contextMenu.entry);
+              setNewName(contextMenu.entry.name);
+              setContextMenu(null);
+            }}
+            title="重命名此文件或文件夹"
+            className="w-full px-3 py-1.5 text-left hover:bg-[#007AFF] hover:text-white flex items-center space-x-2 text-[var(--text-primary)]"
+          >
+            <Pencil className="w-3.5 h-3.5 text-[#007AFF]" />
+            <span>重命名</span>
+          </button>
+
           <div className="h-[1px] bg-[var(--border-subtle)] my-1" />
 
           <button
@@ -1283,6 +1563,80 @@ export function FileExplorer({
           </button>
         </div>
       )}
+
+      {/* Rename Modal (Portaled directly to document.body at top z-index) */}
+      {renamingEntry &&
+        createPortal(
+          <div
+            style={{ zIndex: 10000 }}
+            className="fixed inset-0 bg-black/50 backdrop-blur-[2px] flex items-center justify-center p-4 animate-in fade-in duration-100"
+            onClick={() => setRenamingEntry(null)}
+          >
+            <div
+              className="w-96 apple-card rounded-xl p-5 shadow-2xl border border-[var(--border-subtle)] text-[var(--text-primary)] select-none animate-in zoom-in-95 duration-120"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center space-x-2.5">
+                <div className="w-8 h-8 rounded-lg bg-[#007AFF]/15 text-[#007AFF] flex items-center justify-center flex-shrink-0">
+                  <Pencil className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="text-[13.5px] font-semibold tracking-tight">
+                    {renamingEntry.is_dir ? "重命名文件夹" : "重命名文件"}
+                  </div>
+                  <div className="text-[11px] text-[var(--text-tertiary)] truncate max-w-[280px]">
+                    原名称: {renamingEntry.name}
+                  </div>
+                </div>
+              </div>
+
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  handleConfirmRename();
+                }}
+                className="mt-4 space-y-3"
+              >
+                <div>
+                  <label className="block text-[11px] font-medium text-[var(--text-secondary)] mb-1">
+                    新名称
+                  </label>
+                  <input
+                    ref={renameInputRef}
+                    type="text"
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") setRenamingEntry(null);
+                    }}
+                    disabled={renameLoading}
+                    className="w-full px-3 py-1.5 text-[12.5px] bg-[var(--input-bg)] text-[var(--text-primary)] border border-[var(--border-subtle)] focus:border-[#007AFF] rounded-lg outline-none font-mono"
+                  />
+                </div>
+
+                <div className="flex items-center justify-end space-x-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setRenamingEntry(null)}
+                    disabled={renameLoading}
+                    className="px-3.5 py-1.5 text-[12px] rounded-lg text-[var(--text-secondary)] hover:bg-[var(--hover-item)] transition"
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={renameLoading || !newName.trim() || newName.trim() === renamingEntry.name}
+                    className="px-4 py-1.5 text-[12px] font-medium text-white bg-[#007AFF] hover:bg-[#0062CC] rounded-lg shadow-sm transition active:scale-95 disabled:opacity-40 flex items-center space-x-1.5"
+                  >
+                    {renameLoading && <RotateCw className="w-3 h-3 animate-spin" />}
+                    <span>确认重命名</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>,
+          document.body
+        )}
 
       {/* File Preview Modal (Portaled directly to document.body at top z-index, click-outside to dismiss) */}
       {previewFile &&

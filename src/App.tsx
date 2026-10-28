@@ -13,7 +13,9 @@ import { SettingsModal } from "./components/SettingsModal";
 import { OpsDrawer, DrawerTab } from "./components/OpsDrawer";
 import { CommandAssistant } from "./components/CommandAssistant";
 import { ServerUserMenu } from "./components/ServerUserMenu";
-import { Folder, KeyRound, ShieldCheck, Sun, Moon, Monitor, Activity, HardDrive, Terminal, Globe, Settings, PanelLeft, PanelLeftClose } from "lucide-react";
+import { TransferProvider, useTransferManager } from "./context/TransferContext";
+import { TransferManagerModal } from "./components/TransferManagerModal";
+import { Folder, KeyRound, ShieldCheck, Sun, Moon, Monitor, Activity, HardDrive, Terminal, Globe, Settings, PanelLeft, PanelLeftClose, ArrowUpDown } from "lucide-react";
 import "./App.css";
 
 interface PasswordUpdateEvent {
@@ -23,7 +25,8 @@ interface PasswordUpdateEvent {
   new_password: string;
 }
 
-export function App() {
+function AppContent() {
+  const { activeCount, isOpen: isTransferOpen, setIsOpen: setIsTransferOpen, setIsCollapsed: setIsTransferCollapsed } = useTransferManager();
   const { themeMode, setThemeMode, resolvedTheme } = useTheme();
   const { settings, updateSettings } = useAppSettings();
   const { t, lang, setLang, toggleLang } = useI18n();
@@ -838,6 +841,25 @@ export function App() {
               <Terminal className="w-3 h-3 text-purple-500" />
               <span>{t("status.commands")}</span>
             </button>
+
+            {/* Global File Transfer Manager Status Pill */}
+            <button
+              onClick={() => {
+                setIsTransferOpen(!isTransferOpen);
+                setIsTransferCollapsed(false);
+              }}
+              className={`flex items-center space-x-1.5 px-2 py-0.5 rounded text-[10px] border transition-all ${
+                activeCount > 0
+                  ? "bg-[#007AFF]/20 text-[#007AFF] border-[#007AFF]/40 font-semibold shadow-xs"
+                  : isTransferOpen
+                  ? "bg-[var(--hover-item)] text-[var(--text-primary)] border-[var(--border-strong)]"
+                  : "bg-[var(--hover-item)] text-[var(--text-secondary)] border-[var(--border-subtle)] hover:border-[var(--border-strong)]"
+              }`}
+              title="全局文件传输任务管理器 (下载/上传任务、速度、进度、历史记录)"
+            >
+              <ArrowUpDown className={`w-3 h-3 ${activeCount > 0 ? "animate-spin text-[#007AFF]" : "text-[var(--text-tertiary)]"}`} />
+              <span>{activeCount > 0 ? `${activeCount} 项传输中` : "文件传输"}</span>
+            </button>
           </div>
 
           <div className="flex items-center space-x-2 text-[10.5px] flex-shrink-0">
@@ -975,7 +997,18 @@ export function App() {
         lang={lang}
         onLangChange={setLang}
       />
+
+      {/* Global Collapsible File Transfer Operations Modal / Floating Pill */}
+      <TransferManagerModal />
     </div>
+  );
+}
+
+export function App() {
+  return (
+    <TransferProvider>
+      <AppContent />
+    </TransferProvider>
   );
 }
 

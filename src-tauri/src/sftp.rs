@@ -5,10 +5,13 @@ use std::fs;
 use std::net::{TcpStream, ToSocketAddrs};
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use tauri::{AppHandle, Emitter};
 
 use crate::pty::SpawnOptions;
+use crate::transfer::{TransferProgressPayload, TransferStatusPayload};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileEntry {
@@ -453,6 +456,251 @@ pub fn read_file_preview_content(
         buf.truncate(n);
         String::from_utf8(buf).map_err(|_| "非文本文件或 UTF-8 解码失败".to_string())
     }
+}
+
+pub fn rename_file(
+    pool: &SftpPool,
+    opts: &SpawnOptions,
+    old_path: &str,
+    new_path: &str,
+) -> Result<(), String> {
+    if opts.is_local {
+        fs::rename(old_path, new_path)
+            .map_err(|e| format!("重命名本地文件失败: {}", e))
+    } else {
+        let sess_arc = pool.get_or_connect(opts)?;
+        let sess = sess_arc.lock().map_err(|e| e.to_string())?;
+        let sftp = sess.sftp().map_err(|e| format!("SFTP 会话错误: {}", e))?;
+        sftp.rename(Path::new(old_path), Path::new(new_path), None)
+            .map_err(|e| format!("重命名远程文件失败: {}", e))
+    }
+}
+
+pub fn download_file(
+    app: AppHandle,
+    pool: &SftpPool,
+    opts: &SpawnOptions,
+    remote_path: &str,
+    local_path: &str,
+    task_id: &str,
+    cancel_flag: Arc<AtomicBool>,
+) -> Result<(), String> {
+    use std::io::{Read, Write};
+    let chunk_size = 64 * 1024; // 64KB
+    let mut buf = vec![0u8; chunk_size];
+
+    let (mut reader, total_size): (Box<dyn Read + Send>, u64) = if opts.is_local {
+        let f = fs::File::open(remote_path).map_err(|e| format!("打开本地源文件失败: {}", e))?;
+        let len = f.metadata().map(|m| m.len()).unwrap_or(0);
+        (Box::new(f), len)
+    } else {
+        let sess_arc = pool.get_or_connect(opts)?;
+        let sess = sess_arc.lock().map_err(|e| e.to_string())?;
+        let sftp = match sess.sftp() {
+            Ok(s) => s,
+            Err(e) => {
+                drop(sess);
+                pool.invalidate(&opts.session_id);
+                return Err(format!("启动 SFTP 失败: {}", e));
+            }
+        };
+        let mut f = match sftp.open(Path::new(remote_path)) {
+            Ok(file) => file,
+            Err(e) => {
+                drop(sftp);
+                drop(sess);
+                pool.invalidate(&opts.session_id);
+                return Err(format!("打开远程源文件失败: {}", e));
+            }
+        };
+        let len = f.stat().map(|st| st.size.unwrap_or(0)).unwrap_or(0);
+        (Box::new(f), len)
+    };
+
+    if let Some(parent) = Path::new(local_path).parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+
+    let mut writer = fs::File::create(local_path)
+        .map_err(|e| format!("创建本地目标文件失败: {}", e))?;
+
+    let mut transferred: u64 = 0;
+    let mut last_emit = std::time::Instant::now();
+    let mut last_bytes = 0u64;
+
+    loop {
+        if cancel_flag.load(Ordering::Relaxed) {
+            drop(writer);
+            let _ = fs::remove_file(local_path);
+            let _ = app.emit(
+                "file-transfer-status",
+                TransferStatusPayload {
+                    task_id: task_id.to_string(),
+                    status: "cancelled".to_string(),
+                    error: Some("用户已取消传输".to_string()),
+                },
+            );
+            return Err("传输已取消".to_string());
+        }
+
+        let n = reader
+            .read(&mut buf)
+            .map_err(|e| format!("读取文件块失败: {}", e))?;
+        if n == 0 {
+            break;
+        }
+
+        writer
+            .write_all(&buf[..n])
+            .map_err(|e| format!("写入本地文件块失败: {}", e))?;
+        transferred += n as u64;
+
+        let elapsed = last_emit.elapsed();
+        if elapsed.as_millis() >= 120 || transferred == total_size {
+            let bytes_since = transferred.saturating_sub(last_bytes);
+            let speed = if elapsed.as_secs_f64() > 0.0 {
+                (bytes_since as f64 / elapsed.as_secs_f64()) as u64
+            } else {
+                0
+            };
+            last_emit = std::time::Instant::now();
+            last_bytes = transferred;
+
+            let _ = app.emit(
+                "file-transfer-progress",
+                TransferProgressPayload {
+                    task_id: task_id.to_string(),
+                    transferred,
+                    total: total_size,
+                    speed,
+                },
+            );
+        }
+    }
+
+    let _ = writer.flush();
+    let _ = app.emit(
+        "file-transfer-status",
+        TransferStatusPayload {
+            task_id: task_id.to_string(),
+            status: "completed".to_string(),
+            error: None,
+        },
+    );
+
+    Ok(())
+}
+
+pub fn upload_file(
+    app: AppHandle,
+    pool: &SftpPool,
+    opts: &SpawnOptions,
+    local_path: &str,
+    remote_path: &str,
+    task_id: &str,
+    cancel_flag: Arc<AtomicBool>,
+) -> Result<(), String> {
+    use std::io::{Read, Write};
+    let chunk_size = 64 * 1024; // 64KB
+    let mut buf = vec![0u8; chunk_size];
+
+    let mut local_file =
+        fs::File::open(local_path).map_err(|e| format!("打开本地源文件失败: {}", e))?;
+    let total_size = local_file.metadata().map(|m| m.len()).unwrap_or(0);
+
+    let mut writer: Box<dyn Write + Send> = if opts.is_local {
+        if let Some(parent) = Path::new(remote_path).parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let f = fs::File::create(remote_path)
+            .map_err(|e| format!("创建本地目标文件失败: {}", e))?;
+        Box::new(f)
+    } else {
+        let sess_arc = pool.get_or_connect(opts)?;
+        let sess = sess_arc.lock().map_err(|e| e.to_string())?;
+        let sftp = match sess.sftp() {
+            Ok(s) => s,
+            Err(e) => {
+                drop(sess);
+                pool.invalidate(&opts.session_id);
+                return Err(format!("启动 SFTP 失败: {}", e));
+            }
+        };
+        let f = match sftp.create(Path::new(remote_path)) {
+            Ok(file) => file,
+            Err(e) => {
+                drop(sftp);
+                drop(sess);
+                pool.invalidate(&opts.session_id);
+                return Err(format!("创建远程目标文件失败: {}", e));
+            }
+        };
+        Box::new(f)
+    };
+
+    let mut transferred: u64 = 0;
+    let mut last_emit = std::time::Instant::now();
+    let mut last_bytes = 0u64;
+
+    loop {
+        if cancel_flag.load(Ordering::Relaxed) {
+            let _ = app.emit(
+                "file-transfer-status",
+                TransferStatusPayload {
+                    task_id: task_id.to_string(),
+                    status: "cancelled".to_string(),
+                    error: Some("用户已取消传输".to_string()),
+                },
+            );
+            return Err("传输已取消".to_string());
+        }
+
+        let n = local_file
+            .read(&mut buf)
+            .map_err(|e| format!("读取本地源文件块失败: {}", e))?;
+        if n == 0 {
+            break;
+        }
+
+        writer
+            .write_all(&buf[..n])
+            .map_err(|e| format!("写入远程文件块失败: {}", e))?;
+        transferred += n as u64;
+
+        let elapsed = last_emit.elapsed();
+        if elapsed.as_millis() >= 120 || transferred == total_size {
+            let bytes_since = transferred.saturating_sub(last_bytes);
+            let speed = if elapsed.as_secs_f64() > 0.0 {
+                (bytes_since as f64 / elapsed.as_secs_f64()) as u64
+            } else {
+                0
+            };
+            last_emit = std::time::Instant::now();
+            last_bytes = transferred;
+
+            let _ = app.emit(
+                "file-transfer-progress",
+                TransferProgressPayload {
+                    task_id: task_id.to_string(),
+                    transferred,
+                    total: total_size,
+                    speed,
+                },
+            );
+        }
+    }
+
+    let _ = writer.flush();
+    let _ = app.emit(
+        "file-transfer-status",
+        TransferStatusPayload {
+            task_id: task_id.to_string(),
+            status: "completed".to_string(),
+            error: None,
+        },
+    );
+
+    Ok(())
 }
 
 #[cfg(test)]

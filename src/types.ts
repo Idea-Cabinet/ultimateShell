@@ -90,3 +90,21 @@ export interface ServerUser {
   is_login_user: boolean;
   has_password: boolean;
 }
+
+export interface TransferTask {
+  id: string;
+  sessionId: string;
+  hostName: string;
+  type: "upload" | "download";
+  fileName: string;
+  srcPath: string;
+  destPath: string;
+  totalSize: number;
+  transferredSize: number;
+  speed: number; // bytes per second
+  progress: number; // 0 - 100
+  status: "pending" | "transferring" | "completed" | "error" | "cancelled";
+  errorMsg?: string;
+  startTime: number;
+  endTime?: number;
+}
