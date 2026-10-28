@@ -98,18 +98,33 @@ export const ServerPerfMonitor: React.FC<Props> = ({
     if (!activeSession?.id) return;
 
     let disposed = false;
+    let isFetching = false;
+    let consecutiveFailures = 0;
+
     const fetchPerf = async () => {
+      if (disposed || isFetching) return;
+      // If server is not responding or disconnected, pause polling to avoid hammering backend
+      if (consecutiveFailures >= 3) {
+        return;
+      }
+
+      isFetching = true;
       try {
         const res = await invoke<SystemPerfStats>("get_system_perf", {
           sessionId: activeSession.id,
         });
         if (disposed) return;
+        consecutiveFailures = 0;
         setStats(res);
         setCpuHistory((prev) => [...prev.slice(1), res.cpu_usage]);
         setRamHistory((prev) => [...prev.slice(1), res.mem_percent]);
         setNetRxHistory((prev) => [...prev.slice(1), res.net_rx_kbs + res.net_tx_kbs]);
         setIoHistory((prev) => [...prev.slice(1), res.io_read_kbs + res.io_write_kbs]);
-      } catch (_) {}
+      } catch (_) {
+        consecutiveFailures++;
+      } finally {
+        isFetching = false;
+      }
     };
 
     fetchPerf();

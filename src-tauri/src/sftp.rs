@@ -8,7 +8,7 @@ use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
 use crate::pty::SpawnOptions;
@@ -40,31 +40,60 @@ pub struct DirResult {
     pub total_files: usize,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct SftpPool {
     // Cache active ssh2 sessions by session_id with per-session Mutex to prevent race conditions on libssh2 socket
     sessions: Arc<Mutex<HashMap<String, Arc<Mutex<ssh2::Session>>>>>,
+    // Cooldown map to prevent spamming failed TCP/SSH connections on wrong passwords or dead servers
+    cooldowns: Arc<Mutex<HashMap<String, Instant>>>,
 }
 
 impl SftpPool {
     pub fn new() -> Self {
         Self {
             sessions: Arc::new(Mutex::new(HashMap::new())),
+            cooldowns: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
     pub fn get_or_connect(&self, opts: &SpawnOptions) -> Result<Arc<Mutex<ssh2::Session>>, String> {
-        let mut map = self.sessions.lock().unwrap();
-        if let Some(sess_arc) = map.get(&opts.session_id) {
-            // Check if still connected / alive
-            if let Ok(sess) = sess_arc.lock() {
-                if sess.authenticated() {
-                    return Ok(sess_arc.clone());
-                }
+        // Step 1: Check existing session in map without holding map during health check
+        let existing = {
+            if let Ok(map) = self.sessions.lock() {
+                map.get(&opts.session_id).cloned()
+            } else {
+                None
             }
-            map.remove(&opts.session_id);
+        };
+
+        if let Some(sess_arc) = existing {
+            let is_authed = match sess_arc.try_lock() {
+                Ok(sess) => sess.authenticated(),
+                Err(std::sync::TryLockError::WouldBlock) => true,
+                Err(std::sync::TryLockError::Poisoned(_)) => false,
+            };
+            if is_authed {
+                return Ok(sess_arc);
+            }
+            // If dead or unauthenticated, clean from map
+            if let Ok(mut map) = self.sessions.lock() {
+                map.remove(&opts.session_id);
+            }
         }
 
+        // Step 2: Check failure cooldown to prevent hammering on wrong password or dead host
+        {
+            if let Ok(mut cd) = self.cooldowns.lock() {
+                if let Some(t) = cd.get(&opts.session_id) {
+                    if t.elapsed() < Duration::from_millis(3000) {
+                        return Err("SFTP 连接失败冷却中，请稍后重试".to_string());
+                    }
+                    cd.remove(&opts.session_id);
+                }
+            }
+        }
+
+        // Step 3: Perform network connection OUTSIDE of self.sessions lock!
         let host = opts.host.as_deref().unwrap_or("127.0.0.1");
         let port = opts.port.unwrap_or(22);
         let user = opts.username.as_deref().unwrap_or("root");
@@ -75,16 +104,31 @@ impl SftpPool {
             .next()
             .ok_or_else(|| format!("无法解析主机地址: {}", host))?;
 
-        let tcp = TcpStream::connect_timeout(&addr, Duration::from_secs(5))
-            .map_err(|e| format!("连接超时 (5s) {}:{}: {}", host, port, e))?;
+        let tcp = match TcpStream::connect_timeout(&addr, Duration::from_millis(2500)) {
+            Ok(t) => t,
+            Err(e) => {
+                if let Ok(mut cd) = self.cooldowns.lock() {
+                    cd.insert(opts.session_id.clone(), Instant::now());
+                }
+                return Err(format!("连接超时 (2.5s) {}:{}: {}", host, port, e));
+            }
+        };
         tcp.set_nodelay(true).ok();
-        tcp.set_read_timeout(Some(Duration::from_secs(8))).ok();
-        tcp.set_write_timeout(Some(Duration::from_secs(8))).ok();
+        tcp.set_read_timeout(Some(Duration::from_millis(3500))).ok();
+        tcp.set_write_timeout(Some(Duration::from_millis(3500))).ok();
 
-        let mut sess = ssh2::Session::new().map_err(|e| e.to_string())?;
-        sess.set_timeout(8000); // 8s timeout for SSH operations
+        let mut sess = match ssh2::Session::new() {
+            Ok(s) => s,
+            Err(e) => return Err(e.to_string()),
+        };
+        sess.set_timeout(3500); // 3.5s timeout for SSH operations
         sess.set_tcp_stream(tcp);
-        sess.handshake().map_err(|e| format!("SSH 握手失败: {}", e))?;
+        if let Err(e) = sess.handshake() {
+            if let Ok(mut cd) = self.cooldowns.lock() {
+                cd.insert(opts.session_id.clone(), Instant::now());
+            }
+            return Err(format!("SSH 握手失败: {}", e));
+        }
 
         let mut authed = false;
         // 1. Try identity file
@@ -115,22 +159,35 @@ impl SftpPool {
         }
 
         if !authed {
+            if let Ok(mut cd) = self.cooldowns.lock() {
+                cd.insert(opts.session_id.clone(), Instant::now());
+            }
             return Err("SFTP 认证失败：无有效密码或私钥".to_string());
         }
 
         let arc_sess = Arc::new(Mutex::new(sess));
-        map.insert(opts.session_id.clone(), arc_sess.clone());
+        if let Ok(mut map) = self.sessions.lock() {
+            map.insert(opts.session_id.clone(), arc_sess.clone());
+        }
         Ok(arc_sess)
     }
 
     pub fn close(&self, session_id: &str) {
-        let mut map = self.sessions.lock().unwrap();
-        map.remove(session_id);
+        if let Ok(mut map) = self.sessions.lock() {
+            map.remove(session_id);
+        }
+        if let Ok(mut cd) = self.cooldowns.lock() {
+            cd.remove(session_id);
+        }
     }
 
     pub fn invalidate(&self, session_id: &str) {
-        let mut map = self.sessions.lock().unwrap();
-        map.remove(session_id);
+        if let Ok(mut map) = self.sessions.lock() {
+            map.remove(session_id);
+        }
+        if let Ok(mut cd) = self.cooldowns.lock() {
+            cd.insert(session_id.to_string(), Instant::now());
+        }
     }
 }
 

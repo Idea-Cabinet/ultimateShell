@@ -361,8 +361,20 @@ function AppContent() {
     if (!tab) return;
     // Replace with fresh sessionId to reconnect
     const newId = `${tab.isLocal ? "local" : "ssh"}-${Date.now()}`;
+    // Fetch latest host profile from hosts state so newly saved password/settings are used!
+    const latestHost = tab.hostProfile?.id
+      ? hosts.find((h) => h.id === tab.hostProfile!.id) || tab.hostProfile
+      : tab.hostProfile;
+
+    // Explicitly notify backend to clean up old session's SFTP pool and PTY resources
+    invoke("pty_close", { sessionId: id }).catch(() => {});
+
     setTabs((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, id: newId } : t))
+      prev.map((t) =>
+        t.id === id
+          ? { ...t, id: newId, hostProfile: latestHost, connected: true }
+          : t
+      )
     );
     setActiveTabId(newId);
   };
@@ -485,6 +497,15 @@ function AppContent() {
       };
       await invoke("save_host", { host: normalizedHost, password });
       await refreshHosts();
+
+      // Update existing open tabs that belong to this host so they use the new credentials
+      setTabs((prev) =>
+        prev.map((t) =>
+          t.hostProfile?.id === host.id
+            ? { ...t, hostProfile: normalizedHost }
+            : t
+        )
+      );
     } catch (err) {
       console.error(`保存失败: ${err}`);
     }
