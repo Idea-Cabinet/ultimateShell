@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
 import { useI18n, Lang } from "../i18n";
 import { AppSettings } from "../hooks/useAppSettings";
 import { ThemeMode } from "../hooks/useTheme";
@@ -14,6 +15,7 @@ import {
   Trash2,
   Check,
   Lock,
+  FolderOpen,
 } from "lucide-react";
 
 interface Props {
@@ -210,6 +212,52 @@ export const SettingsModal: React.FC<Props> = ({
                     onChange={(e) => onUpdateSettings({ minimizeToTray: e.target.checked })}
                     className="w-4 h-4 accent-[#007AFF] rounded cursor-pointer"
                   />
+                </div>
+
+                <div className="h-[1px] bg-[var(--border-subtle)]" />
+
+                {/* Default Download Directory */}
+                <div className="space-y-1.5">
+                  <div className="font-semibold text-[13px]">文件默认下载路径</div>
+                  <div className="text-[11px] text-[var(--text-secondary)]">
+                    从服务器快速下载文件时的默认本地存储目录（未指定时保存至系统 Downloads 目录）
+                  </div>
+                  <div className="flex items-center space-x-2 pt-1">
+                    <input
+                      type="text"
+                      readOnly
+                      value={settings.downloadDir || "系统默认下载目录 (Downloads)"}
+                      placeholder="系统默认下载目录 (Downloads)"
+                      className="flex-1 px-3 py-1.5 text-[11.5px] bg-[var(--bg-app)] text-[var(--text-primary)] border border-[var(--border-subtle)] rounded-lg outline-none font-mono truncate cursor-default"
+                    />
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const selected = await open({
+                          directory: true,
+                          multiple: false,
+                          title: "选择文件默认下载目录",
+                        });
+                        if (selected && typeof selected === "string") {
+                          onUpdateSettings({ downloadDir: selected });
+                        }
+                      }}
+                      className="px-3 py-1.5 text-[11.5px] rounded-lg bg-[var(--hover-item)] hover:bg-[#007AFF] hover:text-white transition border border-[var(--border-subtle)] flex items-center space-x-1 flex-shrink-0"
+                    >
+                      <FolderOpen className="w-3.5 h-3.5" />
+                      <span>浏览...</span>
+                    </button>
+                    {settings.downloadDir && (
+                      <button
+                        type="button"
+                        onClick={() => onUpdateSettings({ downloadDir: "" })}
+                        title="重置恢复为系统默认 Downloads 目录"
+                        className="px-2.5 py-1.5 text-[11.5px] rounded-lg text-[var(--text-tertiary)] hover:text-rose-500 hover:bg-rose-500/10 transition border border-[var(--border-subtle)] flex-shrink-0"
+                      >
+                        重置
+                      </button>
+                    )}
+                  </div>
                 </div>
               </>
             )}

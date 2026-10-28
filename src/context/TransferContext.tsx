@@ -144,10 +144,23 @@ export const TransferProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   ): Promise<string> => {
     let localPath = customLocalPath;
     if (!localPath) {
-      const defaultDir = await invoke<string>("fs_get_default_download_dir").catch(
-        () => "."
-      );
-      localPath = `${defaultDir.replace(/\/$/, "")}/${fileName}`;
+      let downloadDir = "";
+      try {
+        const savedSettings = localStorage.getItem("ultimateshell_app_settings");
+        if (savedSettings) {
+          const parsed = JSON.parse(savedSettings);
+          if (parsed.downloadDir && typeof parsed.downloadDir === "string" && parsed.downloadDir.trim()) {
+            downloadDir = parsed.downloadDir.trim();
+          }
+        }
+      } catch {}
+
+      if (!downloadDir) {
+        downloadDir = await invoke<string>("fs_get_default_download_dir").catch(
+          () => "."
+        );
+      }
+      localPath = `${downloadDir.replace(/[\\/]$/, "")}/${fileName}`;
     }
 
     const taskId = `dl-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;

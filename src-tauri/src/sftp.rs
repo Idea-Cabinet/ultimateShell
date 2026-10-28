@@ -489,10 +489,23 @@ pub fn create_file(
         let sess_arc = pool.get_or_connect(opts)?;
         let sess = sess_arc.lock().map_err(|e| e.to_string())?;
         let sftp = sess.sftp().map_err(|e| format!("SFTP 会话错误: {}", e))?;
-        let _ = sftp
-            .create(Path::new(file_path))
-            .map_err(|e| format!("创建远程文件失败: {}", e))?;
-        Ok(())
+        match sftp.create(Path::new(file_path)) {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                // If SFTP create fails (e.g. permission or parent issue), try touch / sudo -n touch
+                let safe_path = file_path.replace('\'', "'\\''");
+                if let Ok(mut ch) = sess.channel_session() {
+                    let cmd = format!("touch '{}' 2>/dev/null || sudo -n touch '{}' 2>/dev/null", safe_path, safe_path);
+                    if ch.exec(&cmd).is_ok() {
+                        let _ = ch.wait_close();
+                        if ch.exit_status().unwrap_or(1) == 0 {
+                            return Ok(());
+                        }
+                    }
+                }
+                Err(format!("创建远程文件失败: {}", e))
+            }
+        }
     }
 }
 
@@ -509,9 +522,23 @@ pub fn create_dir(
         let sess_arc = pool.get_or_connect(opts)?;
         let sess = sess_arc.lock().map_err(|e| e.to_string())?;
         let sftp = sess.sftp().map_err(|e| format!("SFTP 会话错误: {}", e))?;
-        sftp.mkdir(Path::new(dir_path), 0o755)
-            .map_err(|e| format!("创建远程文件夹失败: {}", e))?;
-        Ok(())
+        match sftp.mkdir(Path::new(dir_path), 0o755) {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                // If SFTP mkdir fails, try mkdir -p / sudo -n mkdir -p
+                let safe_path = dir_path.replace('\'', "'\\''");
+                if let Ok(mut ch) = sess.channel_session() {
+                    let cmd = format!("mkdir -p '{}' 2>/dev/null || sudo -n mkdir -p '{}' 2>/dev/null", safe_path, safe_path);
+                    if ch.exec(&cmd).is_ok() {
+                        let _ = ch.wait_close();
+                        if ch.exit_status().unwrap_or(1) == 0 {
+                            return Ok(());
+                        }
+                    }
+                }
+                Err(format!("创建远程文件夹失败: {}", e))
+            }
+        }
     }
 }
 

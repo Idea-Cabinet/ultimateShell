@@ -722,8 +722,8 @@ function AppContent() {
         )}
 
         {/* Bottom Status Bar with Current Path, Ops Drawer Shortcuts & Command Assistant */}
-        <div className="h-6 apple-vibrancy-toolbar border-t border-[var(--border-subtle)] px-3 flex items-center justify-between text-[11px] text-[var(--text-tertiary)] select-none">
-          <div className="flex items-center space-x-2 min-w-0">
+        <div className="h-6 min-h-[24px] flex-shrink-0 apple-vibrancy-toolbar border-t border-[var(--border-subtle)] px-2.5 flex items-center justify-between text-[11px] text-[var(--text-tertiary)] select-none overflow-hidden">
+          <div className="flex-1 flex items-center space-x-1.5 min-w-0 overflow-x-auto no-scrollbar flex-nowrap mr-2">
             <span
               title={activeTab?.connected ? "会话状态：已正常连接并就绪" : "会话状态：已断开或已退出"}
               className="flex items-center space-x-1.5 flex-shrink-0 cursor-default mr-1"
@@ -736,7 +736,7 @@ function AppContent() {
             {activeTab?.hostProfile && (
               <span
                 title={`远程连接目标: ${activeTab.hostProfile.username}@${activeTab.hostProfile.host}:${activeTab.hostProfile.port}`}
-                className="text-[var(--text-tertiary)] font-mono text-[10.5px] truncate cursor-default pr-1 hidden sm:inline"
+                className="text-[var(--text-tertiary)] font-mono text-[10.5px] truncate max-w-[130px] cursor-default pr-1 hidden md:inline flex-shrink-0"
               >
                 {activeTab.hostProfile.username}@{activeTab.hostProfile.host}:{activeTab.hostProfile.port}
               </span>
@@ -755,17 +755,17 @@ function AppContent() {
                   localStorage.setItem("ultimateshell_drawer_tab", "files");
                 }
               }}
-              className={`flex items-center space-x-1.5 px-2 py-0.5 rounded text-[10px] font-mono border transition-all ${
+              className={`flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] font-mono border transition-all flex-shrink-0 max-w-[180px] ${
                 isOpsDrawerOpen && drawerActiveTab === "files"
                   ? "bg-[#007AFF]/15 text-[#007AFF] border-[#007AFF]/40 font-medium"
                   : "bg-[var(--hover-item)] text-[var(--text-secondary)] border-[var(--border-subtle)] hover:border-[var(--border-strong)]"
               }`}
-              title="切换/展开可视化文件树 (Windows/SFTP 风格按需懒加载)"
+              title={`切换/展开可视化文件树 (当前路径: ${dirStats.path})`}
             >
-              <Folder className="w-3 h-3 text-[#007AFF]" />
-              <span>{dirStats.path}</span>
-              <span className="text-[var(--text-tertiary)]">·</span>
-              <span>{dirStats.fileCount} 项</span>
+              <Folder className="w-3 h-3 text-[#007AFF] flex-shrink-0" />
+              <span className="truncate max-w-[80px]">{dirStats.path}</span>
+              <span className="text-[var(--text-tertiary)] flex-shrink-0">·</span>
+              <span className="flex-shrink-0">{dirStats.fileCount} 项</span>
             </button>
 
             {/* Server User Switching Dropdown Menu */}
@@ -789,7 +789,7 @@ function AppContent() {
                   localStorage.setItem("ultimateshell_drawer_tab", "processes");
                 }
               }}
-              className={`flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] border transition-all ${
+              className={`flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] border transition-all flex-shrink-0 ${
                 isOpsDrawerOpen && drawerActiveTab === "processes"
                   ? "bg-[#30D158]/15 text-[#30D158] border-[#30D158]/40 font-medium"
                   : "bg-[var(--hover-item)] text-[var(--text-secondary)] border-[var(--border-subtle)] hover:border-[var(--border-strong)]"
@@ -813,7 +813,7 @@ function AppContent() {
                   localStorage.setItem("ultimateshell_drawer_tab", "disks");
                 }
               }}
-              className={`flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] border transition-all ${
+              className={`flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] border transition-all flex-shrink-0 ${
                 isOpsDrawerOpen && drawerActiveTab === "disks"
                   ? "bg-amber-500/15 text-amber-500 border-amber-500/40 font-medium"
                   : "bg-[var(--hover-item)] text-[var(--text-secondary)] border-[var(--border-subtle)] hover:border-[var(--border-strong)]"
@@ -831,7 +831,7 @@ function AppContent() {
                 setIsCommandAssistantOpen(next);
                 localStorage.setItem("ultimateshell_cmd_assistant_open", next ? "true" : "false");
               }}
-              className={`flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] border transition-all ${
+              className={`flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] border transition-all flex-shrink-0 ${
                 isCommandAssistantOpen
                   ? "bg-purple-500/15 text-purple-500 border-purple-500/40 font-medium"
                   : "bg-[var(--hover-item)] text-[var(--text-secondary)] border-[var(--border-subtle)] hover:border-[var(--border-strong)]"
@@ -848,7 +848,7 @@ function AppContent() {
                 setIsTransferOpen(!isTransferOpen);
                 setIsTransferCollapsed(false);
               }}
-              className={`flex items-center space-x-1.5 px-2 py-0.5 rounded text-[10px] border transition-all ${
+              className={`flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] border transition-all flex-shrink-0 ${
                 activeCount > 0
                   ? "bg-[#007AFF]/20 text-[#007AFF] border-[#007AFF]/40 font-semibold shadow-xs"
                   : isTransferOpen

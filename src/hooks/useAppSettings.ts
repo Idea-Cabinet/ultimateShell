@@ -6,6 +6,7 @@ export interface AppSettings {
   cursorBlink: boolean;
   scrollback: number;
   minimizeToTray: boolean;
+  downloadDir: string;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -14,6 +15,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   cursorBlink: false,
   scrollback: 5000,
   minimizeToTray: true,
+  downloadDir: "",
 };
 
 const STORAGE_KEY = "ultimateshell_app_settings";

@@ -272,7 +272,7 @@ export const ServerUserMenu: React.FC<Props> = ({
   });
 
   return (
-    <div className="relative inline-flex items-center">
+    <div className="relative inline-flex items-center flex-shrink-0">
       {/* Interactive Status Bar User Button */}
       <button
         ref={buttonRef}
