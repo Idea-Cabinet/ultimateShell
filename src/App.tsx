@@ -695,10 +695,7 @@ function AppContent() {
               isActive={tab.id === activeTabId}
               resolvedTheme={resolvedTheme}
               settings={settings}
-              isBroadcastActive={isBroadcastActive}
-              broadcastSessionsCount={tabs.length}
               onBroadcastData={(data) => handleBroadcastData(tab.id, data)}
-              onDisableBroadcast={() => setIsBroadcastActive(false)}
             />
           ))}
         </div>

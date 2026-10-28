@@ -214,17 +214,35 @@ export const TabBar: React.FC<Props> = ({
               onClick={onToggleBroadcast}
               title={
                 isBroadcastActive
-                  ? "关闭多窗口输入广播"
-                  : "开启多窗口输入广播（将键盘输入同步至所有打开的标签页）"
+                  ? "点击关闭多窗口输入广播"
+                  : "多窗口同步键入（广播键盘输入至所有打开的会话）"
               }
-              className={`h-7 px-2 flex items-center space-x-1.5 rounded-[6px] transition active:scale-[0.95] flex-shrink-0 text-[11px] font-medium ml-1 ${
+              className={`h-7 flex items-center rounded-[6px] transition-all duration-300 ease-out flex-shrink-0 select-none ml-1 overflow-hidden group ${
                 isBroadcastActive
-                  ? "bg-rose-500 text-white shadow-xs animate-pulse font-semibold"
-                  : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--hover-item)] border border-[var(--border-subtle)]"
+                  ? "bg-rose-500 text-white px-2 shadow-sm shadow-rose-500/25 active:scale-[0.98]"
+                  : "w-7 justify-center text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--hover-item)] active:scale-[0.95]"
               }`}
             >
-              <Radio className="w-3.5 h-3.5" />
-              <span>{isBroadcastActive ? "广播中" : "同步键入"}</span>
+              <Radio
+                className={`w-3.5 h-3.5 flex-shrink-0 transition-transform duration-200 ${
+                  isBroadcastActive ? "animate-pulse scale-105" : "group-hover:scale-110"
+                }`}
+              />
+
+              {/* Status display expanding smoothly to the right */}
+              <div
+                className={`flex items-center space-x-1.5 overflow-hidden transition-all duration-300 ease-out ${
+                  isBroadcastActive
+                    ? "max-w-[150px] opacity-100 ml-1.5 pointer-events-auto"
+                    : "max-w-0 opacity-0 ml-0 pointer-events-none"
+                }`}
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping flex-shrink-0" />
+                <span className="text-[11px] font-medium tracking-tight whitespace-nowrap">
+                  广播中 ({tabs.length}窗口)
+                </span>
+                <X className="w-3 h-3 opacity-60 hover:opacity-100 flex-shrink-0 transition-opacity ml-0.5" />
+              </div>
             </button>
           )}
         </div>
