@@ -213,13 +213,18 @@ export const Sidebar: React.FC<Props> = ({
 
   const defaultGroupLabel = t("sidebar.defaultGroup");
 
-  // Filter hosts from displayHosts snapshot
+  // Filter hosts from displayHosts snapshot (supports name, host IP, description/remarks, username, and group)
   let filteredHosts = displayHosts.filter((h) => {
-    const term = searchTerm.toLowerCase();
+    const term = searchTerm.trim().toLowerCase();
+    if (!term) return true;
     const groupName = isDefaultGroup(h.group) ? defaultGroupLabel : h.group!;
+    const desc = h.description || "";
+    const username = h.username || "";
     return (
       h.name.toLowerCase().includes(term) ||
       h.host.toLowerCase().includes(term) ||
+      desc.toLowerCase().includes(term) ||
+      username.toLowerCase().includes(term) ||
       groupName.toLowerCase().includes(term)
     );
   });
@@ -422,7 +427,14 @@ export const Sidebar: React.FC<Props> = ({
                                 <span title={t("sidebar.connectedBadge")} className="absolute -bottom-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse ring-1 ring-[var(--bg-app)]" />
                               )}
                             </div>
-                            <div className="truncate flex-1">
+                            <div
+                              title={
+                                host.description
+                                  ? `${host.name} (${host.description})\n${host.username}@${host.host}:${host.port}`
+                                  : `${host.name}\n${host.username}@${host.host}:${host.port}`
+                              }
+                              className="truncate flex-1"
+                            >
                               <div className="flex items-center space-x-1 truncate">
                                 <span className="text-[12.5px] font-medium text-[var(--text-primary)] truncate">
                                   {host.name}
@@ -433,8 +445,13 @@ export const Sidebar: React.FC<Props> = ({
                                   </span>
                                 )}
                               </div>
-                              <div className="text-[10.5px] text-[var(--text-tertiary)] font-mono truncate tracking-tight">
-                                {host.username}@{host.host}
+                              <div className="text-[10.5px] text-[var(--text-tertiary)] font-mono truncate tracking-tight flex items-center space-x-1">
+                                <span className="truncate">{host.username}@{host.host}</span>
+                                {host.description && (
+                                  <span className="text-[10px] text-[var(--text-tertiary)]/75 font-sans truncate flex-shrink-0">
+                                    · {host.description}
+                                  </span>
+                                )}
                               </div>
                             </div>
                           </div>
