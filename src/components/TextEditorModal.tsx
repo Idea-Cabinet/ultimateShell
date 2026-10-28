@@ -14,6 +14,8 @@ import {
   Code2,
   Sparkles,
   Wand2,
+  Undo2,
+  Redo2,
 } from "lucide-react";
 import { FileEntry, PreviewResult } from "../types";
 
@@ -600,6 +602,12 @@ services:
   plaintext: [],
 };
 
+interface HistorySnapshot {
+  content: string;
+  cursorStart: number;
+  cursorEnd: number;
+}
+
 interface TextEditorModalProps {
   entry: FileEntry;
   previewResult: PreviewResult | null;
@@ -632,6 +640,15 @@ export const TextEditorModal: React.FC<TextEditorModalProps> = ({
   const [showUnsavedPrompt, setShowUnsavedPrompt] = useState<boolean>(false);
   const [formatSuccess, setFormatSuccess] = useState<boolean>(false);
 
+  // Undo / Redo History Stacks
+  const undoStackRef = useRef<HistorySnapshot[]>([]);
+  const redoStackRef = useRef<HistorySnapshot[]>([]);
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
+  const currentContentRef = useRef<string>("");
+  currentContentRef.current = content;
+  const lastTypingTimeRef = useRef<number>(0);
+
   // Search in editor state
   const [showSearch, setShowSearch] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -651,6 +668,11 @@ export const TextEditorModal: React.FC<TextEditorModalProps> = ({
   useEffect(() => {
     if (previewResult) {
       setContent(previewResult.content);
+      currentContentRef.current = previewResult.content;
+      undoStackRef.current = [];
+      redoStackRef.current = [];
+      setCanUndo(false);
+      setCanRedo(false);
     }
   }, [previewResult]);
 
@@ -682,13 +704,124 @@ export const TextEditorModal: React.FC<TextEditorModalProps> = ({
   const updateCursorPosition = useCallback(() => {
     if (!textareaRef.current) return;
     const pos = textareaRef.current.selectionStart || 0;
-    const textBefore = content.substring(0, pos);
+    const textBefore = currentContentRef.current.substring(0, pos);
     const splitLines = textBefore.split("\n");
     setCursorPos({
       line: splitLines.length,
       col: splitLines[splitLines.length - 1].length + 1,
     });
-  }, [content]);
+  }, []);
+
+  // Record a programmatic change into undo history
+  const pushProgrammaticChange = useCallback(
+    (newContent: string, newCursorStart: number, newCursorEnd: number) => {
+      const currentStart = textareaRef.current?.selectionStart || 0;
+      const currentEnd = textareaRef.current?.selectionEnd || 0;
+
+      undoStackRef.current.push({
+        content: currentContentRef.current,
+        cursorStart: currentStart,
+        cursorEnd: currentEnd,
+      });
+      if (undoStackRef.current.length > 80) undoStackRef.current.shift();
+      redoStackRef.current = [];
+      setCanUndo(true);
+      setCanRedo(false);
+
+      setContent(newContent);
+      setTimeout(() => {
+        if (textareaRef.current) {
+          textareaRef.current.focus();
+          textareaRef.current.selectionStart = newCursorStart;
+          textareaRef.current.selectionEnd = newCursorEnd;
+          updateCursorPosition();
+        }
+      }, 0);
+    },
+    [updateCursorPosition]
+  );
+
+  // Undo implementation
+  const handleUndo = useCallback(() => {
+    if (undoStackRef.current.length === 0) return;
+    const prevSnapshot = undoStackRef.current.pop()!;
+
+    const currentStart = textareaRef.current?.selectionStart || 0;
+    const currentEnd = textareaRef.current?.selectionEnd || 0;
+    redoStackRef.current.push({
+      content: currentContentRef.current,
+      cursorStart: currentStart,
+      cursorEnd: currentEnd,
+    });
+
+    setCanUndo(undoStackRef.current.length > 0);
+    setCanRedo(true);
+
+    setContent(prevSnapshot.content);
+    setTimeout(() => {
+      if (textareaRef.current) {
+        textareaRef.current.focus();
+        textareaRef.current.selectionStart = prevSnapshot.cursorStart;
+        textareaRef.current.selectionEnd = prevSnapshot.cursorEnd;
+        updateCursorPosition();
+      }
+    }, 0);
+  }, [updateCursorPosition]);
+
+  // Redo implementation
+  const handleRedo = useCallback(() => {
+    if (redoStackRef.current.length === 0) return;
+    const nextSnapshot = redoStackRef.current.pop()!;
+
+    const currentStart = textareaRef.current?.selectionStart || 0;
+    const currentEnd = textareaRef.current?.selectionEnd || 0;
+    undoStackRef.current.push({
+      content: currentContentRef.current,
+      cursorStart: currentStart,
+      cursorEnd: currentEnd,
+    });
+
+    setCanUndo(true);
+    setCanRedo(redoStackRef.current.length > 0);
+
+    setContent(nextSnapshot.content);
+    setTimeout(() => {
+      if (textareaRef.current) {
+        textareaRef.current.focus();
+        textareaRef.current.selectionStart = nextSnapshot.cursorStart;
+        textareaRef.current.selectionEnd = nextSnapshot.cursorEnd;
+        updateCursorPosition();
+      }
+    }, 0);
+  }, [updateCursorPosition]);
+
+  // Handle typing input in textarea with debounce snapshotting for undo
+  const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const newText = e.target.value;
+    const selStart = e.target.selectionStart || 0;
+    const selEnd = e.target.selectionEnd || 0;
+    const now = Date.now();
+
+    // Group typing: if pause > 500ms or large change (paste/cut/delete), snapshot previous state
+    if (
+      now - lastTypingTimeRef.current > 500 ||
+      Math.abs(newText.length - currentContentRef.current.length) > 1
+    ) {
+      undoStackRef.current.push({
+        content: currentContentRef.current,
+        cursorStart: selStart,
+        cursorEnd: selEnd,
+      });
+      if (undoStackRef.current.length > 80) undoStackRef.current.shift();
+      redoStackRef.current = [];
+      setCanUndo(true);
+      setCanRedo(false);
+    }
+    lastTypingTimeRef.current = now;
+
+    setContent(newText);
+    updateCursorPosition();
+  };
 
   // Jump to specific line (used by validation warnings)
   const jumpToLine = (targetLine?: number) => {
@@ -715,15 +848,9 @@ export const TextEditorModal: React.FC<TextEditorModalProps> = ({
     const end = textarea.selectionEnd;
 
     const newContent = content.substring(0, start) + snippet.template + content.substring(end);
-    setContent(newContent);
     setShowSnippetsMenu(false);
-
     const targetPos = start + (snippet.cursorOffset ?? snippet.template.length);
-    setTimeout(() => {
-      textarea.focus();
-      textarea.selectionStart = textarea.selectionEnd = targetPos;
-      updateCursorPosition();
-    }, 10);
+    pushProgrammaticChange(newContent, targetPos, targetPos);
   };
 
   // Format / Prettify Content
@@ -732,7 +859,7 @@ export const TextEditorModal: React.FC<TextEditorModalProps> = ({
       try {
         const parsed = JSON.parse(content);
         const formatted = JSON.stringify(parsed, null, 2);
-        setContent(formatted);
+        pushProgrammaticChange(formatted, 0, 0);
         setFormatSuccess(true);
         setTimeout(() => setFormatSuccess(false), 2000);
       } catch (err: any) {
@@ -744,17 +871,35 @@ export const TextEditorModal: React.FC<TextEditorModalProps> = ({
         .split("\n")
         .map((l) => l.trimEnd())
         .join("\n");
-      setContent(cleaned);
+      pushProgrammaticChange(cleaned, 0, 0);
       setFormatSuccess(true);
       setTimeout(() => setFormatSuccess(false), 2000);
     }
   };
 
-  // Advanced Keyboard Handlers: Tab indent, Auto-close brackets & HTML tags
+  // Advanced Keyboard Handlers: Tab indent, Auto-close brackets & HTML tags, Undo/Redo
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     const textarea = e.currentTarget;
     const start = textarea.selectionStart;
     const end = textarea.selectionEnd;
+
+    // Ctrl+Z / Cmd+Z: Undo (or Redo if Shift pressed)
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
+      e.preventDefault();
+      if (e.shiftKey) {
+        handleRedo();
+      } else {
+        handleUndo();
+      }
+      return;
+    }
+
+    // Ctrl+Y / Cmd+Y: Redo
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "y") {
+      e.preventDefault();
+      handleRedo();
+      return;
+    }
 
     // Ctrl+S / Cmd+S: Save file
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
@@ -786,23 +931,15 @@ export const TextEditorModal: React.FC<TextEditorModalProps> = ({
           const replaceStart = start - word.length;
           const newContent =
             content.substring(0, replaceStart) + found.template + content.substring(end);
-          setContent(newContent);
           const newCursor = replaceStart + (found.cursorOffset ?? found.template.length);
-          setTimeout(() => {
-            textarea.selectionStart = textarea.selectionEnd = newCursor;
-            updateCursorPosition();
-          }, 10);
+          pushProgrammaticChange(newContent, newCursor, newCursor);
           return;
         }
       }
 
       // Default: insert 2 spaces
       const newVal = content.substring(0, start) + "  " + content.substring(end);
-      setContent(newVal);
-      setTimeout(() => {
-        textarea.selectionStart = textarea.selectionEnd = start + 2;
-        updateCursorPosition();
-      }, 0);
+      pushProgrammaticChange(newVal, start + 2, start + 2);
       return;
     }
 
@@ -823,11 +960,7 @@ export const TextEditorModal: React.FC<TextEditorModalProps> = ({
       if (!nextChar || /\s|[)\]};,>]/.test(nextChar)) {
         e.preventDefault();
         const newVal = content.substring(0, start) + e.key + closeChar + content.substring(end);
-        setContent(newVal);
-        setTimeout(() => {
-          textarea.selectionStart = textarea.selectionEnd = start + 1;
-          updateCursorPosition();
-        }, 0);
+        pushProgrammaticChange(newVal, start + 1, start + 1);
         return;
       }
     }
@@ -842,11 +975,7 @@ export const TextEditorModal: React.FC<TextEditorModalProps> = ({
           e.preventDefault();
           const closeTag = `</${tagMatch[1]}>`;
           const newVal = content.substring(0, start) + ">" + closeTag + content.substring(end);
-          setContent(newVal);
-          setTimeout(() => {
-            textarea.selectionStart = textarea.selectionEnd = start + 1; // Cursor stays in between ><
-            updateCursorPosition();
-          }, 0);
+          pushProgrammaticChange(newVal, start + 1, start + 1);
           return;
         }
       }
@@ -867,22 +996,15 @@ export const TextEditorModal: React.FC<TextEditorModalProps> = ({
         const extraIndent = "  ";
         const insertText = `\n${currentIndent}${extraIndent}\n${currentIndent}`;
         const newVal = content.substring(0, start) + insertText + content.substring(end);
-        setContent(newVal);
-        setTimeout(() => {
-          textarea.selectionStart = textarea.selectionEnd =
-            start + 1 + currentIndent.length + extraIndent.length;
-          updateCursorPosition();
-        }, 0);
+        const newCursor = start + 1 + currentIndent.length + extraIndent.length;
+        pushProgrammaticChange(newVal, newCursor, newCursor);
         return;
       } else if (currentIndent) {
         e.preventDefault();
         const insertText = `\n${currentIndent}`;
         const newVal = content.substring(0, start) + insertText + content.substring(end);
-        setContent(newVal);
-        setTimeout(() => {
-          textarea.selectionStart = textarea.selectionEnd = start + insertText.length;
-          updateCursorPosition();
-        }, 0);
+        const newCursor = start + insertText.length;
+        pushProgrammaticChange(newVal, newCursor, newCursor);
         return;
       }
     }
@@ -1028,6 +1150,28 @@ export const TextEditorModal: React.FC<TextEditorModalProps> = ({
                 )}
               </div>
             )}
+
+            {/* Undo / Redo Buttons */}
+            <div className="flex items-center space-x-0.5 border border-[var(--border-subtle)] rounded-lg p-0.5 bg-[var(--hover-item)]/50">
+              <button
+                type="button"
+                onClick={handleUndo}
+                disabled={!canUndo}
+                title="撤销 (⌘Z / Ctrl+Z)"
+                className="p-1 rounded hover:bg-[var(--hover-item)] disabled:opacity-30 disabled:pointer-events-none text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition cursor-pointer"
+              >
+                <Undo2 className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={handleRedo}
+                disabled={!canRedo}
+                title="重做 (⇧⌘Z / Ctrl+Y)"
+                className="p-1 rounded hover:bg-[var(--hover-item)] disabled:opacity-30 disabled:pointer-events-none text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition cursor-pointer"
+              >
+                <Redo2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
 
             {/* Format / Prettify Button */}
             <button
@@ -1266,10 +1410,7 @@ export const TextEditorModal: React.FC<TextEditorModalProps> = ({
               <textarea
                 ref={textareaRef}
                 value={content}
-                onChange={(e) => {
-                  setContent(e.target.value);
-                  updateCursorPosition();
-                }}
+                onChange={handleTextareaChange}
                 onKeyDown={handleKeyDown}
                 onClick={updateCursorPosition}
                 onKeyUp={updateCursorPosition}
