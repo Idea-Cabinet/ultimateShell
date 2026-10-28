@@ -610,6 +610,73 @@ async fn get_disk_partitions(
         .map_err(|e| format!("异步执行错误: {}", e))?
 }
 
+#[tauri::command]
+async fn get_listening_ports(
+    pty_mgr: State<'_, PtyManager>,
+    sftp_pool: State<'_, SftpPool>,
+    session_id: String,
+) -> Result<Vec<ops::PortEntry>, String> {
+    let opts = pty_mgr
+        .get_opts(&session_id)
+        .ok_or_else(|| "会话不存在或已关闭".to_string())?;
+
+    let pool = sftp_pool.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || ops::get_ports(&pool, &opts))
+        .await
+        .map_err(|e| format!("异步执行错误: {}", e))?
+}
+
+#[tauri::command]
+async fn get_systemd_services(
+    pty_mgr: State<'_, PtyManager>,
+    sftp_pool: State<'_, SftpPool>,
+    session_id: String,
+) -> Result<Vec<ops::SystemdService>, String> {
+    let opts = pty_mgr
+        .get_opts(&session_id)
+        .ok_or_else(|| "会话不存在或已关闭".to_string())?;
+
+    let pool = sftp_pool.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || ops::get_systemd_services(&pool, &opts))
+        .await
+        .map_err(|e| format!("异步执行错误: {}", e))?
+}
+
+#[tauri::command]
+async fn systemd_control_service(
+    pty_mgr: State<'_, PtyManager>,
+    sftp_pool: State<'_, SftpPool>,
+    session_id: String,
+    name: String,
+    action: String,
+) -> Result<String, String> {
+    let opts = pty_mgr
+        .get_opts(&session_id)
+        .ok_or_else(|| "会话不存在或已关闭".to_string())?;
+
+    let pool = sftp_pool.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || ops::control_systemd_service(&pool, &opts, &name, &action))
+        .await
+        .map_err(|e| format!("异步执行错误: {}", e))?
+}
+
+#[tauri::command]
+async fn systemd_service_status(
+    pty_mgr: State<'_, PtyManager>,
+    sftp_pool: State<'_, SftpPool>,
+    session_id: String,
+    name: String,
+) -> Result<String, String> {
+    let opts = pty_mgr
+        .get_opts(&session_id)
+        .ok_or_else(|| "会话不存在或已关闭".to_string())?;
+
+    let pool = sftp_pool.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || ops::get_systemd_service_status(&pool, &opts, &name))
+        .await
+        .map_err(|e| format!("异步执行错误: {}", e))?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let pty_mgr = PtyManager::new();
@@ -745,6 +812,10 @@ pub fn run() {
             fs_extract,
             fs_chmod,
             fs_chown,
+            get_listening_ports,
+            get_systemd_services,
+            systemd_control_service,
+            systemd_service_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

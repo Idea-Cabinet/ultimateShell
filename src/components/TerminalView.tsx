@@ -64,13 +64,31 @@ interface Props {
   isActive: boolean;
   resolvedTheme: ResolvedTheme;
   settings?: AppSettings;
+  isBroadcastActive?: boolean;
+  broadcastSessionsCount?: number;
+  onBroadcastData?: (data: string) => void;
+  onDisableBroadcast?: () => void;
 }
 
-export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme, settings }) => {
+export const TerminalView: React.FC<Props> = ({
+  session,
+  isActive,
+  resolvedTheme,
+  settings,
+  isBroadcastActive,
+  broadcastSessionsCount = 0,
+  onBroadcastData,
+  onDisableBroadcast,
+}) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalInstanceRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const searchAddonRef = useRef<SearchAddon | null>(null);
+  const onBroadcastDataRef = useRef(onBroadcastData);
+
+  useEffect(() => {
+    onBroadcastDataRef.current = onBroadcastData;
+  }, [onBroadcastData]);
 
   // Terminal Content Search States (Requirement: 终端内容搜索、匹配高亮、上下条定位)
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -217,6 +235,9 @@ export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme
 
     const onDataDisposable = term.onData((data) => {
       invoke("pty_write", { sessionId: session.id, data }).catch(console.error);
+      if (onBroadcastDataRef.current) {
+        onBroadcastDataRef.current(data);
+      }
       // If user typed something (e.g. Ctrl+C or Enter), flush pending output immediately
       if (pendingChunks.length > 0) {
         flushBuffer();
@@ -485,6 +506,22 @@ export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme
         >
           <Search className="w-3.5 h-3.5" />
         </button>
+      )}
+
+      {/* Broadcast Input Warning Banner */}
+      {isActive && isBroadcastActive && (
+        <div className="absolute top-2 left-1/2 -translate-x-1/2 z-20 px-3.5 py-1 rounded-full bg-rose-500/95 text-white text-[11px] font-medium shadow-xl flex items-center space-x-2 backdrop-blur animate-in fade-in slide-in-from-top-2 border border-white/20 select-none">
+          <span className="w-2 h-2 rounded-full bg-white animate-ping"></span>
+          <span>📢 广播模式开启：按键将实时同步至全部打开的会话 ({broadcastSessionsCount} 个)</span>
+          {onDisableBroadcast && (
+            <button
+              onClick={onDisableBroadcast}
+              className="ml-2 px-2 py-0.5 rounded-full bg-black/25 hover:bg-black/45 text-[10.5px] transition"
+            >
+              关闭广播
+            </button>
+          )}
+        </div>
       )}
 
       {/* Terminal Canvas */}

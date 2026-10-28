@@ -15,7 +15,7 @@ import { CommandAssistant } from "./components/CommandAssistant";
 import { ServerUserMenu } from "./components/ServerUserMenu";
 import { TransferProvider, useTransferManager } from "./context/TransferContext";
 import { TransferManagerModal } from "./components/TransferManagerModal";
-import { Folder, KeyRound, ShieldCheck, Sun, Moon, Monitor, Activity, HardDrive, Terminal, Globe, Settings, PanelLeft, PanelLeftClose, ArrowUpDown } from "lucide-react";
+import { Folder, KeyRound, ShieldCheck, Sun, Moon, Monitor, Activity, HardDrive, Terminal, Globe, Settings, PanelLeft, PanelLeftClose, ArrowUpDown, Network, Server } from "lucide-react";
 import "./App.css";
 
 interface PasswordUpdateEvent {
@@ -66,6 +66,18 @@ function AppContent() {
   const [isCommandAssistantOpen, setIsCommandAssistantOpen] = useState<boolean>(() => {
     return localStorage.getItem("ultimateshell_cmd_assistant_open") === "true";
   });
+
+  // Keyboard Broadcast State (synchronize typed keystrokes across all open tabs)
+  const [isBroadcastActive, setIsBroadcastActive] = useState(false);
+
+  const handleBroadcastData = (sourceSessionId: string, data: string) => {
+    if (!isBroadcastActive) return;
+    tabs.forEach((tab) => {
+      if (tab.id !== sourceSessionId) {
+        invoke("pty_write", { sessionId: tab.id, data }).catch(console.error);
+      }
+    });
+  };
 
   // Password update confirmation prompt
   const [passwordPrompt, setPasswordPrompt] = useState<PasswordUpdateEvent | null>(null);
@@ -657,6 +669,8 @@ function AppContent() {
           tabs={tabs}
           activeTabId={activeTabId}
           isSidebarCollapsed={isSidebarCollapsed}
+          isBroadcastActive={isBroadcastActive}
+          onToggleBroadcast={() => setIsBroadcastActive(!isBroadcastActive)}
           onSelectTab={setActiveTabId}
           onCloseTab={handleCloseTab}
           onCloseOtherTabs={handleCloseOtherTabs}
@@ -681,6 +695,10 @@ function AppContent() {
               isActive={tab.id === activeTabId}
               resolvedTheme={resolvedTheme}
               settings={settings}
+              isBroadcastActive={isBroadcastActive}
+              broadcastSessionsCount={tabs.length}
+              onBroadcastData={(data) => handleBroadcastData(tab.id, data)}
+              onDisableBroadcast={() => setIsBroadcastActive(false)}
             />
           ))}
         </div>
@@ -843,6 +861,54 @@ function AppContent() {
             >
               <HardDrive className="w-3 h-3 text-amber-500" />
               <span>{t("status.disks")}</span>
+            </button>
+
+            {/* Toggle Listening Ports Tab */}
+            <button
+              onClick={() => {
+                if (isOpsDrawerOpen && drawerActiveTab === "ports") {
+                  setIsOpsDrawerOpen(false);
+                  localStorage.setItem("ultimateshell_drawer_open", "false");
+                } else {
+                  setIsOpsDrawerOpen(true);
+                  setDrawerActiveTab("ports");
+                  localStorage.setItem("ultimateshell_drawer_open", "true");
+                  localStorage.setItem("ultimateshell_drawer_tab", "ports");
+                }
+              }}
+              className={`flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] border transition-all flex-shrink-0 ${
+                isOpsDrawerOpen && drawerActiveTab === "ports"
+                  ? "bg-sky-500/15 text-sky-500 border-sky-500/40 font-medium"
+                  : "bg-[var(--hover-item)] text-[var(--text-secondary)] border-[var(--border-subtle)] hover:border-[var(--border-strong)]"
+              }`}
+              title="查看与管理网络监听端口（支持协议/端口搜索、一键终止占用进程）"
+            >
+              <Network className="w-3 h-3 text-sky-500" />
+              <span>端口</span>
+            </button>
+
+            {/* Toggle Systemd Services Tab */}
+            <button
+              onClick={() => {
+                if (isOpsDrawerOpen && drawerActiveTab === "services") {
+                  setIsOpsDrawerOpen(false);
+                  localStorage.setItem("ultimateshell_drawer_open", "false");
+                } else {
+                  setIsOpsDrawerOpen(true);
+                  setDrawerActiveTab("services");
+                  localStorage.setItem("ultimateshell_drawer_open", "true");
+                  localStorage.setItem("ultimateshell_drawer_tab", "services");
+                }
+              }}
+              className={`flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] border transition-all flex-shrink-0 ${
+                isOpsDrawerOpen && drawerActiveTab === "services"
+                  ? "bg-indigo-500/15 text-indigo-500 border-indigo-500/40 font-medium"
+                  : "bg-[var(--hover-item)] text-[var(--text-secondary)] border-[var(--border-subtle)] hover:border-[var(--border-strong)]"
+              }`}
+              title="查看与管理 Systemd 系统服务（支持启动/停止/重启/查看状态日志）"
+            >
+              <Server className="w-3 h-3 text-indigo-500" />
+              <span>服务</span>
             </button>
 
             {/* Toggle Command Assistant Bar */}

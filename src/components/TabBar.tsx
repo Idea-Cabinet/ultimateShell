@@ -13,12 +13,15 @@ import {
   Edit3,
   XCircle,
   ArrowRightCircle,
+  Radio,
 } from "lucide-react";
 
 interface Props {
   tabs: TabSession[];
   activeTabId: string;
   isSidebarCollapsed: boolean;
+  isBroadcastActive?: boolean;
+  onToggleBroadcast?: () => void;
   onSelectTab: (id: string) => void;
   onCloseTab: (id: string) => void;
   onCloseOtherTabs: (id: string) => void;
@@ -41,6 +44,8 @@ export const TabBar: React.FC<Props> = ({
   tabs,
   activeTabId,
   isSidebarCollapsed,
+  isBroadcastActive = false,
+  onToggleBroadcast,
   onSelectTab,
   onCloseTab,
   onCloseOtherTabs,
@@ -201,6 +206,27 @@ export const TabBar: React.FC<Props> = ({
           >
             <Plus className="w-3.5 h-3.5" strokeWidth={2} />
           </button>
+
+          {tabs.length > 1 && onToggleBroadcast && (
+            <button
+              draggable={false}
+              data-tauri-drag-region="false"
+              onClick={onToggleBroadcast}
+              title={
+                isBroadcastActive
+                  ? "关闭多窗口输入广播"
+                  : "开启多窗口输入广播（将键盘输入同步至所有打开的标签页）"
+              }
+              className={`h-7 px-2 flex items-center space-x-1.5 rounded-[6px] transition active:scale-[0.95] flex-shrink-0 text-[11px] font-medium ml-1 ${
+                isBroadcastActive
+                  ? "bg-rose-500 text-white shadow-xs animate-pulse font-semibold"
+                  : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--hover-item)] border border-[var(--border-subtle)]"
+              }`}
+            >
+              <Radio className="w-3.5 h-3.5" />
+              <span>{isBroadcastActive ? "广播中" : "同步键入"}</span>
+            </button>
+          )}
         </div>
 
         {/* Trailing Draggable Area for Window Dragging */}

@@ -3,8 +3,10 @@ import { TabSession } from "../types";
 import { FileExplorer } from "./FileExplorer";
 import { ProcessManager } from "./ProcessManager";
 import { DiskMountManager } from "./DiskMountManager";
+import { PortManager } from "./PortManager";
+import { ServiceManager } from "./ServiceManager";
 
-export type DrawerTab = "files" | "processes" | "disks";
+export type DrawerTab = "files" | "processes" | "disks" | "ports" | "services";
 
 interface Props {
   session: TabSession;
@@ -71,6 +73,26 @@ export const OpsDrawer: React.FC<Props> = ({
         {activeTab === "disks" && (
           <DiskMountManager
             session={session}
+            isMaximized={isMaximized}
+            onToggleMaximize={onToggleMaximize}
+            onClose={onClose}
+          />
+        )}
+
+        {activeTab === "ports" && (
+          <PortManager
+            session={session}
+            onSendToTerminal={onSendToTerminal}
+            isMaximized={isMaximized}
+            onToggleMaximize={onToggleMaximize}
+            onClose={onClose}
+          />
+        )}
+
+        {activeTab === "services" && (
+          <ServiceManager
+            session={session}
+            onSendToTerminal={onSendToTerminal}
             isMaximized={isMaximized}
             onToggleMaximize={onToggleMaximize}
             onClose={onClose}

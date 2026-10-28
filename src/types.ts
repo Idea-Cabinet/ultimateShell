@@ -88,6 +88,24 @@ export interface DiskPartition {
   use_percent: number;
 }
 
+export interface PortEntry {
+  proto: string;
+  local_ip: string;
+  port: number;
+  state: string;
+  pid: number | null;
+  program: string;
+  user: string;
+}
+
+export interface SystemdService {
+  name: string;
+  load: string;
+  active: string;
+  sub: string;
+  description: string;
+}
+
 export interface ServerUser {
   username: string;
   uid: number;
