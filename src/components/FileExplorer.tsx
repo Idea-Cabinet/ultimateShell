@@ -42,6 +42,8 @@ import {
   Trash2,
   AlertTriangle,
   ShieldCheck,
+  Save,
+  Check,
 } from "lucide-react";
 
 interface FileExplorerProps {
@@ -298,12 +300,21 @@ export function FileExplorer({
     window.addEventListener("mouseup", onMouseUp);
   };
 
-  // Preview Modal
+  // Preview / Editor Modal
   const [previewFile, setPreviewFile] = useState<FileEntry | null>(null);
   const [previewResult, setPreviewResult] = useState<PreviewResult | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState<boolean>(false);
   const [previewWrap, setPreviewWrap] = useState<boolean>(false);
+  const [editContent, setEditContent] = useState<string>("");
+  const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [saveSuccess, setSaveSuccess] = useState<boolean>(false);
+  const [showUnsavedPrompt, setShowUnsavedPrompt] = useState<boolean>(false);
+
+  const isDirty = useMemo(() => {
+    if (!previewResult) return false;
+    return editContent !== previewResult.content;
+  }, [editContent, previewResult]);
 
   // Global Transfer Manager
   const transferManager = useTransferManager();
@@ -617,11 +628,13 @@ export function FileExplorer({
     }
   };
 
-  // Open file preview modal (ultra-fast tail/head chunked preview for logs & text)
+  // Open file preview & editor modal (ultra-fast tail/head chunked preview for logs & text)
   const openFilePreview = async (entry: FileEntry, requestedMode?: "tail" | "head") => {
     setPreviewFile(entry);
     setPreviewLoading(true);
     setPreviewError(null);
+    setShowUnsavedPrompt(false);
+    setSaveSuccess(false);
 
     const isLog =
       entry.name.endsWith(".log") ||
@@ -641,27 +654,112 @@ export function FileExplorer({
         maxBytes: 128 * 1024,
       });
       setPreviewResult(res);
+      setEditContent(res.content);
     } catch (err: any) {
       setPreviewError(typeof err === "string" ? err : err?.message || String(err));
       setPreviewResult(null);
+      setEditContent("");
     } finally {
       setPreviewLoading(false);
     }
   };
 
-  // Listen for Escape key to close file preview modal immediately
+  // Save modified text file content to remote or local
+  const handleSaveFile = async (): Promise<boolean> => {
+    if (!previewFile || isSaving) return false;
+    setIsSaving(true);
+    try {
+      await invoke("fs_save_file", {
+        sessionId: session.id,
+        path: previewFile.path,
+        content: editContent,
+      });
+      setPreviewResult((prev) =>
+        prev
+          ? {
+              ...prev,
+              content: editContent,
+              line_count: editContent.split("\n").length,
+            }
+          : null
+      );
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 2200);
+      return true;
+    } catch (err: any) {
+      alert(`保存文件失败: ${typeof err === "string" ? err : err?.message || err}`);
+      return false;
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Safe close request: prompts if there are unsaved changes
+  const requestClosePreview = () => {
+    if (isDirty) {
+      setShowUnsavedPrompt(true);
+    } else {
+      forceClosePreview();
+    }
+  };
+
+  // Force close without prompt
+  const forceClosePreview = () => {
+    setPreviewFile(null);
+    setPreviewResult(null);
+    setPreviewError(null);
+    setEditContent("");
+    setShowUnsavedPrompt(false);
+    setSaveSuccess(false);
+  };
+
+  // Save and close in one action
+  const handleSaveAndClose = async () => {
+    const success = await handleSaveFile();
+    if (success) {
+      forceClosePreview();
+      loadDirectory(currentPath, false);
+    }
+  };
+
+  // Keyboard shortcut listener for Cmd+S and Escape
   useEffect(() => {
     if (!previewFile) return;
     const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        handleSaveFile();
+        return;
+      }
       if (e.key === "Escape") {
-        setPreviewFile(null);
-        setPreviewResult(null);
-        setPreviewError(null);
+        e.preventDefault();
+        requestClosePreview();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [previewFile]);
+  }, [previewFile, isDirty, editContent, isSaving]);
+
+  // Handle Tab key in editor textarea (insert 2 spaces instead of tab out)
+  const handleKeyDownInEditor = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
+      e.preventDefault();
+      handleSaveFile();
+      return;
+    }
+    if (e.key === "Tab") {
+      e.preventDefault();
+      const target = e.currentTarget;
+      const start = target.selectionStart;
+      const end = target.selectionEnd;
+      const val = target.value;
+      const newVal = val.substring(0, start) + "  " + val.substring(end);
+      setEditContent(newVal);
+      setTimeout(() => {
+        target.selectionStart = target.selectionEnd = start + 2;
+      }, 0);
+    }
+  };
 
   // Download file to default Downloads folder
   const handleDownload = async (entry: FileEntry) => {
@@ -1979,29 +2077,30 @@ export function FileExplorer({
           document.body
         )}
 
-      {/* File Preview Modal (Portaled directly to document.body at top z-index, click-outside to dismiss) */}
+      {/* File Preview & Editor Modal (Portaled directly to document.body at top z-index, click-outside to dismiss) */}
       {previewFile &&
         createPortal(
           <div
             style={{ zIndex: 9999 }}
             className="fixed inset-0 bg-black/55 backdrop-blur-[2px] flex items-center justify-center p-4 animate-in fade-in duration-100"
-            onClick={() => {
-              setPreviewFile(null);
-              setPreviewResult(null);
-              setPreviewError(null);
-            }}
+            onClick={requestClosePreview}
           >
             <div
-              className="w-[820px] max-w-full max-h-[88vh] bg-[var(--bg-app)] border border-[var(--border-subtle)] rounded-xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-120"
+              className="w-[880px] max-w-full h-[88vh] max-h-[88vh] bg-[var(--bg-app)] border border-[var(--border-subtle)] rounded-xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-120"
               onClick={(e) => e.stopPropagation()}
             >
               {/* Modal Header */}
-              <div className="h-10 px-4 bg-[var(--bg-card)] border-b border-[var(--border-subtle)] flex items-center justify-between select-none">
+              <div className="h-11 px-4 bg-[var(--bg-card)] border-b border-[var(--border-subtle)] flex items-center justify-between select-none">
                 <div className="flex items-center space-x-2 truncate mr-2">
                   <FileText className="w-4 h-4 text-[#007AFF] flex-shrink-0" />
                   <span className="text-[13px] font-semibold text-[var(--text-primary)] truncate">
                     {previewFile.name}
                   </span>
+                  {isDirty && (
+                    <span className="px-1.5 py-0.5 rounded text-[10px] bg-amber-500/15 text-amber-500 font-semibold border border-amber-500/30 flex-shrink-0">
+                      已修改
+                    </span>
+                  )}
                   <span className="text-[11px] text-[var(--text-tertiary)] font-mono flex-shrink-0">
                     ({previewFile.size_formatted})
                   </span>
@@ -2012,12 +2111,46 @@ export function FileExplorer({
                   )}
                 </div>
                 <div className="flex items-center space-x-1.5 flex-shrink-0">
+                  {/* Save Button */}
+                  <button
+                    onClick={() => handleSaveFile()}
+                    disabled={isSaving || !isDirty}
+                    title="保存文件更改 (⌘S / Ctrl+S)"
+                    className={`px-3 py-1 rounded text-[11px] font-medium transition-all flex items-center space-x-1.5 shadow-sm ${
+                      saveSuccess
+                        ? "bg-emerald-600 text-white"
+                        : isDirty
+                        ? "bg-[#007AFF] hover:bg-[#0066D6] text-white active:scale-95 ring-1 ring-white/20"
+                        : "bg-[var(--hover-item)] text-[var(--text-tertiary)] opacity-60 cursor-not-allowed"
+                    }`}
+                  >
+                    {saveSuccess ? (
+                      <>
+                        <Check className="w-3.5 h-3.5" />
+                        <span>已保存</span>
+                      </>
+                    ) : isSaving ? (
+                      <>
+                        <RotateCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>保存中...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Save className="w-3.5 h-3.5" />
+                        <span>保存{isDirty ? "*" : ""} (⌘S)</span>
+                      </>
+                    )}
+                  </button>
+
                   {/* Tail / Head Mode Switch */}
                   {previewResult && previewResult.is_truncated && (
                     <button
-                      onClick={() =>
-                        openFilePreview(previewFile, previewResult.mode === "tail" ? "head" : "tail")
-                      }
+                      onClick={() => {
+                        if (isDirty && !window.confirm("切换查看模式将放弃当前未保存的修改，是否继续？")) {
+                          return;
+                        }
+                        openFilePreview(previewFile, previewResult.mode === "tail" ? "head" : "tail");
+                      }}
                       title={previewResult.mode === "tail" ? "切换查看文件开头" : "切换查看最新尾部日志"}
                       className="px-2 py-1 rounded bg-[var(--hover-item)] hover:bg-[#007AFF]/15 hover:text-[#007AFF] text-[11px] text-[var(--text-secondary)] transition-colors flex items-center space-x-1"
                     >
@@ -2026,7 +2159,12 @@ export function FileExplorer({
                   )}
                   {/* Refresh button */}
                   <button
-                    onClick={() => openFilePreview(previewFile, previewResult?.mode || "tail")}
+                    onClick={() => {
+                      if (isDirty && !window.confirm("刷新将重新从服务器读取并丢弃当前未保存的内容，是否继续？")) {
+                        return;
+                      }
+                      openFilePreview(previewFile, previewResult?.mode || "tail");
+                    }}
                     title="重新获取最新日志/文件内容"
                     className="p-1.5 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[#007AFF] transition"
                   >
@@ -2047,11 +2185,11 @@ export function FileExplorer({
                   {/* Copy button */}
                   <button
                     onClick={() => {
-                      if (previewResult?.content) {
-                        navigator.clipboard.writeText(previewResult.content);
+                      if (editContent) {
+                        navigator.clipboard.writeText(editContent);
                       }
                     }}
-                    title="一键复制当前预览文本"
+                    title="一键复制当前编辑器文本"
                     className="px-2.5 py-1 rounded bg-[var(--hover-item)] hover:bg-[#007AFF]/15 hover:text-[#007AFF] text-[11px] flex items-center space-x-1 transition-colors"
                   >
                     <Copy className="w-3.5 h-3.5" />
@@ -2059,12 +2197,8 @@ export function FileExplorer({
                   </button>
                   {/* Close button */}
                   <button
-                    onClick={() => {
-                      setPreviewFile(null);
-                      setPreviewResult(null);
-                      setPreviewError(null);
-                    }}
-                    title="关闭预览弹窗 (Esc)"
+                    onClick={requestClosePreview}
+                    title="关闭窗口 (Esc)"
                     className="p-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition"
                   >
                     <X className="w-4 h-4" />
@@ -2072,30 +2206,101 @@ export function FileExplorer({
                 </div>
               </div>
 
-              {/* Modal Body */}
+              {/* Truncated File Notice */}
+              {previewResult && previewResult.is_truncated && (
+                <div className="px-4 py-2 bg-amber-500/10 border-b border-amber-500/20 text-[11px] text-amber-500 flex items-center justify-between flex-shrink-0">
+                  <span>
+                    ⚠️ 注意：此文件较大（当前仅截取显示了部分内容）。直接编辑并保存将覆盖为当前编辑框内容，如需完整编辑建议下载文件后修改。
+                  </span>
+                </div>
+              )}
+
+              {/* Modal Body: Direct Text Editor */}
               <div
                 style={{ contain: "content" }}
-                className="flex-1 p-3.5 overflow-auto font-mono text-[11.5px] leading-relaxed bg-[var(--bg-terminal)] text-[var(--text-primary)] select-text"
+                className="flex-1 p-0 overflow-hidden font-mono text-[12px] leading-relaxed bg-[var(--bg-terminal)] text-[var(--text-primary)] relative"
               >
                 {previewLoading ? (
-                  <div className="flex items-center justify-center py-16 text-[var(--text-tertiary)] space-x-2">
+                  <div className="flex items-center justify-center py-24 text-[var(--text-tertiary)] space-x-2">
                     <RotateCw className="w-5 h-5 animate-spin text-[#007AFF]" />
-                    <span>正在读取日志与文件内容...</span>
+                    <span>正在读取文件内容...</span>
                   </div>
                 ) : previewError ? (
-                  <div className="text-red-400 p-4 font-mono text-xs">
+                  <div className="text-red-400 p-6 font-mono text-xs">
                     {previewError}
                   </div>
                 ) : previewResult ? (
-                  <pre
-                    style={{ contain: "content" }}
-                    className={`font-mono text-[11.5px] leading-relaxed ${
-                      previewWrap ? "whitespace-pre-wrap break-all" : "whitespace-pre"
+                  <textarea
+                    spellCheck={false}
+                    autoCapitalize="off"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    value={editContent}
+                    onChange={(e) => setEditContent(e.target.value)}
+                    onKeyDown={handleKeyDownInEditor}
+                    placeholder="文件为空，可在此直接输入文本..."
+                    className={`w-full h-full p-4 font-mono text-[12px] leading-relaxed resize-none outline-none border-none bg-transparent text-[var(--text-primary)] selection:bg-[#007AFF]/30 ${
+                      previewWrap ? "whitespace-pre-wrap break-all" : "whitespace-pre overflow-x-auto"
                     }`}
-                  >
-                    {previewResult.content}
-                  </pre>
+                    wrap={previewWrap ? "soft" : "off"}
+                  />
                 ) : null}
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+
+      {/* Unsaved Changes Confirmation Dialog */}
+      {showUnsavedPrompt &&
+        createPortal(
+          <div
+            style={{ zIndex: 10001 }}
+            className="fixed inset-0 bg-black/60 backdrop-blur-[3px] flex items-center justify-center p-4 animate-in fade-in duration-100"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              className="w-[420px] max-w-full bg-[var(--bg-app)] border border-[var(--border-subtle)] rounded-xl shadow-2xl p-5 flex flex-col space-y-4 animate-in zoom-in-95 duration-120"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start space-x-3">
+                <div className="p-2 rounded-full bg-amber-500/15 text-amber-500 flex-shrink-0 mt-0.5">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-[14px] font-semibold text-[var(--text-primary)]">
+                    未保存的更改
+                  </h3>
+                  <p className="text-[12px] text-[var(--text-secondary)] mt-1.5 leading-normal">
+                    文件「<span className="font-mono font-medium text-[var(--text-primary)]">{previewFile?.name}</span>」已做修改，是否在关闭窗口前保存更改？
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end space-x-2 pt-2 border-t border-[var(--border-subtle)]">
+                <button
+                  type="button"
+                  onClick={() => setShowUnsavedPrompt(false)}
+                  className="px-3 py-1.5 rounded-lg text-[12px] text-[var(--text-secondary)] hover:bg-[var(--hover-item)] hover:text-[var(--text-primary)] transition"
+                >
+                  继续编辑
+                </button>
+                <button
+                  type="button"
+                  onClick={() => forceClosePreview()}
+                  className="px-3 py-1.5 rounded-lg text-[12px] text-red-500 hover:bg-red-500/15 transition font-medium"
+                >
+                  放弃更改
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveAndClose}
+                  disabled={isSaving}
+                  className="px-3.5 py-1.5 rounded-lg text-[12px] bg-[#007AFF] hover:bg-[#0066D6] text-white font-medium shadow transition flex items-center space-x-1.5"
+                >
+                  {isSaving && <RotateCw className="w-3.5 h-3.5 animate-spin" />}
+                  <span>保存并关闭</span>
+                </button>
               </div>
             </div>
           </div>,

@@ -654,6 +654,55 @@ pub fn read_file_preview_content(
     }
 }
 
+pub fn save_file_content(
+    pool: &SftpPool,
+    opts: &SpawnOptions,
+    file_path: &str,
+    content: &str,
+) -> Result<(), String> {
+    let target = resolve_path_str(pool, opts, file_path);
+    if opts.is_local {
+        fs::write(&target, content.as_bytes())
+            .map_err(|e| format!("保存本地文件失败: {}", e))?;
+        Ok(())
+    } else {
+        let sess_arc = pool.get_or_connect(opts)?;
+        let sess = sess_arc.lock().map_err(|e| e.to_string())?;
+
+        // 1. Try SFTP create & write
+        let mut sftp_ok = false;
+        if let Ok(sftp) = sess.sftp() {
+            if let Ok(mut file) = sftp.create(Path::new(&target)) {
+                use std::io::Write;
+                if file.write_all(content.as_bytes()).is_ok() && file.flush().is_ok() {
+                    sftp_ok = true;
+                }
+            }
+        }
+
+        if sftp_ok {
+            return Ok(());
+        }
+
+        // 2. Fallback to SSH command: tee or sudo -n tee
+        let safe_path = target.replace('\'', "'\\''");
+        let cmd = format!("tee '{}' > /dev/null || sudo -n tee '{}' > /dev/null", safe_path, safe_path);
+        if let Ok(mut ch) = sess.channel_session() {
+            if ch.exec(&cmd).is_ok() {
+                use std::io::Write;
+                let _ = ch.write_all(content.as_bytes());
+                let _ = ch.send_eof();
+                let _ = ch.wait_close();
+                if ch.exit_status().unwrap_or(1) == 0 {
+                    return Ok(());
+                }
+            }
+        }
+
+        Err(format!("保存远程文件失败 (权限不足或路径不可写): {}", target))
+    }
+}
+
 pub fn rename_file(
     pool: &SftpPool,
     opts: &SpawnOptions,

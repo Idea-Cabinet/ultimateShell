@@ -103,6 +103,26 @@ async fn fs_read_preview(
 }
 
 #[tauri::command]
+async fn fs_save_file(
+    pty_mgr: State<'_, PtyManager>,
+    sftp_pool: State<'_, SftpPool>,
+    session_id: String,
+    path: String,
+    content: String,
+) -> Result<(), String> {
+    let opts = pty_mgr
+        .get_opts(&session_id)
+        .ok_or_else(|| "会话不存在或已关闭".to_string())?;
+
+    let pool = sftp_pool.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        sftp::save_file_content(&pool, &opts, &path, &content)
+    })
+    .await
+    .map_err(|e| format!("异步执行错误: {}", e))?
+}
+
+#[tauri::command]
 async fn fs_rename(
     pty_mgr: State<'_, PtyManager>,
     sftp_pool: State<'_, SftpPool>,
@@ -607,6 +627,7 @@ pub fn run() {
             switch_session_user,
             fs_list_dir,
             fs_read_preview,
+            fs_save_file,
             fs_rename,
             fs_create_file,
             fs_create_dir,
