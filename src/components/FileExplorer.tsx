@@ -739,10 +739,12 @@ export function FileExplorer({
       return;
     }
     const cleanName = createItemName.trim();
-    const targetPath = `${currentPath.replace(/\/$/, "")}/${cleanName}`;
+    const basePath = currentPath === "/" ? "" : currentPath.replace(/\/$/, "");
+    const targetPath = `${basePath}/${cleanName}`;
     setCreateItemLoading(true);
 
     try {
+      console.log(`[FileExplorer] 创建${createModal.type === "file" ? "文件" : "文件夹"}: targetPath=${targetPath}`);
       if (createModal.type === "file") {
         await invoke("fs_create_file", {
           sessionId: session.id,
@@ -756,12 +758,16 @@ export function FileExplorer({
       }
       setCreateModal(null);
       setCreateItemName("");
-      loadDirectory(currentPath, false);
+      await loadDirectory(currentPath, false);
+      if (currentPath === "/" || currentPath === "~") {
+        initLazyRoot(true);
+      }
     } catch (err: any) {
+      console.error("[FileExplorer] 创建失败:", err);
       const errStr = typeof err === "string" ? err : err?.message || String(err);
       if (errStr.includes("permission denied") || errStr.includes("SFTP(3)") || errStr.includes("Permission denied")) {
         alert(
-          `创建${createModal.type === "file" ? "文件" : "文件夹"}失败: 权限不足 (Permission Denied)\n\n当前用户无权在目录「${currentPath}」中写入。\n\n提示：若需在根目录或受保护的系统目录（如 / 或 /etc）中创建，请使用具有 root 特权的用户；或点击主页按钮 (~) 导航至您的主目录进行操作。`
+          `创建${createModal.type === "file" ? "文件" : "文件夹"}失败: 权限不足 (Permission Denied)\n\n当前用户无权在目录「${currentPath}」中写入。\n\n提示：若需在根目录或受保护的系统目录（如 / 或 /etc）中创建，请在终端切换为 root 身份；或点击主页图标 (~) 导航至您的主目录进行操作。`
         );
       } else {
         alert(`创建${createModal.type === "file" ? "文件" : "文件夹"}失败: ${errStr}`);

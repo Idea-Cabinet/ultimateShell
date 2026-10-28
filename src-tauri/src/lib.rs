@@ -127,6 +127,7 @@ async fn fs_create_file(
     session_id: String,
     path: String,
 ) -> Result<(), String> {
+    println!("[IPC:fs_create_file] sessionId={}, path={}", session_id, path);
     let opts = pty_mgr
         .get_opts(&session_id)
         .ok_or_else(|| "会话不存在或已关闭".to_string())?;
@@ -146,6 +147,7 @@ async fn fs_create_dir(
     session_id: String,
     path: String,
 ) -> Result<(), String> {
+    println!("[IPC:fs_create_dir] sessionId={}, path={}", session_id, path);
     let opts = pty_mgr
         .get_opts(&session_id)
         .ok_or_else(|| "会话不存在或已关闭".to_string())?;

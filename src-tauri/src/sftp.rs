@@ -2,6 +2,7 @@ use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
+use std::io::Read;
 use std::net::{TcpStream, ToSocketAddrs};
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
@@ -476,33 +477,94 @@ pub fn rename_file(
     }
 }
 
+pub fn resolve_path_str(pool: &SftpPool, opts: &SpawnOptions, raw_path: &str) -> String {
+    let clean = raw_path.trim();
+    if opts.is_local {
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
+        if clean.is_empty() || clean == "~" || clean == "." {
+            home
+        } else if clean.starts_with("~/") {
+            format!("{}/{}", home.trim_end_matches('/'), &clean[2..])
+        } else if clean.starts_with('~') {
+            format!("{}/{}", home.trim_end_matches('/'), &clean[1..].trim_start_matches('/'))
+        } else {
+            clean.to_string()
+        }
+    } else {
+        // Remote path resolution
+        if clean.starts_with('~') || clean.is_empty() || clean == "." {
+            let home = if let Ok(sess_arc) = pool.get_or_connect(opts) {
+                if let Ok(sess) = sess_arc.lock() {
+                    if let Ok(sftp) = sess.sftp() {
+                        sftp.realpath(Path::new("."))
+                            .map(|p| p.to_string_lossy().to_string())
+                            .unwrap_or_else(|_| "/root".to_string())
+                    } else {
+                        "/root".to_string()
+                    }
+                } else {
+                    "/root".to_string()
+                }
+            } else {
+                "/root".to_string()
+            };
+
+            if clean.is_empty() || clean == "~" || clean == "." {
+                home
+            } else if clean.starts_with("~/") {
+                format!("{}/{}", home.trim_end_matches('/'), &clean[2..])
+            } else {
+                format!("{}/{}", home.trim_end_matches('/'), &clean[1..].trim_start_matches('/'))
+            }
+        } else {
+            clean.to_string()
+        }
+    }
+}
+
 pub fn create_file(
     pool: &SftpPool,
     opts: &SpawnOptions,
     file_path: &str,
 ) -> Result<(), String> {
+    let target = resolve_path_str(pool, opts, file_path);
+    println!("[sftp::create_file] raw='{}' -> target='{}' is_local={}", file_path, target, opts.is_local);
+
     if opts.is_local {
-        fs::File::create(file_path)
-            .map_err(|e| format!("创建本地文件失败: {}", e))?;
+        fs::File::create(&target)
+            .map_err(|e| {
+                println!("[sftp::create_file] 本地创建文件失败: {}", e);
+                format!("创建本地文件失败: {}", e)
+            })?;
+        println!("[sftp::create_file] 本地创建文件成功: {}", target);
         Ok(())
     } else {
         let sess_arc = pool.get_or_connect(opts)?;
         let sess = sess_arc.lock().map_err(|e| e.to_string())?;
         let sftp = sess.sftp().map_err(|e| format!("SFTP 会话错误: {}", e))?;
-        match sftp.create(Path::new(file_path)) {
-            Ok(_) => Ok(()),
+        match sftp.create(Path::new(&target)) {
+            Ok(file) => {
+                drop(file);
+                println!("[sftp::create_file] 远程文件通过 SFTP 创建成功: {}", target);
+                Ok(())
+            }
             Err(e) => {
-                // If SFTP create fails (e.g. permission or parent issue), try touch / sudo -n touch
-                let safe_path = file_path.replace('\'', "'\\''");
+                println!("[sftp::create_file] SFTP 创建失败 ({}): {}，尝试 SSH touch 回退...", target, e);
+                // Fallback to touch / sudo -n touch
+                let safe_path = target.replace('\'', "'\\''");
                 if let Ok(mut ch) = sess.channel_session() {
                     let cmd = format!("touch '{}' 2>/dev/null || sudo -n touch '{}' 2>/dev/null", safe_path, safe_path);
                     if ch.exec(&cmd).is_ok() {
+                        let mut output = String::new();
+                        let _ = ch.read_to_string(&mut output);
                         let _ = ch.wait_close();
                         if ch.exit_status().unwrap_or(1) == 0 {
+                            println!("[sftp::create_file] 远程文件通过 SSH touch 回退创建成功: {}", target);
                             return Ok(());
                         }
                     }
                 }
+                println!("[sftp::create_file] 远程文件创建最终失败: {}", e);
                 Err(format!("创建远程文件失败: {}", e))
             }
         }
@@ -514,28 +576,43 @@ pub fn create_dir(
     opts: &SpawnOptions,
     dir_path: &str,
 ) -> Result<(), String> {
+    let target = resolve_path_str(pool, opts, dir_path);
+    let target_clean = target.trim_end_matches('/').to_string();
+    println!("[sftp::create_dir] raw='{}' -> target='{}' is_local={}", dir_path, target_clean, opts.is_local);
+
     if opts.is_local {
-        fs::create_dir_all(dir_path)
-            .map_err(|e| format!("创建本地文件夹失败: {}", e))?;
+        fs::create_dir_all(&target_clean)
+            .map_err(|e| {
+                println!("[sftp::create_dir] 本地创建文件夹失败: {}", e);
+                format!("创建本地文件夹失败: {}", e)
+            })?;
+        println!("[sftp::create_dir] 本地创建文件夹成功: {}", target_clean);
         Ok(())
     } else {
         let sess_arc = pool.get_or_connect(opts)?;
         let sess = sess_arc.lock().map_err(|e| e.to_string())?;
         let sftp = sess.sftp().map_err(|e| format!("SFTP 会话错误: {}", e))?;
-        match sftp.mkdir(Path::new(dir_path), 0o755) {
-            Ok(_) => Ok(()),
+        match sftp.mkdir(Path::new(&target_clean), 0o755) {
+            Ok(_) => {
+                println!("[sftp::create_dir] 远程文件夹通过 SFTP 创建成功: {}", target_clean);
+                Ok(())
+            }
             Err(e) => {
-                // If SFTP mkdir fails, try mkdir -p / sudo -n mkdir -p
-                let safe_path = dir_path.replace('\'', "'\\''");
+                println!("[sftp::create_dir] SFTP mkdir 失败 ({}): {}，尝试 SSH mkdir -p 回退...", target_clean, e);
+                let safe_path = target_clean.replace('\'', "'\\''");
                 if let Ok(mut ch) = sess.channel_session() {
                     let cmd = format!("mkdir -p '{}' 2>/dev/null || sudo -n mkdir -p '{}' 2>/dev/null", safe_path, safe_path);
                     if ch.exec(&cmd).is_ok() {
+                        let mut output = String::new();
+                        let _ = ch.read_to_string(&mut output);
                         let _ = ch.wait_close();
                         if ch.exit_status().unwrap_or(1) == 0 {
+                            println!("[sftp::create_dir] 远程文件夹通过 SSH mkdir -p 回退创建成功: {}", target_clean);
                             return Ok(());
                         }
                     }
                 }
+                println!("[sftp::create_dir] 远程文件夹创建最终失败: {}", e);
                 Err(format!("创建远程文件夹失败: {}", e))
             }
         }
