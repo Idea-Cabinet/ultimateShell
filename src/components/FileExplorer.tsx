@@ -37,6 +37,8 @@ import {
   Download,
   Pencil,
   ArrowUpDown,
+  FilePlus,
+  FolderPlus,
 } from "lucide-react";
 
 interface FileExplorerProps {
@@ -330,6 +332,28 @@ export function FileExplorer({
     y: number;
     entry: FileEntry;
   } | null>(null);
+
+  // Blank Area Context Menu (New File, New Folder, Upload, Terminal, Refresh)
+  const [blankContextMenu, setBlankContextMenu] = useState<{ x: number; y: number } | null>(null);
+
+  // New File / Folder modal state
+  const [createModal, setCreateModal] = useState<{ type: "file" | "folder" } | null>(null);
+  const [createItemName, setCreateItemName] = useState("");
+  const [createItemLoading, setCreateItemLoading] = useState(false);
+  const createInputRef = useRef<HTMLInputElement>(null);
+
+  // Focus create input on modal open
+  useEffect(() => {
+    if (createModal && createInputRef.current) {
+      createInputRef.current.focus();
+      const dotIdx = createItemName.lastIndexOf(".");
+      if (dotIdx > 0 && createModal.type === "file") {
+        createInputRef.current.setSelectionRange(0, dotIdx);
+      } else {
+        createInputRef.current.select();
+      }
+    }
+  }, [createModal]);
 
   // Fetch directory contents lazily for the main table view
   const loadDirectory = async (path: string, pushHistory = true) => {
@@ -708,6 +732,38 @@ export function FileExplorer({
     }
   };
 
+  // Confirm create file or directory
+  const handleConfirmCreate = async () => {
+    if (!createModal || !createItemName.trim()) {
+      setCreateModal(null);
+      return;
+    }
+    const cleanName = createItemName.trim();
+    const targetPath = `${currentPath.replace(/\/$/, "")}/${cleanName}`;
+    setCreateItemLoading(true);
+
+    try {
+      if (createModal.type === "file") {
+        await invoke("fs_create_file", {
+          sessionId: session.id,
+          path: targetPath,
+        });
+      } else {
+        await invoke("fs_create_dir", {
+          sessionId: session.id,
+          path: targetPath,
+        });
+      }
+      setCreateModal(null);
+      setCreateItemName("");
+      loadDirectory(currentPath, false);
+    } catch (err: any) {
+      alert(`创建${createModal.type === "file" ? "文件" : "文件夹"}失败: ${typeof err === "string" ? err : err?.message || err}`);
+    } finally {
+      setCreateItemLoading(false);
+    }
+  };
+
   // Drag and Drop event handlers
   const handleDragEnter = (e: React.DragEvent) => {
     e.preventDefault();
@@ -839,7 +895,10 @@ export function FileExplorer({
 
   // Context menu closer
   useEffect(() => {
-    const handleClickOutside = () => setContextMenu(null);
+    const handleClickOutside = () => {
+      setContextMenu(null);
+      setBlankContextMenu(null);
+    };
     window.addEventListener("click", handleClickOutside);
     return () => window.removeEventListener("click", handleClickOutside);
   }, []);
@@ -1101,16 +1160,6 @@ export function FileExplorer({
             )}
           </div>
 
-          {/* Upload Button */}
-          <button
-            onClick={handleUploadClick}
-            className="px-2 py-0.8 bg-[#007AFF] hover:bg-[#0062CC] text-white rounded text-[11px] font-medium flex items-center space-x-1 transition active:scale-95 shadow-xs"
-            title="选择本地文件上传到当前目录"
-          >
-            <Upload className="w-3 h-3" />
-            <span>上传</span>
-          </button>
-
           {/* Transfer Manager Button */}
           <button
             onClick={() => {
@@ -1184,6 +1233,11 @@ export function FileExplorer({
           <>
             <div
               style={{ width: `${treeWidth}px` }}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setContextMenu(null);
+                setBlankContextMenu({ x: e.clientX, y: e.clientY });
+              }}
               className="flex-shrink-0 border-r border-[var(--border-subtle)] bg-[var(--bg-sidebar)] flex flex-col overflow-hidden select-none"
             >
               <div className="p-2 text-[10.5px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider flex items-center justify-between">
@@ -1234,6 +1288,11 @@ export function FileExplorer({
           onDragLeave={handleDragLeave}
           onDragOver={handleDragOver}
           onDrop={handleDrop}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            setContextMenu(null);
+            setBlankContextMenu({ x: e.clientX, y: e.clientY });
+          }}
           className="flex-1 flex flex-col bg-[var(--bg-app)] overflow-hidden relative"
         >
           {/* Drag & Drop File Upload Overlay */}
@@ -1360,7 +1419,9 @@ export function FileExplorer({
                         onDoubleClick={() => handleItemDoubleClick(entry)}
                         onContextMenu={(e) => {
                           e.preventDefault();
+                          e.stopPropagation();
                           setSelectedEntry(entry);
+                          setBlankContextMenu(null);
                           setContextMenu({ x: e.clientX, y: e.clientY, entry });
                         }}
                         className={`h-7 flex items-center text-[12px] border-b border-[var(--border-subtle)]/40 cursor-default group transition-colors min-w-max ${
@@ -1563,6 +1624,179 @@ export function FileExplorer({
           </button>
         </div>
       )}
+
+      {/* Blank Area Context Menu */}
+      {blankContextMenu &&
+        createPortal(
+          <div
+            style={{
+              position: "fixed",
+              left: `${Math.min(blankContextMenu.x, window.innerWidth - 200)}px`,
+              top: `${Math.min(blankContextMenu.y, window.innerHeight - 250)}px`,
+              zIndex: 9999,
+            }}
+            className="w-48 bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-lg shadow-xl py-1 text-[12px] apple-vibrancy-popover animate-in fade-in zoom-in-95 duration-100 select-none"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => {
+                setBlankContextMenu(null);
+                setCreateItemName("untitled.txt");
+                setCreateModal({ type: "file" });
+              }}
+              title="在此目录下创建新文本文件"
+              className="w-full px-3 py-1.5 text-left hover:bg-[#007AFF] hover:text-white flex items-center space-x-2 text-[var(--text-primary)] transition-colors"
+            >
+              <FilePlus className="w-3.5 h-3.5 text-[#007AFF]" />
+              <span>新建文件</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setBlankContextMenu(null);
+                setCreateItemName("new_folder");
+                setCreateModal({ type: "folder" });
+              }}
+              title="在此目录下创建新文件夹"
+              className="w-full px-3 py-1.5 text-left hover:bg-[#007AFF] hover:text-white flex items-center space-x-2 text-[var(--text-primary)] transition-colors"
+            >
+              <FolderPlus className="w-3.5 h-3.5 text-[#F2B93B]" />
+              <span>新建文件夹</span>
+            </button>
+
+            <div className="h-[1px] bg-[var(--border-subtle)] my-1" />
+
+            <button
+              onClick={() => {
+                setBlankContextMenu(null);
+                handleUploadClick();
+              }}
+              title="选择本地文件上传到此目录"
+              className="w-full px-3 py-1.5 text-left hover:bg-[#007AFF] hover:text-white flex items-center space-x-2 text-[var(--text-primary)] transition-colors"
+            >
+              <Upload className="w-3.5 h-3.5 text-emerald-500" />
+              <span>上传文件...</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setBlankContextMenu(null);
+                onSendToTerminal(`cd "${currentPath}"\n`);
+              }}
+              title="在终端 Shell 中执行 cd 进入此当前路径"
+              className="w-full px-3 py-1.5 text-left hover:bg-[#007AFF] hover:text-white flex items-center space-x-2 text-[var(--text-primary)] transition-colors"
+            >
+              <Terminal className="w-3.5 h-3.5" />
+              <span>在终端打开此路径</span>
+            </button>
+
+            <div className="h-[1px] bg-[var(--border-subtle)] my-1" />
+
+            <button
+              onClick={() => {
+                setBlankContextMenu(null);
+                handleRefresh();
+              }}
+              title="重新加载刷新当前目录"
+              className="w-full px-3 py-1.5 text-left hover:bg-[#007AFF] hover:text-white flex items-center space-x-2 text-[var(--text-primary)] transition-colors"
+            >
+              <RotateCw className="w-3.5 h-3.5" />
+              <span>刷新目录</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setBlankContextMenu(null);
+                navigator.clipboard.writeText(currentPath);
+              }}
+              title="复制当前目录完整绝对路径到剪贴板"
+              className="w-full px-3 py-1.5 text-left hover:bg-[#007AFF] hover:text-white flex items-center space-x-2 text-[var(--text-primary)] transition-colors"
+            >
+              <Copy className="w-3.5 h-3.5" />
+              <span>复制当前路径</span>
+            </button>
+          </div>,
+          document.body
+        )}
+
+      {/* Create File / Folder Modal */}
+      {createModal &&
+        createPortal(
+          <div
+            style={{ zIndex: 10000 }}
+            className="fixed inset-0 bg-black/50 backdrop-blur-[2px] flex items-center justify-center p-4 animate-in fade-in duration-100"
+            onClick={() => setCreateModal(null)}
+          >
+            <div
+              className="w-96 apple-card rounded-xl p-5 shadow-2xl border border-[var(--border-subtle)] text-[var(--text-primary)] select-none animate-in zoom-in-95 duration-120"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center space-x-2.5">
+                <div className="w-8 h-8 rounded-lg bg-[#007AFF]/15 text-[#007AFF] flex items-center justify-center flex-shrink-0">
+                  {createModal.type === "file" ? (
+                    <FilePlus className="w-4 h-4" />
+                  ) : (
+                    <FolderPlus className="w-4 h-4 text-[#F2B93B]" />
+                  )}
+                </div>
+                <div>
+                  <div className="text-[13.5px] font-semibold tracking-tight">
+                    {createModal.type === "file" ? "新建文件" : "新建文件夹"}
+                  </div>
+                  <div className="text-[11px] text-[var(--text-tertiary)] truncate max-w-[280px]">
+                    所在目录: {currentPath}
+                  </div>
+                </div>
+              </div>
+
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  handleConfirmCreate();
+                }}
+                className="mt-4 space-y-3"
+              >
+                <div>
+                  <label className="block text-[11px] font-medium text-[var(--text-secondary)] mb-1">
+                    {createModal.type === "file" ? "文件名称" : "文件夹名称"}
+                  </label>
+                  <input
+                    ref={createInputRef}
+                    type="text"
+                    value={createItemName}
+                    onChange={(e) => setCreateItemName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") setCreateModal(null);
+                    }}
+                    disabled={createItemLoading}
+                    placeholder={createModal.type === "file" ? "untitled.txt" : "new_folder"}
+                    className="w-full px-3 py-1.5 text-[12.5px] bg-[var(--input-bg)] text-[var(--text-primary)] border border-[var(--border-subtle)] focus:border-[#007AFF] rounded-lg outline-none font-mono"
+                  />
+                </div>
+
+                <div className="flex items-center justify-end space-x-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setCreateModal(null)}
+                    disabled={createItemLoading}
+                    className="px-3.5 py-1.5 text-[12px] rounded-lg text-[var(--text-secondary)] hover:bg-[var(--hover-item)] transition"
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={createItemLoading || !createItemName.trim()}
+                    className="px-4 py-1.5 text-[12px] font-medium text-white bg-[#007AFF] hover:bg-[#0062CC] rounded-lg shadow-sm transition active:scale-95 disabled:opacity-40 flex items-center space-x-1.5"
+                  >
+                    {createItemLoading && <RotateCw className="w-3 h-3 animate-spin" />}
+                    <span>确认创建</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>,
+          document.body
+        )}
 
       {/* Rename Modal (Portaled directly to document.body at top z-index) */}
       {renamingEntry &&

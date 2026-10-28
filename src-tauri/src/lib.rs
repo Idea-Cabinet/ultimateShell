@@ -121,6 +121,44 @@ async fn fs_rename(
 }
 
 #[tauri::command]
+async fn fs_create_file(
+    pty_mgr: State<'_, PtyManager>,
+    sftp_pool: State<'_, SftpPool>,
+    session_id: String,
+    path: String,
+) -> Result<(), String> {
+    let opts = pty_mgr
+        .get_opts(&session_id)
+        .ok_or_else(|| "会话不存在或已关闭".to_string())?;
+
+    let pool = sftp_pool.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        sftp::create_file(&pool, &opts, &path)
+    })
+    .await
+    .map_err(|e| format!("异步执行错误: {}", e))?
+}
+
+#[tauri::command]
+async fn fs_create_dir(
+    pty_mgr: State<'_, PtyManager>,
+    sftp_pool: State<'_, SftpPool>,
+    session_id: String,
+    path: String,
+) -> Result<(), String> {
+    let opts = pty_mgr
+        .get_opts(&session_id)
+        .ok_or_else(|| "会话不存在或已关闭".to_string())?;
+
+    let pool = sftp_pool.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        sftp::create_dir(&pool, &opts, &path)
+    })
+    .await
+    .map_err(|e| format!("异步执行错误: {}", e))?
+}
+
+#[tauri::command]
 async fn fs_download_file(
     app: AppHandle,
     pty_mgr: State<'_, PtyManager>,
@@ -529,6 +567,8 @@ pub fn run() {
             fs_list_dir,
             fs_read_preview,
             fs_rename,
+            fs_create_file,
+            fs_create_dir,
             fs_download_file,
             fs_upload_file,
             fs_cancel_transfer,

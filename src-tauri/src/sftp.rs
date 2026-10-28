@@ -476,6 +476,45 @@ pub fn rename_file(
     }
 }
 
+pub fn create_file(
+    pool: &SftpPool,
+    opts: &SpawnOptions,
+    file_path: &str,
+) -> Result<(), String> {
+    if opts.is_local {
+        fs::File::create(file_path)
+            .map_err(|e| format!("创建本地文件失败: {}", e))?;
+        Ok(())
+    } else {
+        let sess_arc = pool.get_or_connect(opts)?;
+        let sess = sess_arc.lock().map_err(|e| e.to_string())?;
+        let sftp = sess.sftp().map_err(|e| format!("SFTP 会话错误: {}", e))?;
+        let _ = sftp
+            .create(Path::new(file_path))
+            .map_err(|e| format!("创建远程文件失败: {}", e))?;
+        Ok(())
+    }
+}
+
+pub fn create_dir(
+    pool: &SftpPool,
+    opts: &SpawnOptions,
+    dir_path: &str,
+) -> Result<(), String> {
+    if opts.is_local {
+        fs::create_dir_all(dir_path)
+            .map_err(|e| format!("创建本地文件夹失败: {}", e))?;
+        Ok(())
+    } else {
+        let sess_arc = pool.get_or_connect(opts)?;
+        let sess = sess_arc.lock().map_err(|e| e.to_string())?;
+        let sftp = sess.sftp().map_err(|e| format!("SFTP 会话错误: {}", e))?;
+        sftp.mkdir(Path::new(dir_path), 0o755)
+            .map_err(|e| format!("创建远程文件夹失败: {}", e))?;
+        Ok(())
+    }
+}
+
 pub fn download_file(
     app: AppHandle,
     pool: &SftpPool,
