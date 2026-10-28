@@ -1253,6 +1253,356 @@ pub fn upload_file(
     Ok(())
 }
 
+pub fn get_terminal_cwd(
+    pool: &SftpPool,
+    opts: &SpawnOptions,
+    local_pid: Option<u32>,
+) -> Result<String, String> {
+    if opts.is_local {
+        if let Some(pid) = local_pid {
+            #[cfg(target_os = "macos")]
+            {
+                if let Ok(output) = std::process::Command::new("lsof")
+                    .args(["-a", "-d", "cwd", "-p", &pid.to_string(), "-Fn"])
+                    .output()
+                {
+                    let text = String::from_utf8_lossy(&output.stdout);
+                    for line in text.lines() {
+                        if line.starts_with('n') && line.len() > 1 {
+                            return Ok(line[1..].to_string());
+                        }
+                    }
+                }
+            }
+            #[cfg(target_os = "linux")]
+            {
+                if let Ok(link) = std::fs::read_link(format!("/proc/{}/cwd", pid)) {
+                    return Ok(link.to_string_lossy().to_string());
+                }
+            }
+        }
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
+        Ok(home)
+    } else {
+        let sess_arc = pool.get_or_connect(opts)?;
+        let sess = sess_arc.lock().map_err(|e| e.to_string())?;
+        let user = opts.username.as_deref().unwrap_or("root");
+
+        // Inspect remote process tree of the logged-in user on active pts
+        let cmd = format!(
+            "sh -c 'TTY=$(w -h {} 2>/dev/null | awk \"{{print \\$2}}\" | tail -n 1); \
+             if [ -n \"$TTY\" ]; then \
+                 PID=$(pgrep -t \"$TTY\" 2>/dev/null | tail -n 1); \
+                 [ -n \"$PID\" ] && readlink \"/proc/$PID/cwd\" 2>/dev/null; \
+             fi'",
+            user
+        );
+        if let Ok(mut ch) = sess.channel_session() {
+            if ch.exec(&cmd).is_ok() {
+                let mut out = String::new();
+                let _ = ch.read_to_string(&mut out);
+                let _ = ch.wait_close();
+                let trimmed = out.trim();
+                if !trimmed.is_empty() && trimmed.starts_with('/') {
+                    return Ok(trimmed.to_string());
+                }
+            }
+        }
+
+        // Fallback: sftp realpath(".")
+        if let Ok(sftp) = sess.sftp() {
+            if let Ok(p) = sftp.realpath(Path::new(".")) {
+                return Ok(p.to_string_lossy().to_string());
+            }
+        }
+
+        Ok("/root".to_string())
+    }
+}
+
+pub fn archive_entry(
+    pool: &SftpPool,
+    opts: &SpawnOptions,
+    source_paths: &[String],
+    dest_archive_path: &str,
+    format: &str,
+) -> Result<(), String> {
+    if source_paths.is_empty() {
+        return Err("未指定待压缩的文件或目录".to_string());
+    }
+    let target_dest = resolve_path_str(pool, opts, dest_archive_path);
+    let resolved_sources: Vec<String> = source_paths
+        .iter()
+        .map(|s| resolve_path_str(pool, opts, s))
+        .collect();
+
+    let first_path = Path::new(&resolved_sources[0]);
+    let parent_dir = first_path
+        .parent()
+        .and_then(|p| p.to_str())
+        .unwrap_or("/");
+
+    let relative_items: Vec<String> = resolved_sources
+        .iter()
+        .map(|s| {
+            Path::new(s)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(s)
+                .to_string()
+        })
+        .collect();
+
+    if opts.is_local {
+        let is_zip = format == "zip" || target_dest.ends_with(".zip");
+        let mut cmd = if is_zip {
+            let mut c = std::process::Command::new("zip");
+            c.arg("-r").arg(&target_dest);
+            for item in &relative_items {
+                c.arg(item);
+            }
+            c.current_dir(parent_dir);
+            c
+        } else {
+            let mut c = std::process::Command::new("tar");
+            c.arg("-czf").arg(&target_dest);
+            for item in &relative_items {
+                c.arg(item);
+            }
+            c.current_dir(parent_dir);
+            c
+        };
+
+        let output = cmd.output().map_err(|e| format!("执行压缩失败: {}", e))?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            let err_msg = String::from_utf8_lossy(&output.stderr);
+            Err(format!("压缩失败: {}", err_msg))
+        }
+    } else {
+        let sess_arc = pool.get_or_connect(opts)?;
+        let sess = sess_arc.lock().map_err(|e| e.to_string())?;
+
+        let is_zip = format == "zip" || target_dest.ends_with(".zip");
+        let safe_dest = target_dest.replace('\'', "'\\''");
+        let safe_parent = parent_dir.replace('\'', "'\\''");
+        let items_escaped = relative_items
+            .iter()
+            .map(|i| format!("'{}'", i.replace('\'', "'\\''")))
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        let cmd = if is_zip {
+            format!(
+                "cd '{}' && (zip -r '{}' {} 2>/dev/null || tar -czf '{}.tar.gz' {})",
+                safe_parent, safe_dest, items_escaped, safe_dest, items_escaped
+            )
+        } else {
+            format!(
+                "cd '{}' && tar -czf '{}' {}",
+                safe_parent, safe_dest, items_escaped
+            )
+        };
+
+        if let Ok(mut ch) = sess.channel_session() {
+            if ch.exec(&cmd).is_ok() {
+                let mut out = String::new();
+                let _ = ch.read_to_string(&mut out);
+                let _ = ch.wait_close();
+                if ch.exit_status().unwrap_or(1) == 0 {
+                    return Ok(());
+                } else {
+                    return Err(format!("远程压缩执行失败: {}", out));
+                }
+            }
+        }
+        Err("创建远程通道执行压缩失败".to_string())
+    }
+}
+
+pub fn extract_archive(
+    pool: &SftpPool,
+    opts: &SpawnOptions,
+    archive_path: &str,
+    dest_dir: &str,
+) -> Result<(), String> {
+    let target_archive = resolve_path_str(pool, opts, archive_path);
+    let target_dest = resolve_path_str(pool, opts, dest_dir);
+
+    let is_zip = target_archive.ends_with(".zip");
+    let is_tar = target_archive.ends_with(".tar.gz")
+        || target_archive.ends_with(".tgz")
+        || target_archive.ends_with(".tar")
+        || target_archive.ends_with(".tar.bz2")
+        || target_archive.ends_with(".tar.xz");
+
+    if !is_zip && !is_tar {
+        return Err("不支持的压缩包格式（仅支持 .tar.gz, .tgz, .tar, .zip）".to_string());
+    }
+
+    if opts.is_local {
+        let output = if is_zip {
+            std::process::Command::new("unzip")
+                .arg("-o")
+                .arg(&target_archive)
+                .arg("-d")
+                .arg(&target_dest)
+                .output()
+                .map_err(|e| format!("执行解压失败: {}", e))?
+        } else {
+            std::process::Command::new("tar")
+                .arg("-xf")
+                .arg(&target_archive)
+                .arg("-C")
+                .arg(&target_dest)
+                .output()
+                .map_err(|e| format!("执行解压失败: {}", e))?
+        };
+
+        if output.status.success() {
+            Ok(())
+        } else {
+            let err_msg = String::from_utf8_lossy(&output.stderr);
+            Err(format!("解压失败: {}", err_msg))
+        }
+    } else {
+        let sess_arc = pool.get_or_connect(opts)?;
+        let sess = sess_arc.lock().map_err(|e| e.to_string())?;
+
+        let safe_archive = target_archive.replace('\'', "'\\''");
+        let safe_dest = target_dest.replace('\'', "'\\''");
+
+        let cmd = if is_zip {
+            format!(
+                "mkdir -p '{}' && (unzip -o '{}' -d '{}' 2>/dev/null || (cd '{}' && python3 -m zipfile -e '{}' . 2>/dev/null))",
+                safe_dest, safe_archive, safe_dest, safe_dest, safe_archive
+            )
+        } else {
+            format!(
+                "mkdir -p '{}' && tar -xf '{}' -C '{}'",
+                safe_dest, safe_archive, safe_dest
+            )
+        };
+
+        if let Ok(mut ch) = sess.channel_session() {
+            if ch.exec(&cmd).is_ok() {
+                let mut out = String::new();
+                let _ = ch.read_to_string(&mut out);
+                let _ = ch.wait_close();
+                if ch.exit_status().unwrap_or(1) == 0 {
+                    return Ok(());
+                } else {
+                    return Err(format!("远程解压执行失败: {}", out));
+                }
+            }
+        }
+        Err("创建远程通道执行解压失败".to_string())
+    }
+}
+
+pub fn chmod_entry(
+    pool: &SftpPool,
+    opts: &SpawnOptions,
+    path: &str,
+    mode: &str,
+    recursive: bool,
+) -> Result<(), String> {
+    let target = resolve_path_str(pool, opts, path);
+    let clean_mode = mode.trim();
+    if clean_mode.is_empty() {
+        return Err("权限模式不能为空".to_string());
+    }
+
+    if opts.is_local {
+        let mut cmd = std::process::Command::new("chmod");
+        if recursive {
+            cmd.arg("-R");
+        }
+        cmd.arg(clean_mode).arg(&target);
+        let output = cmd.output().map_err(|e| format!("执行 chmod 失败: {}", e))?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            let err_msg = String::from_utf8_lossy(&output.stderr);
+            Err(format!("chmod 失败: {}", err_msg))
+        }
+    } else {
+        let sess_arc = pool.get_or_connect(opts)?;
+        let sess = sess_arc.lock().map_err(|e| e.to_string())?;
+
+        let safe_path = target.replace('\'', "'\\''");
+        let rec_flag = if recursive { "-R " } else { "" };
+        let cmd = format!(
+            "chmod {}{clean_mode} '{safe_path}' 2>/dev/null || sudo -n chmod {}{clean_mode} '{safe_path}' 2>/dev/null",
+            rec_flag, rec_flag
+        );
+
+        if let Ok(mut ch) = sess.channel_session() {
+            if ch.exec(&cmd).is_ok() {
+                let mut out = String::new();
+                let _ = ch.read_to_string(&mut out);
+                let _ = ch.wait_close();
+                if ch.exit_status().unwrap_or(1) == 0 {
+                    return Ok(());
+                }
+            }
+        }
+        Err(format!("修改远程文件权限失败: {}", target))
+    }
+}
+
+pub fn chown_entry(
+    pool: &SftpPool,
+    opts: &SpawnOptions,
+    path: &str,
+    owner: &str,
+    recursive: bool,
+) -> Result<(), String> {
+    let target = resolve_path_str(pool, opts, path);
+    let clean_owner = owner.trim();
+    if clean_owner.is_empty() {
+        return Err("所有者不能为空".to_string());
+    }
+
+    if opts.is_local {
+        let mut cmd = std::process::Command::new("chown");
+        if recursive {
+            cmd.arg("-R");
+        }
+        cmd.arg(clean_owner).arg(&target);
+        let output = cmd.output().map_err(|e| format!("执行 chown 失败: {}", e))?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            let err_msg = String::from_utf8_lossy(&output.stderr);
+            Err(format!("chown 失败: {}", err_msg))
+        }
+    } else {
+        let sess_arc = pool.get_or_connect(opts)?;
+        let sess = sess_arc.lock().map_err(|e| e.to_string())?;
+
+        let safe_path = target.replace('\'', "'\\''");
+        let rec_flag = if recursive { "-R " } else { "" };
+        let cmd = format!(
+            "chown {}{clean_owner} '{safe_path}' 2>/dev/null || sudo -n chown {}{clean_owner} '{safe_path}' 2>/dev/null",
+            rec_flag, rec_flag
+        );
+
+        if let Ok(mut ch) = sess.channel_session() {
+            if ch.exec(&cmd).is_ok() {
+                let mut out = String::new();
+                let _ = ch.read_to_string(&mut out);
+                let _ = ch.wait_close();
+                if ch.exit_status().unwrap_or(1) == 0 {
+                    return Ok(());
+                }
+            }
+        }
+        Err(format!("修改远程文件所有者失败: {}", target))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -306,6 +306,108 @@ fn fs_get_default_download_dir() -> String {
 }
 
 #[tauri::command]
+async fn fs_get_terminal_cwd(
+    pty_mgr: State<'_, PtyManager>,
+    sftp_pool: State<'_, SftpPool>,
+    session_id: String,
+) -> Result<String, String> {
+    let opts = pty_mgr
+        .get_opts(&session_id)
+        .ok_or_else(|| "会话不存在或已关闭".to_string())?;
+
+    let local_pid = pty_mgr.get_local_pid(&session_id);
+    let pool = sftp_pool.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        sftp::get_terminal_cwd(&pool, &opts, local_pid)
+    })
+    .await
+    .map_err(|e| format!("异步执行错误: {}", e))?
+}
+
+#[tauri::command]
+async fn fs_archive(
+    pty_mgr: State<'_, PtyManager>,
+    sftp_pool: State<'_, SftpPool>,
+    session_id: String,
+    source_paths: Vec<String>,
+    dest_archive_path: String,
+    format: String,
+) -> Result<(), String> {
+    let opts = pty_mgr
+        .get_opts(&session_id)
+        .ok_or_else(|| "会话不存在或已关闭".to_string())?;
+
+    let pool = sftp_pool.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        sftp::archive_entry(&pool, &opts, &source_paths, &dest_archive_path, &format)
+    })
+    .await
+    .map_err(|e| format!("异步执行错误: {}", e))?
+}
+
+#[tauri::command]
+async fn fs_extract(
+    pty_mgr: State<'_, PtyManager>,
+    sftp_pool: State<'_, SftpPool>,
+    session_id: String,
+    archive_path: String,
+    dest_dir: String,
+) -> Result<(), String> {
+    let opts = pty_mgr
+        .get_opts(&session_id)
+        .ok_or_else(|| "会话不存在或已关闭".to_string())?;
+
+    let pool = sftp_pool.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        sftp::extract_archive(&pool, &opts, &archive_path, &dest_dir)
+    })
+    .await
+    .map_err(|e| format!("异步执行错误: {}", e))?
+}
+
+#[tauri::command]
+async fn fs_chmod(
+    pty_mgr: State<'_, PtyManager>,
+    sftp_pool: State<'_, SftpPool>,
+    session_id: String,
+    path: String,
+    mode: String,
+    recursive: bool,
+) -> Result<(), String> {
+    let opts = pty_mgr
+        .get_opts(&session_id)
+        .ok_or_else(|| "会话不存在或已关闭".to_string())?;
+
+    let pool = sftp_pool.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        sftp::chmod_entry(&pool, &opts, &path, &mode, recursive)
+    })
+    .await
+    .map_err(|e| format!("异步执行错误: {}", e))?
+}
+
+#[tauri::command]
+async fn fs_chown(
+    pty_mgr: State<'_, PtyManager>,
+    sftp_pool: State<'_, SftpPool>,
+    session_id: String,
+    path: String,
+    owner: String,
+    recursive: bool,
+) -> Result<(), String> {
+    let opts = pty_mgr
+        .get_opts(&session_id)
+        .ok_or_else(|| "会话不存在或已关闭".to_string())?;
+
+    let pool = sftp_pool.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        sftp::chown_entry(&pool, &opts, &path, &owner, recursive)
+    })
+    .await
+    .map_err(|e| format!("异步执行错误: {}", e))?
+}
+
+#[tauri::command]
 fn switch_to_ascii_input() -> Result<(), String> {
     Ok(())
 }
@@ -638,6 +740,11 @@ pub fn run() {
             fs_upload_file,
             fs_cancel_transfer,
             fs_get_default_download_dir,
+            fs_get_terminal_cwd,
+            fs_archive,
+            fs_extract,
+            fs_chmod,
+            fs_chown,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

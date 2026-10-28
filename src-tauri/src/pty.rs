@@ -496,6 +496,11 @@ impl PtyManager {
         Ok(())
     }
 
+    pub fn get_local_pid(&self, session_id: &str) -> Option<u32> {
+        let sessions = self.sessions.lock().unwrap();
+        sessions.get(session_id).and_then(|s| s.pid)
+    }
+
     pub fn get_cwd_stats(&self, session_id: &str) -> (String, usize) {
         let sessions = self.sessions.lock().unwrap();
         let session = match sessions.get(session_id) {

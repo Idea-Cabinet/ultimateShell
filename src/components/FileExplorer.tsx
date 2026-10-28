@@ -140,6 +140,66 @@ interface LazyTreeNode {
   children: LazyTreeNode[] | null; // null means not yet loaded (lazy)
 }
 
+export interface ChmodState {
+  ownerR: boolean;
+  ownerW: boolean;
+  ownerX: boolean;
+  groupR: boolean;
+  groupW: boolean;
+  groupX: boolean;
+  otherR: boolean;
+  otherW: boolean;
+  otherX: boolean;
+}
+
+export const parseOctalToState = (oct: string): ChmodState => {
+  const clean = oct.replace(/^0+/, "") || "0";
+  const num = parseInt(clean, 8) || 0;
+  return {
+    ownerR: Boolean(num & 0o400),
+    ownerW: Boolean(num & 0o200),
+    ownerX: Boolean(num & 0o100),
+    groupR: Boolean(num & 0o040),
+    groupW: Boolean(num & 0o020),
+    groupX: Boolean(num & 0o010),
+    otherR: Boolean(num & 0o004),
+    otherW: Boolean(num & 0o002),
+    otherX: Boolean(num & 0o001),
+  };
+};
+
+export const stateToOctal = (s: ChmodState): string => {
+  let num = 0;
+  if (s.ownerR) num |= 0o400;
+  if (s.ownerW) num |= 0o200;
+  if (s.ownerX) num |= 0o100;
+  if (s.groupR) num |= 0o040;
+  if (s.groupW) num |= 0o020;
+  if (s.groupX) num |= 0o010;
+  if (s.otherR) num |= 0o004;
+  if (s.otherW) num |= 0o002;
+  if (s.otherX) num |= 0o001;
+  return "0" + num.toString(8).padStart(3, "0");
+};
+
+export const parsePermissionsToOctal = (permStr: string, isDir: boolean): string => {
+  const s = permStr.replace(/^[-dcbsp]/, "");
+  if (s.length >= 9) {
+    let num = 0;
+    if (s[0] === 'r') num |= 0o400;
+    if (s[1] === 'w') num |= 0o200;
+    if (s[2] === 'x') num |= 0o100;
+    if (s[3] === 'r') num |= 0o040;
+    if (s[4] === 'w') num |= 0o020;
+    if (s[5] === 'x') num |= 0o010;
+    if (s[6] === 'r') num |= 0o004;
+    if (s[7] === 'w') num |= 0o002;
+    if (s[8] === 'x') num |= 0o001;
+    return "0" + num.toString(8).padStart(3, "0");
+  }
+  return isDir ? "0755" : "0644";
+};
+
 export function FileExplorer({
   session,
   height,
@@ -377,6 +437,28 @@ export function FileExplorer({
   const [isFirstTimeDelete, setIsFirstTimeDelete] = useState(false);
   const [modalUseTrash, setModalUseTrash] = useState(false);
   const [modalRememberChoice, setModalRememberChoice] = useState(true);
+
+  // Terminal CWD Sync state
+  const [isSyncingCwd, setIsSyncingCwd] = useState(false);
+
+  // Archive & Extract states
+  const [archiveModal, setArchiveModal] = useState<{
+    entry: FileEntry;
+    format: "tar.gz" | "zip";
+    archiveName: string;
+  } | null>(null);
+  const [archiveLoading, setArchiveLoading] = useState(false);
+  const [extractLoading, setExtractLoading] = useState(false);
+
+  // Chmod / Permissions modal state
+  const [chmodModal, setChmodModal] = useState<{
+    entry: FileEntry;
+    octal: string;
+    state: ChmodState;
+    recursive: boolean;
+    owner: string;
+  } | null>(null);
+  const [chmodLoading, setChmodLoading] = useState(false);
 
   // Fetch directory contents lazily for the main table view
   const loadDirectory = async (path: string, pushHistory = true) => {
@@ -951,6 +1033,172 @@ export function FileExplorer({
     }
   };
 
+  // Follow Terminal CWD
+  const handleSyncTerminalCwd = async () => {
+    if (!session.id || isSyncingCwd) return;
+    setIsSyncingCwd(true);
+    try {
+      const cwd = await invoke<string>("fs_get_terminal_cwd", {
+        sessionId: session.id,
+      });
+      if (cwd && cwd.trim() && cwd.trim() !== currentPath) {
+        await loadDirectory(cwd.trim(), true);
+      }
+    } catch (err: any) {
+      console.warn("[FileExplorer] 同步终端工作目录失败:", err);
+      const errStr = typeof err === "string" ? err : err?.message || String(err);
+      alert(`获取终端工作目录失败: ${errStr}`);
+    } finally {
+      setIsSyncingCwd(false);
+    }
+  };
+
+  // Archive Handlers
+  const openArchiveModal = (entry: FileEntry, format: "tar.gz" | "zip") => {
+    const ext = format === "tar.gz" ? ".tar.gz" : ".zip";
+    const baseName = entry.name.replace(/\.[^/.]+$/, "");
+    const defaultName = `${entry.is_dir ? entry.name : (baseName || entry.name)}${ext}`;
+    setArchiveModal({
+      entry,
+      format,
+      archiveName: defaultName,
+    });
+  };
+
+  const handleConfirmArchive = async () => {
+    if (!archiveModal || !archiveModal.archiveName.trim()) return;
+    setArchiveLoading(true);
+    try {
+      const parentDir = currentPath === "/" ? "" : currentPath.replace(/\/$/, "");
+      const destArchivePath = `${parentDir}/${archiveModal.archiveName.trim()}`;
+      await invoke("fs_archive", {
+        sessionId: session.id,
+        sourcePaths: [archiveModal.entry.path],
+        destArchivePath,
+        format: archiveModal.format,
+      });
+      setArchiveModal(null);
+      await loadDirectory(currentPath, false);
+    } catch (err: any) {
+      console.error("[FileExplorer] 压缩失败:", err);
+      const errStr = typeof err === "string" ? err : err?.message || String(err);
+      alert(`压缩失败: ${errStr}`);
+    } finally {
+      setArchiveLoading(false);
+    }
+  };
+
+  // Extract Archive Handler
+  const handleExtractArchive = async (entry: FileEntry) => {
+    if (extractLoading) return;
+    setExtractLoading(true);
+    try {
+      await invoke("fs_extract", {
+        sessionId: session.id,
+        archivePath: entry.path,
+        destDir: currentPath,
+      });
+      await loadDirectory(currentPath, false);
+      if (currentPath === "/" || currentPath === "~") {
+        initLazyRoot(true);
+      }
+    } catch (err: any) {
+      console.error("[FileExplorer] 解压失败:", err);
+      const errStr = typeof err === "string" ? err : err?.message || String(err);
+      alert(`解压失败: ${errStr}`);
+    } finally {
+      setExtractLoading(false);
+    }
+  };
+
+  // Helper to check if file is an archive
+  const isArchiveFile = (fileName: string): boolean => {
+    const lower = fileName.toLowerCase();
+    return (
+      lower.endsWith(".tar.gz") ||
+      lower.endsWith(".tgz") ||
+      lower.endsWith(".tar") ||
+      lower.endsWith(".zip")
+    );
+  };
+
+  // Chmod / Permissions Modal Handlers
+  const openChmodModal = (entry: FileEntry) => {
+    const octal = parsePermissionsToOctal(entry.permissions || "", entry.is_dir);
+    const state = parseOctalToState(octal);
+    const owner = entry.owner || "";
+    setChmodModal({
+      entry,
+      octal,
+      state,
+      recursive: false,
+      owner,
+    });
+  };
+
+  const handleChmodStateToggle = (key: keyof ChmodState) => {
+    if (!chmodModal) return;
+    const newState = { ...chmodModal.state, [key]: !chmodModal.state[key] };
+    const newOctal = stateToOctal(newState);
+    setChmodModal({
+      ...chmodModal,
+      state: newState,
+      octal: newOctal,
+    });
+  };
+
+  const handleChmodOctalChange = (val: string) => {
+    if (!chmodModal) return;
+    const clean = val.replace(/[^0-7]/g, "").slice(0, 4);
+    const newState = parseOctalToState(clean);
+    setChmodModal({
+      ...chmodModal,
+      octal: clean,
+      state: newState,
+    });
+  };
+
+  const handleApplyPreset = (presetOctal: string) => {
+    if (!chmodModal) return;
+    const newState = parseOctalToState(presetOctal);
+    setChmodModal({
+      ...chmodModal,
+      octal: presetOctal,
+      state: newState,
+    });
+  };
+
+  const handleConfirmChmod = async () => {
+    if (!chmodModal) return;
+    setChmodLoading(true);
+    try {
+      await invoke("fs_chmod", {
+        sessionId: session.id,
+        path: chmodModal.entry.path,
+        mode: chmodModal.octal,
+        recursive: chmodModal.recursive,
+      });
+
+      if (chmodModal.owner && chmodModal.owner.trim()) {
+        await invoke("fs_chown", {
+          sessionId: session.id,
+          path: chmodModal.entry.path,
+          owner: chmodModal.owner.trim(),
+          recursive: chmodModal.recursive,
+        });
+      }
+
+      setChmodModal(null);
+      await loadDirectory(currentPath, false);
+    } catch (err: any) {
+      console.error("[FileExplorer] 更改权限失败:", err);
+      const errStr = typeof err === "string" ? err : err?.message || String(err);
+      alert(`设置权限失败: ${errStr}`);
+    } finally {
+      setChmodLoading(false);
+    }
+  };
+
   // Drag and Drop event handlers
   const handleDragEnter = (e: React.DragEvent) => {
     e.preventDefault();
@@ -1275,6 +1523,15 @@ export function FileExplorer({
             title="主目录 (跳转至用户 ~ 路径)"
           >
             <Home className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={handleSyncTerminalCwd}
+            disabled={isSyncingCwd}
+            className="px-1.5 py-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors flex items-center space-x-1 disabled:opacity-50"
+            title="跟随终端 (获取终端当前所在目录并跳转)"
+          >
+            <Terminal className={`w-3.5 h-3.5 text-[#007AFF] ${isSyncingCwd ? "animate-pulse" : ""}`} />
+            <span className="text-[11px] font-medium hidden sm:inline">跟随终端</span>
           </button>
         </div>
 
@@ -1784,6 +2041,64 @@ export function FileExplorer({
             >
               <Pencil className="w-3.5 h-3.5 text-[#007AFF]" />
               <span>重命名</span>
+            </button>
+
+            <div className="h-[1px] bg-[var(--border-subtle)] my-1" />
+
+            {/* Archive & Extraction options */}
+            {isArchiveFile(contextMenu.entry.name) && (
+              <button
+                onClick={() => {
+                  const entry = contextMenu.entry;
+                  setContextMenu(null);
+                  handleExtractArchive(entry);
+                }}
+                disabled={extractLoading}
+                title="解压该压缩包内容到当前目录"
+                className="w-full px-3 py-1.5 text-left hover:bg-[#007AFF] hover:text-white flex items-center space-x-2 text-[var(--text-primary)] transition-colors"
+              >
+                <FileArchive className={`w-3.5 h-3.5 text-amber-500 ${extractLoading ? "animate-spin" : ""}`} />
+                <span>{extractLoading ? "正在解压..." : "解压到当前目录"}</span>
+              </button>
+            )}
+
+            <button
+              onClick={() => {
+                const entry = contextMenu.entry;
+                setContextMenu(null);
+                openArchiveModal(entry, "tar.gz");
+              }}
+              title="打包压缩为 .tar.gz"
+              className="w-full px-3 py-1.5 text-left hover:bg-[#007AFF] hover:text-white flex items-center space-x-2 text-[var(--text-primary)] transition-colors"
+            >
+              <FileArchive className="w-3.5 h-3.5 text-sky-500" />
+              <span>压缩为 .tar.gz</span>
+            </button>
+
+            <button
+              onClick={() => {
+                const entry = contextMenu.entry;
+                setContextMenu(null);
+                openArchiveModal(entry, "zip");
+              }}
+              title="打包压缩为 .zip"
+              className="w-full px-3 py-1.5 text-left hover:bg-[#007AFF] hover:text-white flex items-center space-x-2 text-[var(--text-primary)] transition-colors"
+            >
+              <FileArchive className="w-3.5 h-3.5 text-blue-500" />
+              <span>压缩为 .zip</span>
+            </button>
+
+            <button
+              onClick={() => {
+                const entry = contextMenu.entry;
+                setContextMenu(null);
+                openChmodModal(entry);
+              }}
+              title="查看与修改文件属性与权限 (chmod / chown)"
+              className="w-full px-3 py-1.5 text-left hover:bg-[#007AFF] hover:text-white flex items-center space-x-2 text-[var(--text-primary)] transition-colors"
+            >
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
+              <span>属性与权限 (chmod)...</span>
             </button>
 
             <div className="h-[1px] bg-[var(--border-subtle)] my-1" />
@@ -2469,6 +2784,314 @@ export function FileExplorer({
                 >
                   {deleteLoading && <RotateCw className="w-3 h-3 animate-spin" />}
                   <span>{modalUseTrash ? "备份并删除" : "确认永久删除"}</span>
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+
+      {/* Archive Modal */}
+      {archiveModal &&
+        createPortal(
+          <div
+            className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4"
+            style={{ zIndex: 99999 }}
+            onClick={() => {
+              if (!archiveLoading) setArchiveModal(null);
+            }}
+          >
+            <div
+              className="w-[420px] max-w-full apple-card rounded-2xl p-5 shadow-2xl border border-[var(--border-subtle)] text-[var(--text-primary)] select-none animate-in zoom-in-95 duration-120"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start space-x-3">
+                <div className="w-9 h-9 rounded-xl bg-sky-500/15 text-sky-500 flex items-center justify-center flex-shrink-0">
+                  <FileArchive className="w-5 h-5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[14px] font-semibold tracking-tight">
+                    压缩{archiveModal.entry.is_dir ? "文件夹" : "文件"}
+                  </div>
+                  <div className="text-[11.5px] text-[var(--text-secondary)] mt-1 truncate">
+                    源目标：<span className="font-mono font-medium text-[var(--text-primary)]">{archiveModal.entry.name}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-4 space-y-3">
+                <div>
+                  <label className="text-[11.5px] font-medium text-[var(--text-secondary)] block mb-1">
+                    压缩包文件名 ({archiveModal.format === "tar.gz" ? ".tar.gz 格式" : ".zip 格式"})
+                  </label>
+                  <input
+                    type="text"
+                    value={archiveModal.archiveName}
+                    onChange={(e) =>
+                      setArchiveModal({ ...archiveModal, archiveName: e.target.value })
+                    }
+                    disabled={archiveLoading}
+                    placeholder="输入压缩文件名..."
+                    className="w-full h-8 px-2.5 text-[12px] font-mono bg-[var(--bg-app)] border border-[var(--border-subtle)] focus:border-[#007AFF] rounded-lg focus:outline-none text-[var(--text-primary)]"
+                    autoFocus
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleConfirmArchive();
+                    }}
+                  />
+                </div>
+                <div className="text-[11px] text-[var(--text-tertiary)] leading-normal">
+                  压缩文件将直接生成在当前目录「<span className="font-mono">{currentPath}</span>」下。
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end space-x-2 pt-5">
+                <button
+                  type="button"
+                  onClick={() => setArchiveModal(null)}
+                  disabled={archiveLoading}
+                  className="px-3.5 py-1.5 text-[12px] rounded-lg text-[var(--text-secondary)] hover:bg-[var(--hover-item)] transition"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmArchive}
+                  disabled={archiveLoading || !archiveModal.archiveName.trim()}
+                  className="px-4 py-1.5 text-[12px] font-medium text-white rounded-lg shadow-sm transition active:scale-95 disabled:opacity-50 flex items-center space-x-1.5 bg-[#007AFF] hover:bg-[#0062CC]"
+                >
+                  {archiveLoading && <RotateCw className="w-3 h-3 animate-spin" />}
+                  <span>{archiveLoading ? "正在打包压缩..." : "开始压缩"}</span>
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+
+      {/* Chmod / Permissions Modal */}
+      {chmodModal &&
+        createPortal(
+          <div
+            className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4"
+            style={{ zIndex: 99999 }}
+            onClick={() => {
+              if (!chmodLoading) setChmodModal(null);
+            }}
+          >
+            <div
+              className="w-[450px] max-w-full apple-card rounded-2xl p-5 shadow-2xl border border-[var(--border-subtle)] text-[var(--text-primary)] select-none animate-in zoom-in-95 duration-120"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start space-x-3">
+                <div className="w-9 h-9 rounded-xl bg-emerald-500/15 text-emerald-500 flex items-center justify-center flex-shrink-0">
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[14px] font-semibold tracking-tight">
+                    文件属性与权限设置 (chmod / chown)
+                  </div>
+                  <div className="text-[11.5px] text-[var(--text-secondary)] mt-1 truncate">
+                    目标：<span className="font-mono font-medium text-[var(--text-primary)]">{chmodModal.entry.name}</span>
+                    <span className="text-[var(--text-tertiary)] ml-1">
+                      ({chmodModal.entry.is_dir ? "文件夹" : "文件"})
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Permission Checkboxes Matrix */}
+              <div className="mt-4 p-3 bg-[var(--bg-app)] rounded-xl border border-[var(--border-subtle)]">
+                <table className="w-full text-center text-[11.5px]">
+                  <thead>
+                    <tr className="text-[var(--text-secondary)] border-b border-[var(--border-subtle)]">
+                      <th className="py-1 text-left font-medium">权限类别</th>
+                      <th className="py-1 font-medium">读取 (r)</th>
+                      <th className="py-1 font-medium">写入 (w)</th>
+                      <th className="py-1 font-medium">执行 (x)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[var(--border-subtle)]/50">
+                    <tr>
+                      <td className="py-1.5 text-left font-medium text-[var(--text-primary)]">所有者 (Owner)</td>
+                      <td className="py-1.5">
+                        <input
+                          type="checkbox"
+                          checked={chmodModal.state.ownerR}
+                          onChange={() => handleChmodStateToggle("ownerR")}
+                          className="accent-[#007AFF] rounded cursor-pointer"
+                        />
+                      </td>
+                      <td className="py-1.5">
+                        <input
+                          type="checkbox"
+                          checked={chmodModal.state.ownerW}
+                          onChange={() => handleChmodStateToggle("ownerW")}
+                          className="accent-[#007AFF] rounded cursor-pointer"
+                        />
+                      </td>
+                      <td className="py-1.5">
+                        <input
+                          type="checkbox"
+                          checked={chmodModal.state.ownerX}
+                          onChange={() => handleChmodStateToggle("ownerX")}
+                          className="accent-[#007AFF] rounded cursor-pointer"
+                        />
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="py-1.5 text-left font-medium text-[var(--text-primary)]">用户组 (Group)</td>
+                      <td className="py-1.5">
+                        <input
+                          type="checkbox"
+                          checked={chmodModal.state.groupR}
+                          onChange={() => handleChmodStateToggle("groupR")}
+                          className="accent-[#007AFF] rounded cursor-pointer"
+                        />
+                      </td>
+                      <td className="py-1.5">
+                        <input
+                          type="checkbox"
+                          checked={chmodModal.state.groupW}
+                          onChange={() => handleChmodStateToggle("groupW")}
+                          className="accent-[#007AFF] rounded cursor-pointer"
+                        />
+                      </td>
+                      <td className="py-1.5">
+                        <input
+                          type="checkbox"
+                          checked={chmodModal.state.groupX}
+                          onChange={() => handleChmodStateToggle("groupX")}
+                          className="accent-[#007AFF] rounded cursor-pointer"
+                        />
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="py-1.5 text-left font-medium text-[var(--text-primary)]">公共其他人 (Others)</td>
+                      <td className="py-1.5">
+                        <input
+                          type="checkbox"
+                          checked={chmodModal.state.otherR}
+                          onChange={() => handleChmodStateToggle("otherR")}
+                          className="accent-[#007AFF] rounded cursor-pointer"
+                        />
+                      </td>
+                      <td className="py-1.5">
+                        <input
+                          type="checkbox"
+                          checked={chmodModal.state.otherW}
+                          onChange={() => handleChmodStateToggle("otherW")}
+                          className="accent-[#007AFF] rounded cursor-pointer"
+                        />
+                      </td>
+                      <td className="py-1.5">
+                        <input
+                          type="checkbox"
+                          checked={chmodModal.state.otherX}
+                          onChange={() => handleChmodStateToggle("otherX")}
+                          className="accent-[#007AFF] rounded cursor-pointer"
+                        />
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Octal & Presets */}
+              <div className="mt-3 flex items-center justify-between space-x-2">
+                <div className="flex items-center space-x-2">
+                  <span className="text-[11.5px] font-medium text-[var(--text-secondary)]">八进制权限码:</span>
+                  <input
+                    type="text"
+                    maxLength={4}
+                    value={chmodModal.octal}
+                    onChange={(e) => handleChmodOctalChange(e.target.value)}
+                    className="w-16 h-7 px-2 text-center text-[12px] font-mono font-bold bg-[var(--bg-app)] border border-[#007AFF] rounded focus:outline-none text-[#007AFF]"
+                  />
+                </div>
+                {/* Presets */}
+                <div className="flex items-center space-x-1">
+                  <button
+                    type="button"
+                    onClick={() => handleApplyPreset("0644")}
+                    className="px-1.5 py-0.5 text-[10.5px] rounded border border-[var(--border-subtle)] hover:border-[#007AFF] hover:text-[#007AFF] transition"
+                    title="0644 (标准文件只读执行限制)"
+                  >
+                    0644
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleApplyPreset("0755")}
+                    className="px-1.5 py-0.5 text-[10.5px] rounded border border-[var(--border-subtle)] hover:border-[#007AFF] hover:text-[#007AFF] transition"
+                    title="0755 (标准目录与可执行程序)"
+                  >
+                    0755
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleApplyPreset("0777")}
+                    className="px-1.5 py-0.5 text-[10.5px] rounded border border-[var(--border-subtle)] hover:border-rose-500 hover:text-rose-500 transition"
+                    title="0777 (全员可读写执行)"
+                  >
+                    0777
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleApplyPreset("0600")}
+                    className="px-1.5 py-0.5 text-[10.5px] rounded border border-[var(--border-subtle)] hover:border-amber-500 hover:text-amber-500 transition"
+                    title="0600 (私密文件/密钥)"
+                  >
+                    0600
+                  </button>
+                </div>
+              </div>
+
+              {/* Owner / Group (chown) */}
+              <div className="mt-3">
+                <label className="text-[11px] text-[var(--text-secondary)] block mb-1">
+                  所有者与组 (chown，如 <span className="font-mono">root:root</span> 或 <span className="font-mono">www-data</span>)
+                </label>
+                <input
+                  type="text"
+                  value={chmodModal.owner}
+                  onChange={(e) => setChmodModal({ ...chmodModal, owner: e.target.value })}
+                  placeholder="留空则不修改所有者"
+                  className="w-full h-7 px-2 text-[11.5px] font-mono bg-[var(--bg-app)] border border-[var(--border-subtle)] focus:border-[#007AFF] rounded focus:outline-none text-[var(--text-primary)]"
+                />
+              </div>
+
+              {/* Recursive for directory */}
+              {chmodModal.entry.is_dir && (
+                <label className="flex items-center space-x-2 mt-3 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={chmodModal.recursive}
+                    onChange={(e) => setChmodModal({ ...chmodModal, recursive: e.target.checked })}
+                    className="accent-[#007AFF] rounded w-3.5 h-3.5"
+                  />
+                  <span className="text-[11px] text-[var(--text-secondary)]">
+                    递归应用到该目录下的所有子文件和子文件夹 (-R)
+                  </span>
+                </label>
+              )}
+
+              {/* Action Buttons */}
+              <div className="flex items-center justify-end space-x-2 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setChmodModal(null)}
+                  disabled={chmodLoading}
+                  className="px-3.5 py-1.5 text-[12px] rounded-lg text-[var(--text-secondary)] hover:bg-[var(--hover-item)] transition"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmChmod}
+                  disabled={chmodLoading}
+                  className="px-4 py-1.5 text-[12px] font-medium text-white rounded-lg shadow-sm transition active:scale-95 disabled:opacity-50 flex items-center space-x-1.5 bg-[#007AFF] hover:bg-[#0062CC]"
+                >
+                  {chmodLoading && <RotateCw className="w-3 h-3 animate-spin" />}
+                  <span>{chmodLoading ? "正在应用..." : "保存权限"}</span>
                 </button>
               </div>
             </div>
