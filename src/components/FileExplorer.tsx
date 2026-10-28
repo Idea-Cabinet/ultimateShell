@@ -44,6 +44,7 @@ import {
   ShieldCheck,
   Save,
   Check,
+  Calculator,
 } from "lucide-react";
 
 interface FileExplorerProps {
@@ -457,6 +458,8 @@ export function FileExplorer({
     state: ChmodState;
     recursive: boolean;
     owner: string;
+    folderSize?: string | null;
+    isCalculatingSize?: boolean;
   } | null>(null);
   const [chmodLoading, setChmodLoading] = useState(false);
 
@@ -1133,7 +1136,24 @@ export function FileExplorer({
       state,
       recursive: false,
       owner,
+      folderSize: null,
+      isCalculatingSize: false,
     });
+  };
+
+  const handleCalculateFolderSize = async () => {
+    if (!chmodModal || !chmodModal.entry.is_dir || chmodModal.isCalculatingSize) return;
+    setChmodModal((prev) => (prev ? { ...prev, isCalculatingSize: true } : null));
+    try {
+      const sizeStr = await invoke<string>("fs_get_dir_size", {
+        sessionId: session.id,
+        path: chmodModal.entry.path,
+      });
+      setChmodModal((prev) => (prev ? { ...prev, folderSize: sizeStr, isCalculatingSize: false } : null));
+    } catch (err: any) {
+      const msg = typeof err === "string" ? err : err?.message || String(err);
+      setChmodModal((prev) => (prev ? { ...prev, folderSize: `统计失败: ${msg}`, isCalculatingSize: false } : null));
+    }
   };
 
   const handleChmodStateToggle = (key: keyof ChmodState) => {
@@ -2897,6 +2917,62 @@ export function FileExplorer({
                     </span>
                   </div>
                 </div>
+              </div>
+
+              {/* Basic File/Folder Information */}
+              <div className="mt-3 p-3 bg-[var(--bg-app)] rounded-xl border border-[var(--border-subtle)] text-[12px] space-y-2">
+                <div className="flex items-start justify-between gap-2">
+                  <span className="text-[var(--text-tertiary)] flex-shrink-0">完整路径:</span>
+                  <span className="text-[var(--text-primary)] font-mono text-[11px] break-all select-all text-right">
+                    {chmodModal.entry.path}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[var(--text-tertiary)] flex-shrink-0">大小:</span>
+                  <div className="flex items-center space-x-2">
+                    {chmodModal.entry.is_dir ? (
+                      chmodModal.isCalculatingSize ? (
+                        <div className="flex items-center space-x-1.5 text-xs text-[var(--text-secondary)]">
+                          <RotateCw className="w-3.5 h-3.5 animate-spin text-[#007AFF]" />
+                          <span>正在后台统计大小...</span>
+                        </div>
+                      ) : chmodModal.folderSize ? (
+                        <div className="flex items-center space-x-1.5">
+                          <span className="font-semibold text-[#007AFF] font-mono">{chmodModal.folderSize}</span>
+                          <button
+                            type="button"
+                            onClick={handleCalculateFolderSize}
+                            title="重新统计大小"
+                            className="p-1 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] rounded transition-colors"
+                          >
+                            <RotateCw className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={handleCalculateFolderSize}
+                          className="px-2 py-0.5 text-xs font-medium bg-[#007AFF]/10 text-[#007AFF] hover:bg-[#007AFF]/20 rounded-md transition-colors flex items-center space-x-1 cursor-pointer border border-[#007AFF]/20"
+                        >
+                          <Calculator className="w-3 h-3" />
+                          <span>统计文件夹大小</span>
+                        </button>
+                      )
+                    ) : (
+                      <span className="font-mono text-[var(--text-primary)]">
+                        {chmodModal.entry.size_formatted || "0 B"}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                {chmodModal.entry.mtime_formatted && (
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[var(--text-tertiary)] flex-shrink-0">修改时间:</span>
+                    <span className="text-[var(--text-secondary)] font-mono text-[11px]">
+                      {chmodModal.entry.mtime_formatted}
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* Permission Checkboxes Matrix */}

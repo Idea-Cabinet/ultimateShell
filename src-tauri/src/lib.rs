@@ -412,6 +412,25 @@ async fn fs_chown(
 }
 
 #[tauri::command]
+async fn fs_get_dir_size(
+    pty_mgr: State<'_, PtyManager>,
+    sftp_pool: State<'_, SftpPool>,
+    session_id: String,
+    path: String,
+) -> Result<String, String> {
+    let opts = pty_mgr
+        .get_opts(&session_id)
+        .ok_or_else(|| "会话不存在或已关闭".to_string())?;
+
+    let pool = sftp_pool.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        sftp::get_dir_size(&pool, &opts, &path)
+    })
+    .await
+    .map_err(|e| format!("异步执行错误: {}", e))?
+}
+
+#[tauri::command]
 fn switch_to_ascii_input() -> Result<(), String> {
     Ok(())
 }
@@ -851,6 +870,7 @@ pub fn run() {
             fs_extract,
             fs_chmod,
             fs_chown,
+            fs_get_dir_size,
             get_listening_ports,
             get_systemd_services,
             systemd_control_service,

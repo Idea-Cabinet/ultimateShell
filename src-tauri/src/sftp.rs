@@ -1621,6 +1621,80 @@ pub fn chown_entry(
     }
 }
 
+fn calculate_local_dir_size(path: &Path) -> u64 {
+    let mut total = 0;
+    if let Ok(entries) = std::fs::read_dir(path) {
+        for entry in entries.flatten() {
+            if let Ok(meta) = entry.metadata() {
+                if meta.is_dir() {
+                    total += calculate_local_dir_size(&entry.path());
+                } else {
+                    total += meta.len();
+                }
+            }
+        }
+    }
+    total
+}
+
+pub fn get_dir_size(
+    pool: &SftpPool,
+    opts: &SpawnOptions,
+    path: &str,
+) -> Result<String, String> {
+    if opts.is_local {
+        #[cfg(not(target_os = "windows"))]
+        {
+            if let Ok(output) = std::process::Command::new("du")
+                .args(["-sh", path])
+                .output()
+            {
+                let s = String::from_utf8_lossy(&output.stdout);
+                if let Some(first) = s.split_whitespace().next() {
+                    return Ok(first.to_string());
+                }
+            }
+        }
+        let bytes = calculate_local_dir_size(Path::new(path));
+        Ok(format_size(bytes, false))
+    } else {
+        let sess_arc = pool.get_or_connect(opts)?;
+        let sess = sess_arc.lock().map_err(|e| e.to_string())?;
+        let mut channel = match sess.channel_session() {
+            Ok(c) => c,
+            Err(e) => {
+                drop(sess);
+                pool.invalidate(&opts.session_id);
+                return Err(format!("无法创建 SSH 通道: {}", e));
+            }
+        };
+
+        let safe_path = path.replace('\'', "'\\''");
+        let cmd = format!(
+            "sudo -n du -sh '{safe_path}' 2>/dev/null || du -sh '{safe_path}' 2>/dev/null"
+        );
+
+        if let Err(e) = channel.exec(&cmd) {
+            drop(channel);
+            drop(sess);
+            pool.invalidate(&opts.session_id);
+            return Err(format!("执行 du 命令失败: {}", e));
+        }
+
+        let mut output = String::new();
+        channel.read_to_string(&mut output).ok();
+        channel.wait_close().ok();
+
+        if let Some(line) = output.lines().next() {
+            if let Some(size) = line.split_whitespace().next() {
+                return Ok(size.to_string());
+            }
+        }
+
+        Err("无法统计文件夹大小".to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
