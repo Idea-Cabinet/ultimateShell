@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { HostProfile, ServerUser } from "../types";
 import {
@@ -37,6 +38,17 @@ export const ServerUserMenu: React.FC<Props> = ({
   const [searchTerm, setSearchTerm] = useState("");
   const [activeTabFilter, setActiveTabFilter] = useState<"login" | "all">("login");
   const popoverRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [menuPosition, setMenuPosition] = useState<{ bottom: number; left: number }>({
+    bottom: 32,
+    left: 16,
+  });
+
+  const effectiveUser =
+    !currentUser || currentUser === "unknown"
+      ? hostProfile?.username || (isLocal ? "local" : "root")
+      : currentUser;
+  const isRoot = effectiveUser === "root";
 
   // Password Input / Switch Modal state
   const [passwordModal, setPasswordModal] = useState<{
@@ -72,6 +84,17 @@ export const ServerUserMenu: React.FC<Props> = ({
     }
   };
 
+  const toggleOpen = () => {
+    if (!isOpen && buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      setMenuPosition({
+        bottom: window.innerHeight - rect.top + 6,
+        left: Math.max(8, Math.min(rect.left, window.innerWidth - 340)),
+      });
+    }
+    setIsOpen(!isOpen);
+  };
+
   // Fetch users when popover opens or session changes
   useEffect(() => {
     if (isOpen) {
@@ -83,24 +106,42 @@ export const ServerUserMenu: React.FC<Props> = ({
   useEffect(() => {
     if (!isOpen) return;
     const handleClickOutside = (e: MouseEvent) => {
-      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (
+        popoverRef.current &&
+        !popoverRef.current.contains(target) &&
+        buttonRef.current &&
+        !buttonRef.current.contains(target)
+      ) {
         setIsOpen(false);
-        setPasswordModal(null);
-        setManagingPasswordUser(null);
       }
     };
     window.addEventListener("mousedown", handleClickOutside);
     return () => window.removeEventListener("mousedown", handleClickOutside);
   }, [isOpen]);
 
+  // Escape key listener to close menu or modals
+  useEffect(() => {
+    if (!isOpen && !passwordModal && !managingPasswordUser) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (passwordModal) setPasswordModal(null);
+        else if (managingPasswordUser) setManagingPasswordUser(null);
+        else if (isOpen) setIsOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, passwordModal, managingPasswordUser]);
+
   const handleStartSwitch = async (targetUser: string) => {
-    if (targetUser === currentUser) {
+    if (targetUser === effectiveUser) {
       setIsOpen(false);
       return;
     }
 
     // If current user is root, switching to any user is passwordless in Linux/Unix!
-    if (currentUser === "root") {
+    if (effectiveUser === "root") {
       try {
         await invoke("switch_session_user", {
           sessionId,
@@ -220,18 +261,17 @@ export const ServerUserMenu: React.FC<Props> = ({
     );
   });
 
-  const isRoot = currentUser === "root";
-
   return (
-    <div className="relative inline-flex items-center" ref={popoverRef}>
+    <div className="relative inline-flex items-center">
       {/* Interactive Status Bar User Button */}
       <button
+        ref={buttonRef}
         type="button"
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={toggleOpen}
         title={
           isRoot
             ? "当前终端用户: root (超级管理员) - 点击查看与切换服务器用户"
-            : `当前终端用户: ${currentUser} - 点击查看与切换服务器用户`
+            : `当前终端用户: ${effectiveUser} - 点击查看与切换服务器用户`
         }
         className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-medium border flex items-center space-x-1.5 transition active:scale-95 select-none ${
           isRoot
@@ -245,7 +285,7 @@ export const ServerUserMenu: React.FC<Props> = ({
           }`}
         />
         <User className="w-3 h-3 flex-shrink-0" />
-        <span className="font-semibold tracking-tight">{currentUser}</span>
+        <span className="font-semibold tracking-tight">{effectiveUser}</span>
         <ChevronDown
           className={`w-2.5 h-2.5 opacity-70 transition-transform duration-150 ${
             isOpen ? "rotate-180" : ""
@@ -253,12 +293,20 @@ export const ServerUserMenu: React.FC<Props> = ({
         />
       </button>
 
-      {/* Dropdown Menu Popover (Opens upward from bottom status bar) */}
-      {isOpen && (
-        <div
-          className="absolute bottom-8 left-0 z-50 w-84 max-w-[90vw] apple-card rounded-xl shadow-2xl border border-[var(--border-subtle)] text-[12px] text-[var(--text-primary)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-120 select-none"
-          onClick={(e) => e.stopPropagation()}
-        >
+      {/* Dropdown Menu Popover (Portaled to document.body with top z-index) */}
+      {isOpen &&
+        createPortal(
+          <div
+            ref={popoverRef}
+            style={{
+              position: "fixed",
+              bottom: `${menuPosition.bottom}px`,
+              left: `${menuPosition.left}px`,
+              zIndex: 9999,
+            }}
+            className="w-84 max-w-[90vw] apple-card rounded-xl shadow-2xl border border-[var(--border-subtle)] text-[12px] text-[var(--text-primary)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-120 select-none"
+            onClick={(e) => e.stopPropagation()}
+          >
           {/* Header */}
           <div className="px-3 py-2 border-b border-[var(--border-subtle)] bg-[var(--bg-card)] flex items-center justify-between">
             <div className="flex items-center space-x-1.5 truncate">
@@ -353,7 +401,7 @@ export const ServerUserMenu: React.FC<Props> = ({
               </div>
             ) : (
               filteredUsers.map((u) => {
-                const isActive = u.username === currentUser;
+                const isActive = u.username === effectiveUser;
                 return (
                   <div
                     key={u.username}
@@ -501,15 +549,18 @@ export const ServerUserMenu: React.FC<Props> = ({
               </button>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
-      {/* Password Prompt Modal for Switching Users */}
-      {passwordModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-[2px] animate-in fade-in duration-100"
-          onClick={() => setPasswordModal(null)}
-        >
+      {/* Password Prompt Modal for Switching Users (Portaled directly to document.body) */}
+      {passwordModal &&
+        createPortal(
+          <div
+            style={{ position: "fixed", inset: 0, zIndex: 10000 }}
+            className="flex items-center justify-center bg-black/50 backdrop-blur-[2px] animate-in fade-in duration-100"
+            onClick={() => setPasswordModal(null)}
+          >
           <div
             className="w-88 apple-card rounded-xl p-5 shadow-2xl border border-[var(--border-subtle)] text-[var(--text-primary)] select-none animate-in zoom-in-95 duration-120"
             onClick={(e) => e.stopPropagation()}
@@ -598,15 +649,18 @@ export const ServerUserMenu: React.FC<Props> = ({
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
-      {/* Password Management Modal for a Single User */}
-      {managingPasswordUser && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-[2px] animate-in fade-in duration-100"
-          onClick={() => setManagingPasswordUser(null)}
-        >
+      {/* Password Management Modal for a Single User (Portaled directly to document.body) */}
+      {managingPasswordUser &&
+        createPortal(
+          <div
+            style={{ position: "fixed", inset: 0, zIndex: 10000 }}
+            className="flex items-center justify-center bg-black/50 backdrop-blur-[2px] animate-in fade-in duration-100"
+            onClick={() => setManagingPasswordUser(null)}
+          >
           <div
             className="w-84 apple-card rounded-xl p-5 shadow-2xl border border-[var(--border-subtle)] text-[var(--text-primary)] select-none animate-in zoom-in-95 duration-120"
             onClick={(e) => e.stopPropagation()}
@@ -683,7 +737,8 @@ export const ServerUserMenu: React.FC<Props> = ({
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

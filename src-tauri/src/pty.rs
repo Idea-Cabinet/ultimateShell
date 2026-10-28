@@ -330,7 +330,7 @@ impl PtyManager {
                 return guard.clone();
             }
         }
-        "unknown".to_string()
+        String::new()
     }
 
     pub fn switch_user(

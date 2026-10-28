@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
 import { usePointerReorder } from "../hooks/usePointerReorder";
 import { useI18n } from "../i18n";
 import { invoke } from "@tauri-apps/api/core";
@@ -559,13 +560,33 @@ export function FileExplorer({
         sessionId: session.id,
         path: entry.path,
       });
-      setPreviewContent(content);
+      // Safety guard: if content exceeds 120KB, truncate with notice to prevent browser DOM rendering lockup
+      const maxChars = 120 * 1024;
+      if (content.length > maxChars) {
+        setPreviewContent(
+          content.slice(0, maxChars) + "\n\n--- [已截断显示前 120KB 内容，以防界面渲染卡死] ---"
+        );
+      } else {
+        setPreviewContent(content);
+      }
     } catch (err: any) {
-      setPreviewContent(`[无法读取文件预览: ${typeof err === "string" ? err : err.message}]`);
+      setPreviewContent(`[无法读取文件预览: ${typeof err === "string" ? err : err?.message || err}]`);
     } finally {
       setPreviewLoading(false);
     }
   };
+
+  // Listen for Escape key to close file preview modal immediately
+  useEffect(() => {
+    if (!previewFile) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setPreviewFile(null);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [previewFile]);
 
   // Sorting columns
   const handleSort = (field: SortField) => {
@@ -1263,54 +1284,63 @@ export function FileExplorer({
         </div>
       )}
 
-      {/* File Preview Modal */}
-      {previewFile && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-[720px] max-w-full max-h-[85vh] bg-[var(--bg-app)] border border-[var(--border-subtle)] rounded-xl shadow-2xl flex flex-col overflow-hidden">
-            {/* Modal Header */}
-            <div className="h-10 px-4 bg-[var(--bg-card)] border-b border-[var(--border-subtle)] flex items-center justify-between">
-              <div className="flex items-center space-x-2 truncate">
-                <FileText className="w-4 h-4 text-[#007AFF]" />
-                <span className="text-[13px] font-semibold text-[var(--text-primary)] truncate">
-                  {previewFile.name}
-                </span>
-                <span className="text-[11px] text-[var(--text-tertiary)] font-mono">
-                  ({previewFile.size_formatted})
-                </span>
-              </div>
-              <div className="flex items-center space-x-2">
-                <button
-                  onClick={() => navigator.clipboard.writeText(previewContent)}
-                  title="一键复制全部文本内容到剪贴板"
-                  className="px-2.5 py-1 rounded bg-[var(--hover-item)] hover:bg-[#007AFF]/15 hover:text-[#007AFF] text-[11.5px] flex items-center space-x-1.5 transition-colors"
-                >
-                  <Copy className="w-3.5 h-3.5" />
-                  <span>复制内容</span>
-                </button>
-                <button
-                  onClick={() => setPreviewFile(null)}
-                  title="关闭预览弹窗 (Esc)"
-                  className="p-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-
-            {/* Modal Body */}
-            <div className="flex-1 p-3 overflow-y-auto font-mono text-[11.5px] leading-relaxed bg-[var(--bg-terminal)] text-[var(--text-primary)] select-text">
-              {previewLoading ? (
-                <div className="flex items-center justify-center py-12 text-[var(--text-tertiary)]">
-                  <RotateCw className="w-5 h-5 animate-spin mr-2" />
-                  <span>正在读取文件预览...</span>
+      {/* File Preview Modal (Portaled directly to document.body at top z-index, click-outside to dismiss) */}
+      {previewFile &&
+        createPortal(
+          <div
+            style={{ zIndex: 9999 }}
+            className="fixed inset-0 bg-black/55 backdrop-blur-[2px] flex items-center justify-center p-4 animate-in fade-in duration-100"
+            onClick={() => setPreviewFile(null)}
+          >
+            <div
+              className="w-[740px] max-w-full max-h-[85vh] bg-[var(--bg-app)] border border-[var(--border-subtle)] rounded-xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-120"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Modal Header */}
+              <div className="h-10 px-4 bg-[var(--bg-card)] border-b border-[var(--border-subtle)] flex items-center justify-between select-none">
+                <div className="flex items-center space-x-2 truncate">
+                  <FileText className="w-4 h-4 text-[#007AFF] flex-shrink-0" />
+                  <span className="text-[13px] font-semibold text-[var(--text-primary)] truncate">
+                    {previewFile.name}
+                  </span>
+                  <span className="text-[11px] text-[var(--text-tertiary)] font-mono">
+                    ({previewFile.size_formatted})
+                  </span>
                 </div>
-              ) : (
-                <pre className="whitespace-pre-wrap break-all">{previewContent}</pre>
-              )}
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={() => navigator.clipboard.writeText(previewContent)}
+                    title="一键复制全部文本内容到剪贴板"
+                    className="px-2.5 py-1 rounded bg-[var(--hover-item)] hover:bg-[#007AFF]/15 hover:text-[#007AFF] text-[11.5px] flex items-center space-x-1.5 transition-colors"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>复制内容</span>
+                  </button>
+                  <button
+                    onClick={() => setPreviewFile(null)}
+                    title="关闭预览弹窗 (Esc)"
+                    className="p-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Modal Body */}
+              <div className="flex-1 p-3.5 overflow-y-auto font-mono text-[11.5px] leading-relaxed bg-[var(--bg-terminal)] text-[var(--text-primary)] select-text">
+                {previewLoading ? (
+                  <div className="flex items-center justify-center py-16 text-[var(--text-tertiary)] space-x-2">
+                    <RotateCw className="w-5 h-5 animate-spin text-[#007AFF]" />
+                    <span>正在读取文件预览...</span>
+                  </div>
+                ) : (
+                  <pre className="whitespace-pre-wrap break-all">{previewContent}</pre>
+                )}
+              </div>
             </div>
-          </div>
-        </div>
-      )}
+          </div>,
+          document.body
+        )}
     </div>
   );
 }

@@ -399,7 +399,6 @@ export const Sidebar: React.FC<Props> = ({
                       return (
                         <div
                           key={host.id}
-                          onDoubleClick={() => onConnect(host)}
                           onContextMenu={(e) => handleHostContextMenu(e, host)}
                           className="group relative flex items-center justify-between px-2.5 py-1.5 text-xs rounded-[7px] hover:bg-[var(--hover-item)] cursor-pointer transition active:scale-[0.98]"
                         >

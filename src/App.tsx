@@ -219,17 +219,31 @@ export function App() {
   useEffect(() => {
     if (!activeTabId) return;
 
+    // Immediately initialize user from current tab's profile or local
+    const curTab = tabs.find((t) => t.id === activeTabId);
+    if (curTab) {
+      if (curTab.isLocal) {
+        // preserve or set local
+      } else if (curTab.hostProfile?.username) {
+        setActiveUser(curTab.hostProfile.username);
+      } else {
+        setActiveUser("root");
+      }
+    }
+
     // 1. Initial query from PTY manager
     invoke<string>("get_session_user", { sessionId: activeTabId })
       .then((user) => {
-        if (user) setActiveUser(user);
+        if (user && user !== "unknown" && user.trim() !== "") {
+          setActiveUser(user);
+        }
       })
       .catch(() => {});
 
     // 2. Real-time prompt listener
     let unlisten: (() => void) | null = null;
     listen<string>(`pty-user-${activeTabId}`, (event) => {
-      if (event.payload) {
+      if (event.payload && event.payload !== "unknown" && event.payload.trim() !== "") {
         setActiveUser(event.payload);
       }
     }).then((fn) => {
@@ -239,10 +253,16 @@ export function App() {
     return () => {
       if (unlisten) unlisten();
     };
-  }, [activeTabId]);
+  }, [activeTabId, tabs]);
 
+  const lastLocalTabTimeRef = useRef<number>(0);
   const createNewLocalTab = () => {
-    const newId = `local-${Date.now()}`;
+    const now = Date.now();
+    if (now - lastLocalTabTimeRef.current < 400) {
+      return;
+    }
+    lastLocalTabTimeRef.current = now;
+    const newId = `local-${now}`;
     const newTab: TabSession = {
       id: newId,
       title: t("tab.localTerminal"),
@@ -253,8 +273,17 @@ export function App() {
     setActiveTabId(newId);
   };
 
+  const lastConnectMapRef = useRef<Map<string, number>>(new Map());
   const handleConnect = (host: HostProfile) => {
-    const newId = `ssh-${host.id}-${Date.now()}`;
+    const now = Date.now();
+    const lastTime = lastConnectMapRef.current.get(host.id) || 0;
+    // Debounce: prevent duplicate window opening when clicked repeatedly in a short interval (< 800ms)
+    if (now - lastTime < 800) {
+      return;
+    }
+    lastConnectMapRef.current.set(host.id, now);
+
+    const newId = `ssh-${host.id}-${now}`;
     const newTab: TabSession = {
       id: newId,
       title: `${host.name}`,
@@ -691,7 +720,7 @@ export function App() {
 
         {/* Bottom Status Bar with Current Path, Ops Drawer Shortcuts & Command Assistant */}
         <div className="h-6 apple-vibrancy-toolbar border-t border-[var(--border-subtle)] px-3 flex items-center justify-between text-[11px] text-[var(--text-tertiary)] select-none">
-          <div className="flex items-center space-x-2 truncate">
+          <div className="flex items-center space-x-2 min-w-0">
             <span
               title={activeTab?.connected ? "会话状态：已正常连接并就绪" : "会话状态：已断开或已退出"}
               className="flex items-center space-x-1.5 flex-shrink-0 cursor-default mr-1"
