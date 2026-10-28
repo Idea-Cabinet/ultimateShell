@@ -1507,123 +1507,126 @@ export function FileExplorer({
         </div>
       </div>
 
-      {/* Context Menu Popover */}
-      {contextMenu && (
-        <div
-          style={{
-            position: "fixed",
-            left: `${Math.min(contextMenu.x, window.innerWidth - 200)}px`,
-            top: `${Math.min(contextMenu.y, window.innerHeight - 180)}px`,
-          }}
-          className="z-50 w-44 bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-lg shadow-xl py-1 text-[12px] apple-vibrancy-popover animate-in fade-in zoom-in-95 duration-100"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {contextMenu.entry.is_dir ? (
-            <>
+      {/* Context Menu Popover (Portaled to document.body at top z-index) */}
+      {contextMenu &&
+        createPortal(
+          <div
+            style={{
+              position: "fixed",
+              left: `${Math.max(10, Math.min(contextMenu.x, window.innerWidth - 210))}px`,
+              top: `${Math.max(10, Math.min(contextMenu.y, window.innerHeight - 280))}px`,
+              zIndex: 9999,
+            }}
+            className="w-48 bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-lg shadow-xl py-1 text-[12px] apple-vibrancy-popover animate-in fade-in zoom-in-95 duration-100 select-none"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {contextMenu.entry.is_dir ? (
+              <>
+                <button
+                  onClick={() => {
+                    loadDirectory(contextMenu.entry.path);
+                    setContextMenu(null);
+                  }}
+                  title="打开并载入此文件夹"
+                  className="w-full px-3 py-1.5 text-left hover:bg-[#007AFF] hover:text-white flex items-center space-x-2 text-[var(--text-primary)] transition-colors"
+                >
+                  <FolderOpen className="w-3.5 h-3.5" />
+                  <span>进入目录</span>
+                </button>
+                <button
+                  onClick={() => {
+                    onSendToTerminal(`cd "${contextMenu.entry.path}"\n`);
+                    setContextMenu(null);
+                  }}
+                  title="在终端 Shell 中执行 cd 进入此路径"
+                  className="w-full px-3 py-1.5 text-left hover:bg-[#007AFF] hover:text-white flex items-center space-x-2 text-[var(--text-primary)] transition-colors"
+                >
+                  <Terminal className="w-3.5 h-3.5" />
+                  <span>在终端 cd 此路径</span>
+                </button>
+              </>
+            ) : (
               <button
                 onClick={() => {
-                  loadDirectory(contextMenu.entry.path);
+                  openFilePreview(contextMenu.entry);
                   setContextMenu(null);
                 }}
-                title="打开并载入此文件夹"
-                className="w-full px-3 py-1.5 text-left hover:bg-[#007AFF] hover:text-white flex items-center space-x-2 text-[var(--text-primary)]"
+                title="在弹窗中查看只读 UTF-8 文本内容"
+                className="w-full px-3 py-1.5 text-left hover:bg-[#007AFF] hover:text-white flex items-center space-x-2 text-[var(--text-primary)] transition-colors"
               >
-                <FolderOpen className="w-3.5 h-3.5" />
-                <span>进入目录</span>
+                <Eye className="w-3.5 h-3.5 text-[#007AFF]" />
+                <span>查看文本预览</span>
               </button>
-              <button
-                onClick={() => {
-                  onSendToTerminal(`cd "${contextMenu.entry.path}"\n`);
-                  setContextMenu(null);
-                }}
-                title="在终端 Shell 中执行 cd 进入此路径"
-                className="w-full px-3 py-1.5 text-left hover:bg-[#007AFF] hover:text-white flex items-center space-x-2 text-[var(--text-primary)]"
-              >
-                <Terminal className="w-3.5 h-3.5" />
-                <span>在终端 cd 此路径</span>
-              </button>
-            </>
-          ) : (
+            )}
+
+            {!contextMenu.entry.is_dir && (
+              <>
+                <button
+                  onClick={() => {
+                    handleDownload(contextMenu.entry);
+                    setContextMenu(null);
+                  }}
+                  title="快速下载此文件至本地 Downloads 目录"
+                  className="w-full px-3 py-1.5 text-left hover:bg-[#007AFF] hover:text-white flex items-center space-x-2 text-[var(--text-primary)] transition-colors"
+                >
+                  <Download className="w-3.5 h-3.5 text-emerald-500" />
+                  <span>下载文件</span>
+                </button>
+                <button
+                  onClick={() => {
+                    handleDownloadSaveAs(contextMenu.entry);
+                    setContextMenu(null);
+                  }}
+                  title="选择本地保存目录并下载"
+                  className="w-full px-3 py-1.5 text-left hover:bg-[#007AFF] hover:text-white flex items-center space-x-2 text-[var(--text-primary)] transition-colors"
+                >
+                  <Download className="w-3.5 h-3.5 opacity-70" />
+                  <span>另存为...</span>
+                </button>
+              </>
+            )}
+
             <button
               onClick={() => {
-                openFilePreview(contextMenu.entry);
+                setRenamingEntry(contextMenu.entry);
+                setNewName(contextMenu.entry.name);
                 setContextMenu(null);
               }}
-              title="在弹窗中查看只读 UTF-8 文本内容"
-              className="w-full px-3 py-1.5 text-left hover:bg-[#007AFF] hover:text-white flex items-center space-x-2 text-[var(--text-primary)]"
+              title="重命名此文件或文件夹"
+              className="w-full px-3 py-1.5 text-left hover:bg-[#007AFF] hover:text-white flex items-center space-x-2 text-[var(--text-primary)] transition-colors"
             >
-              <Eye className="w-3.5 h-3.5" />
-              <span>查看文本预览</span>
+              <Pencil className="w-3.5 h-3.5 text-[#007AFF]" />
+              <span>重命名</span>
             </button>
-          )}
 
-          {!contextMenu.entry.is_dir && (
-            <>
-              <button
-                onClick={() => {
-                  handleDownload(contextMenu.entry);
-                  setContextMenu(null);
-                }}
-                title="快速下载此文件至本地 Downloads 目录"
-                className="w-full px-3 py-1.5 text-left hover:bg-[#007AFF] hover:text-white flex items-center space-x-2 text-[var(--text-primary)]"
-              >
-                <Download className="w-3.5 h-3.5 text-emerald-500" />
-                <span>下载文件</span>
-              </button>
-              <button
-                onClick={() => {
-                  handleDownloadSaveAs(contextMenu.entry);
-                  setContextMenu(null);
-                }}
-                title="选择本地保存目录并下载"
-                className="w-full px-3 py-1.5 text-left hover:bg-[#007AFF] hover:text-white flex items-center space-x-2 text-[var(--text-primary)]"
-              >
-                <Download className="w-3.5 h-3.5 opacity-70" />
-                <span>另存为...</span>
-              </button>
-            </>
-          )}
+            <div className="h-[1px] bg-[var(--border-subtle)] my-1" />
 
-          <button
-            onClick={() => {
-              setRenamingEntry(contextMenu.entry);
-              setNewName(contextMenu.entry.name);
-              setContextMenu(null);
-            }}
-            title="重命名此文件或文件夹"
-            className="w-full px-3 py-1.5 text-left hover:bg-[#007AFF] hover:text-white flex items-center space-x-2 text-[var(--text-primary)]"
-          >
-            <Pencil className="w-3.5 h-3.5 text-[#007AFF]" />
-            <span>重命名</span>
-          </button>
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(contextMenu.entry.path);
+                setContextMenu(null);
+              }}
+              title="复制此项完整绝对路径到剪贴板"
+              className="w-full px-3 py-1.5 text-left hover:bg-[#007AFF] hover:text-white flex items-center space-x-2 text-[var(--text-primary)] transition-colors"
+            >
+              <Copy className="w-3.5 h-3.5" />
+              <span>复制完整路径</span>
+            </button>
 
-          <div className="h-[1px] bg-[var(--border-subtle)] my-1" />
-
-          <button
-            onClick={() => {
-              navigator.clipboard.writeText(contextMenu.entry.path);
-              setContextMenu(null);
-            }}
-            title="复制此项完整绝对路径到剪贴板"
-            className="w-full px-3 py-1.5 text-left hover:bg-[#007AFF] hover:text-white flex items-center space-x-2 text-[var(--text-primary)]"
-          >
-            <Copy className="w-3.5 h-3.5" />
-            <span>复制完整路径</span>
-          </button>
-
-          <button
-            onClick={() => {
-              navigator.clipboard.writeText(contextMenu.entry.name);
-              setContextMenu(null);
-            }}
-            title="仅复制文件名到剪贴板"
-            className="w-full px-3 py-1.5 text-left hover:bg-[#007AFF] hover:text-white flex items-center space-x-2 text-[var(--text-primary)]"
-          >
-            <Copy className="w-3.5 h-3.5" />
-            <span>复制文件名</span>
-          </button>
-        </div>
-      )}
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(contextMenu.entry.name);
+                setContextMenu(null);
+              }}
+              title="仅复制文件名到剪贴板"
+              className="w-full px-3 py-1.5 text-left hover:bg-[#007AFF] hover:text-white flex items-center space-x-2 text-[var(--text-primary)] transition-colors"
+            >
+              <Copy className="w-3.5 h-3.5" />
+              <span>复制文件名</span>
+            </button>
+          </div>,
+          document.body
+        )}
 
       {/* Blank Area Context Menu */}
       {blankContextMenu &&

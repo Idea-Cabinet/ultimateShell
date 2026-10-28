@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { usePointerReorder } from "../hooks/usePointerReorder";
 import { useI18n } from "../i18n";
 import { TabSession } from "../types";
@@ -206,13 +207,18 @@ export const TabBar: React.FC<Props> = ({
         <div data-tauri-drag-region className="flex-1 h-full min-w-[20px]" />
       </div>
 
-      {/* Right-click Context Menu Popover (macOS Styled) */}
-      {contextMenu.visible && (
-        <div
-          style={{ top: `${contextMenu.y}px`, left: `${contextMenu.x}px` }}
-          className="fixed z-50 apple-card rounded-xl py-1.5 w-44 shadow-2xl text-[12px] text-[var(--text-primary)] animate-in fade-in zoom-in-95 duration-100 select-none"
-          onClick={(e) => e.stopPropagation()}
-        >
+      {/* Right-click Context Menu Popover (macOS Styled, Portaled to document.body at top z-index) */}
+      {contextMenu.visible &&
+        createPortal(
+          <div
+            style={{
+              top: `${Math.max(10, Math.min(contextMenu.y, window.innerHeight - 240))}px`,
+              left: `${Math.max(10, Math.min(contextMenu.x, window.innerWidth - 190))}px`,
+              zIndex: 9999,
+            }}
+            className="fixed apple-card rounded-xl py-1.5 w-44 shadow-2xl text-[12px] text-[var(--text-primary)] animate-in fade-in zoom-in-95 duration-100 select-none border border-[var(--border-subtle)]"
+            onClick={(e) => e.stopPropagation()}
+          >
           <button
             onClick={() => {
               onReconnectTab(contextMenu.tabId);
@@ -277,7 +283,8 @@ export const TabBar: React.FC<Props> = ({
             <ArrowRightCircle className="w-3.5 h-3.5" strokeWidth={1.75} />
             <span>{t("tab.closeRight")}</span>
           </button>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );

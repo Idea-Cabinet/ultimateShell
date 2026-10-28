@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { HostProfile, TabSession, isDefaultGroup } from "../types";
 import { ServerPerfMonitor } from "./ServerPerfMonitor";
 import { useI18n } from "../i18n";
@@ -493,13 +494,18 @@ export const Sidebar: React.FC<Props> = ({
         </div>
       )}
 
-      {/* Context Menus Popover (Host / Group / Blank) */}
-      {contextMenu && (
-        <div
-          style={{ top: `${contextMenu.y}px`, left: `${contextMenu.x}px` }}
-          className="fixed z-50 apple-card rounded-xl py-1.5 w-48 shadow-2xl text-[12px] text-[var(--text-primary)] animate-in fade-in zoom-in-95 duration-100 select-none border border-[var(--border-subtle)]"
-          onClick={(e) => e.stopPropagation()}
-        >
+      {/* Context Menus Popover (Host / Group / Blank, Portaled to document.body at top z-index) */}
+      {contextMenu &&
+        createPortal(
+          <div
+            style={{
+              top: `${Math.max(10, Math.min(contextMenu.y, window.innerHeight - 280))}px`,
+              left: `${Math.max(10, Math.min(contextMenu.x, window.innerWidth - 210))}px`,
+              zIndex: 9999,
+            }}
+            className="fixed apple-card rounded-xl py-1.5 w-48 shadow-2xl text-[12px] text-[var(--text-primary)] animate-in fade-in zoom-in-95 duration-100 select-none border border-[var(--border-subtle)]"
+            onClick={(e) => e.stopPropagation()}
+          >
           {contextMenu.type === "host" && (
             <>
               <button
@@ -681,7 +687,8 @@ export const Sidebar: React.FC<Props> = ({
               </button>
             </>
           )}
-        </div>
+        </div>,
+        document.body
       )}
     </aside>
   );
