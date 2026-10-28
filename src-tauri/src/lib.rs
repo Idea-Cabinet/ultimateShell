@@ -161,6 +161,43 @@ async fn fs_create_dir(
 }
 
 #[tauri::command]
+async fn fs_delete(
+    pty_mgr: State<'_, PtyManager>,
+    sftp_pool: State<'_, SftpPool>,
+    session_id: String,
+    path: String,
+    is_dir: bool,
+    use_trash: bool,
+) -> Result<String, String> {
+    println!("[IPC:fs_delete] sessionId={}, path={}, is_dir={}, use_trash={}", session_id, path, is_dir, use_trash);
+    let opts = pty_mgr
+        .get_opts(&session_id)
+        .ok_or_else(|| "会话不存在或已关闭".to_string())?;
+
+    let pool = sftp_pool.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        sftp::delete_entry(&pool, &opts, &path, is_dir, use_trash)
+    })
+    .await
+    .map_err(|e| format!("异步执行错误: {}", e))?
+}
+
+#[tauri::command]
+fn fs_get_trash_dir() -> String {
+    std::env::var("HOME")
+        .map(|h| format!("{}/.ultimateshell/trash", h))
+        .unwrap_or_else(|_| ".ultimateshell_trash".to_string())
+}
+
+#[tauri::command]
+fn fs_clear_trash() -> Result<(), String> {
+    let trash_dir = fs_get_trash_dir();
+    let _ = std::fs::remove_dir_all(&trash_dir);
+    let _ = std::fs::create_dir_all(&trash_dir);
+    Ok(())
+}
+
+#[tauri::command]
 async fn fs_download_file(
     app: AppHandle,
     pty_mgr: State<'_, PtyManager>,
@@ -571,6 +608,9 @@ pub fn run() {
             fs_rename,
             fs_create_file,
             fs_create_dir,
+            fs_delete,
+            fs_get_trash_dir,
+            fs_clear_trash,
             fs_download_file,
             fs_upload_file,
             fs_cancel_transfer,

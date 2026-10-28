@@ -1,5 +1,7 @@
 import React, { useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import { openPath } from "@tauri-apps/plugin-opener";
 import { useI18n, Lang } from "../i18n";
 import { AppSettings } from "../hooks/useAppSettings";
 import { ThemeMode } from "../hooks/useTheme";
@@ -257,6 +259,60 @@ export const SettingsModal: React.FC<Props> = ({
                         重置
                       </button>
                     )}
+                  </div>
+                </div>
+
+                <div className="h-[1px] bg-[var(--border-subtle)]" />
+
+                {/* Recycle Bin / Trash Settings */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5 pr-4">
+                      <div className="font-semibold text-[13px]">删除时先备份至本地回收站</div>
+                      <div className="text-[11px] text-[var(--text-secondary)]">
+                        开启后，删除文件/文件夹前将自动下载备份至本地回收站 (~/.ultimateshell/trash)；关闭则直接永久删除
+                      </div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={settings.deleteToTrash}
+                      onChange={(e) => onUpdateSettings({ deleteToTrash: e.target.checked })}
+                      className="w-4 h-4 accent-[#007AFF] rounded cursor-pointer"
+                    />
+                  </div>
+                  <div className="flex items-center space-x-2 pt-0.5">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          const trashDir = await invoke<string>("fs_get_trash_dir");
+                          openPath(trashDir);
+                        } catch (err) {
+                          console.error("打开回收站目录失败:", err);
+                        }
+                      }}
+                      className="px-2.5 py-1 text-[11px] rounded-lg bg-[var(--hover-item)] hover:text-[#007AFF] transition border border-[var(--border-subtle)] flex items-center space-x-1 text-[var(--text-secondary)]"
+                    >
+                      <FolderOpen className="w-3.5 h-3.5" />
+                      <span>查看回收站目录</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (confirm("确定要清空程序本地回收站吗？已备份的文件将被彻底清除。")) {
+                          try {
+                            await invoke("fs_clear_trash");
+                            alert("本地回收站已清空");
+                          } catch (err) {
+                            alert("清空回收站失败: " + err);
+                          }
+                        }
+                      }}
+                      className="px-2.5 py-1 text-[11px] rounded-lg hover:bg-rose-500/10 hover:text-rose-500 transition border border-[var(--border-subtle)] flex items-center space-x-1 text-[var(--text-tertiary)]"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>清空回收站</span>
+                    </button>
                   </div>
                 </div>
               </>

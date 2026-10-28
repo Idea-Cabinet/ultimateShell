@@ -7,6 +7,8 @@ export interface AppSettings {
   scrollback: number;
   minimizeToTray: boolean;
   downloadDir: string;
+  deleteToTrash: boolean;
+  hasAskedTrashConfirm: boolean;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -16,6 +18,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   scrollback: 5000,
   minimizeToTray: true,
   downloadDir: "",
+  deleteToTrash: false,
+  hasAskedTrashConfirm: false,
 };
 
 const STORAGE_KEY = "ultimateshell_app_settings";

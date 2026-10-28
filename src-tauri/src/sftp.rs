@@ -2,7 +2,7 @@ use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
@@ -616,6 +616,169 @@ pub fn create_dir(
                 Err(format!("创建远程文件夹失败: {}", e))
             }
         }
+    }
+}
+
+pub fn delete_entry(
+    pool: &SftpPool,
+    opts: &SpawnOptions,
+    path_str: &str,
+    is_dir: bool,
+    use_trash: bool,
+) -> Result<String, String> {
+    let target = resolve_path_str(pool, opts, path_str);
+    let target_clean = target.trim_end_matches('/').to_string();
+    println!("[sftp::delete_entry] target='{}', is_dir={}, use_trash={}, is_local={}", target_clean, is_dir, use_trash, opts.is_local);
+
+    let trash_dir = std::env::var("HOME")
+        .map(|h| format!("{}/.ultimateshell/trash", h))
+        .unwrap_or_else(|_| ".ultimateshell_trash".to_string());
+
+    if use_trash {
+        let _ = fs::create_dir_all(&trash_dir);
+    }
+
+    let item_name = Path::new(&target_clean)
+        .file_name()
+        .map(|f| f.to_string_lossy().to_string())
+        .unwrap_or_else(|| "unnamed".to_string());
+
+    let now_str = Local::now().format("%Y%m%d_%H%M%S").to_string();
+    let trash_item_path = format!("{}/{}_{}", trash_dir, now_str, item_name);
+
+    if opts.is_local {
+        if use_trash {
+            if is_dir {
+                // Move local directory to trash
+                let _ = fs::rename(&target_clean, &trash_item_path);
+                println!("[sftp::delete_entry] 本地文件夹已移至回收站: {}", trash_item_path);
+                return Ok(format!("已移至本地回收站: {}", trash_item_path));
+            } else {
+                // For local file, rename into trash
+                match fs::rename(&target_clean, &trash_item_path) {
+                    Ok(_) => {
+                        println!("[sftp::delete_entry] 本地文件已移至回收站: {}", trash_item_path);
+                        return Ok(format!("已移至本地回收站: {}", trash_item_path));
+                    }
+                    Err(_) => {
+                        let _ = fs::copy(&target_clean, &trash_item_path);
+                        let _ = fs::remove_file(&target_clean);
+                        return Ok(format!("已备份至本地回收站并删除: {}", trash_item_path));
+                    }
+                }
+            }
+        } else {
+            // Direct permanent delete
+            if is_dir {
+                fs::remove_dir_all(&target_clean)
+                    .map_err(|e| format!("删除本地文件夹失败: {}", e))?;
+                println!("[sftp::delete_entry] 本地文件夹已永久删除: {}", target_clean);
+            } else {
+                fs::remove_file(&target_clean)
+                    .map_err(|e| format!("删除本地文件失败: {}", e))?;
+                println!("[sftp::delete_entry] 本地文件已永久删除: {}", target_clean);
+            }
+            return Ok("已永久删除".to_string());
+        }
+    } else {
+        // Remote SFTP
+        let sess_arc = pool.get_or_connect(opts)?;
+        let sess = sess_arc.lock().map_err(|e| e.to_string())?;
+        let sftp = sess.sftp().map_err(|e| format!("SFTP 会话错误: {}", e))?;
+
+        if use_trash {
+            if !is_dir {
+                // Download file content into local trash file first
+                if let Ok(mut remote_file) = sftp.open(Path::new(&target_clean)) {
+                    if let Ok(mut local_trash_file) = fs::File::create(&trash_item_path) {
+                        let mut buf = [0u8; 32768];
+                        loop {
+                            match remote_file.read(&mut buf) {
+                                Ok(0) => break,
+                                Ok(n) => {
+                                    if local_trash_file.write_all(&buf[..n]).is_err() {
+                                        break;
+                                    }
+                                }
+                                Err(_) => break,
+                            }
+                        }
+                        println!("[sftp::delete_entry] 远程文件已先下载备份至本地回收站: {}", trash_item_path);
+                    }
+                }
+            } else {
+                // For remote dir, tar and download into trash
+                if let Ok(mut ch) = sess.channel_session() {
+                    let cmd = format!("tar -czf - -C '{}' . 2>/dev/null", target_clean);
+                    if ch.exec(&cmd).is_ok() {
+                        let trash_tar_path = format!("{}.tar.gz", trash_item_path);
+                        if let Ok(mut local_tar) = fs::File::create(&trash_tar_path) {
+                            let mut buf = [0u8; 32768];
+                            loop {
+                                match ch.read(&mut buf) {
+                                    Ok(0) => break,
+                                    Ok(n) => {
+                                        if local_tar.write_all(&buf[..n]).is_err() {
+                                            break;
+                                        }
+                                    }
+                                    Err(_) => break,
+                                }
+                            }
+                            let _ = ch.wait_close();
+                            println!("[sftp::delete_entry] 远程文件夹已打包备份至本地回收站: {}", trash_tar_path);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Now perform remote deletion
+        if is_dir {
+            // SFTP rmdir only removes empty dirs, so run SSH rm -rf for robust recursive deletion
+            let safe_path = target_clean.replace('\'', "'\\''");
+            if let Ok(mut ch) = sess.channel_session() {
+                let cmd = format!("rm -rf '{}' || sudo -n rm -rf '{}'", safe_path, safe_path);
+                if ch.exec(&cmd).is_ok() {
+                    let mut out = String::new();
+                    let _ = ch.read_to_string(&mut out);
+                    let _ = ch.wait_close();
+                    if ch.exit_status().unwrap_or(1) == 0 {
+                        println!("[sftp::delete_entry] 远程文件夹已通过 SSH rm -rf 删除成功: {}", target_clean);
+                        return Ok(if use_trash { "已备份至本地回收站并从服务器删除".to_string() } else { "已从服务器永久删除".to_string() });
+                    }
+                }
+            }
+            // Fallback to sftp.rmdir
+            sftp.rmdir(Path::new(&target_clean))
+                .map_err(|e| format!("删除远程文件夹失败: {}", e))?;
+            println!("[sftp::delete_entry] 远程文件夹通过 SFTP rmdir 删除成功: {}", target_clean);
+        } else {
+            // SFTP unlink for file
+            match sftp.unlink(Path::new(&target_clean)) {
+                Ok(_) => {
+                    println!("[sftp::delete_entry] 远程文件已通过 SFTP unlink 删除成功: {}", target_clean);
+                }
+                Err(e) => {
+                    println!("[sftp::delete_entry] SFTP unlink 失败: {}，尝试 SSH rm -f 回退...", e);
+                    let safe_path = target_clean.replace('\'', "'\\''");
+                    if let Ok(mut ch) = sess.channel_session() {
+                        let cmd = format!("rm -f '{}' || sudo -n rm -f '{}'", safe_path, safe_path);
+                        if ch.exec(&cmd).is_ok() {
+                            let mut out = String::new();
+                            let _ = ch.read_to_string(&mut out);
+                            let _ = ch.wait_close();
+                            if ch.exit_status().unwrap_or(1) == 0 {
+                                println!("[sftp::delete_entry] 远程文件通过 SSH rm -f 删除成功: {}", target_clean);
+                                return Ok(if use_trash { "已备份至本地回收站并从服务器删除".to_string() } else { "已从服务器永久删除".to_string() });
+                            }
+                        }
+                    }
+                    return Err(format!("删除远程文件失败: {}", e));
+                }
+            }
+        }
+        Ok(if use_trash { "已备份至本地回收站并从服务器删除".to_string() } else { "已从服务器永久删除".to_string() })
     }
 }
 

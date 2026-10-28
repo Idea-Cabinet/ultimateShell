@@ -39,6 +39,9 @@ import {
   ArrowUpDown,
   FilePlus,
   FolderPlus,
+  Trash2,
+  AlertTriangle,
+  ShieldCheck,
 } from "lucide-react";
 
 interface FileExplorerProps {
@@ -354,6 +357,13 @@ export function FileExplorer({
       }
     }
   }, [createModal]);
+
+  // Delete modal state (Recycle bin / permanent delete)
+  const [deleteTarget, setDeleteTarget] = useState<FileEntry | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [isFirstTimeDelete, setIsFirstTimeDelete] = useState(false);
+  const [modalUseTrash, setModalUseTrash] = useState(false);
+  const [modalRememberChoice, setModalRememberChoice] = useState(true);
 
   // Fetch directory contents lazily for the main table view
   const loadDirectory = async (path: string, pushHistory = true) => {
@@ -774,6 +784,63 @@ export function FileExplorer({
       }
     } finally {
       setCreateItemLoading(false);
+    }
+  };
+
+  // Open delete confirmation modal (checks if user has already configured trash preference)
+  const handleRequestDelete = (entry: FileEntry) => {
+    let hasAsked = false;
+    let deleteToTrash = false;
+    try {
+      const s = localStorage.getItem("ultimateshell_app_settings");
+      if (s) {
+        const parsed = JSON.parse(s);
+        hasAsked = !!parsed.hasAskedTrashConfirm;
+        deleteToTrash = !!parsed.deleteToTrash;
+      }
+    } catch {}
+
+    setDeleteTarget(entry);
+    setModalUseTrash(deleteToTrash);
+    setIsFirstTimeDelete(!hasAsked);
+  };
+
+  // Confirm delete file or folder
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleteLoading(true);
+
+    try {
+      // If first time prompt, persist user's choice to app settings
+      if (isFirstTimeDelete && modalRememberChoice) {
+        try {
+          const s = localStorage.getItem("ultimateshell_app_settings");
+          const parsed = s ? JSON.parse(s) : {};
+          parsed.hasAskedTrashConfirm = true;
+          parsed.deleteToTrash = modalUseTrash;
+          localStorage.setItem("ultimateshell_app_settings", JSON.stringify(parsed));
+        } catch {}
+      }
+
+      console.log(`[FileExplorer] 删除项: path=${deleteTarget.path}, is_dir=${deleteTarget.is_dir}, use_trash=${modalUseTrash}`);
+      await invoke("fs_delete", {
+        sessionId: session.id,
+        path: deleteTarget.path,
+        isDir: deleteTarget.is_dir,
+        useTrash: modalUseTrash,
+      });
+
+      setDeleteTarget(null);
+      await loadDirectory(currentPath, false);
+      if (currentPath === "/" || currentPath === "~") {
+        initLazyRoot(true);
+      }
+    } catch (err: any) {
+      console.error("[FileExplorer] 删除失败:", err);
+      const errStr = typeof err === "string" ? err : err?.message || String(err);
+      alert(`删除失败: ${errStr}`);
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -1637,6 +1704,21 @@ export function FileExplorer({
               <Copy className="w-3.5 h-3.5" />
               <span>复制文件名</span>
             </button>
+
+            <div className="h-[1px] bg-[var(--border-subtle)] my-1" />
+
+            <button
+              onClick={() => {
+                const entry = contextMenu.entry;
+                setContextMenu(null);
+                handleRequestDelete(entry);
+              }}
+              title="删除此项 (可选择是否移入程序回收站)"
+              className="w-full px-3 py-1.5 text-left hover:bg-rose-500 hover:text-white flex items-center space-x-2 text-rose-500 transition-colors group"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-rose-500 group-hover:text-white" />
+              <span>删除</span>
+            </button>
           </div>,
           document.body
         )}
@@ -1940,6 +2022,175 @@ export function FileExplorer({
                 ) : (
                   <pre className="whitespace-pre-wrap break-all">{previewContent}</pre>
                 )}
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+
+      {/* Delete Confirmation Modal (First-time preference prompt or standard confirmation) */}
+      {deleteTarget &&
+        createPortal(
+          <div
+            style={{ zIndex: 10000 }}
+            className="fixed inset-0 bg-black/55 backdrop-blur-[2px] flex items-center justify-center p-4 animate-in fade-in duration-100"
+            onClick={() => {
+              if (!deleteLoading) setDeleteTarget(null);
+            }}
+          >
+            <div
+              className="w-[430px] max-w-full apple-card rounded-2xl p-5 shadow-2xl border border-[var(--border-subtle)] text-[var(--text-primary)] select-none animate-in zoom-in-95 duration-120"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Modal Header */}
+              <div className="flex items-start space-x-3">
+                <div
+                  className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${
+                    modalUseTrash ? "bg-[#007AFF]/15 text-[#007AFF]" : "bg-rose-500/15 text-rose-500"
+                  }`}
+                >
+                  {modalUseTrash ? <ShieldCheck className="w-5 h-5" /> : <Trash2 className="w-5 h-5" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[14px] font-semibold tracking-tight">
+                    {isFirstTimeDelete
+                      ? "删除确认与回收站设置"
+                      : `确认删除${deleteTarget.is_dir ? "文件夹" : "文件"}？`}
+                  </div>
+                  <div className="text-[11.5px] text-[var(--text-secondary)] mt-1 break-all leading-relaxed">
+                    目标：<span className="font-mono font-medium text-[var(--text-primary)]">{deleteTarget.name}</span>
+                    <span className="text-[var(--text-tertiary)] ml-1">
+                      ({deleteTarget.is_dir ? "文件夹" : deleteTarget.size_formatted})
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* First Time: Interactive Choice Cards */}
+              {isFirstTimeDelete ? (
+                <div className="mt-4 space-y-2.5">
+                  <div className="text-[11px] text-[var(--text-tertiary)]">
+                    首次执行删除操作，请选择删除模式（默认直接删除，可配置先备份至回收站）：
+                  </div>
+
+                  {/* Option 1: Direct Permanent Delete (Default) */}
+                  <div
+                    onClick={() => setModalUseTrash(false)}
+                    className={`p-3 rounded-xl border cursor-pointer transition-all ${
+                      !modalUseTrash
+                        ? "border-rose-500/60 bg-rose-500/10 shadow-xs"
+                        : "border-[var(--border-subtle)] hover:bg-[var(--hover-item)]"
+                    }`}
+                  >
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="radio"
+                        name="trashMode"
+                        checked={!modalUseTrash}
+                        onChange={() => setModalUseTrash(false)}
+                        className="accent-rose-500 cursor-pointer"
+                      />
+                      <span className="font-semibold text-[12px] text-rose-500">直接永久删除（默认）</span>
+                    </div>
+                    <div className="text-[10.5px] text-[var(--text-tertiary)] mt-1 pl-5 leading-normal">
+                      直接从服务器或文件系统永久移除，速度极快，不可撤销。
+                    </div>
+                  </div>
+
+                  {/* Option 2: Download to local trash first */}
+                  <div
+                    onClick={() => setModalUseTrash(true)}
+                    className={`p-3 rounded-xl border cursor-pointer transition-all ${
+                      modalUseTrash
+                        ? "border-[#007AFF]/60 bg-[#007AFF]/10 shadow-xs"
+                        : "border-[var(--border-subtle)] hover:bg-[var(--hover-item)]"
+                    }`}
+                  >
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="radio"
+                        name="trashMode"
+                        checked={modalUseTrash}
+                        onChange={() => setModalUseTrash(true)}
+                        className="accent-[#007AFF] cursor-pointer"
+                      />
+                      <span className="font-semibold text-[12px] text-[#007AFF]">先下载备份至本地回收站再删除（安全模式）</span>
+                    </div>
+                    <div className="text-[10.5px] text-[var(--text-tertiary)] mt-1 pl-5 leading-normal">
+                      删除前自动下载一份备份至程序本地回收站 (~/.ultimateshell/trash)，防止手滑误删。
+                    </div>
+                  </div>
+
+                  {/* Remember choice checkbox */}
+                  <label className="flex items-center space-x-2 pt-1 px-1 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={modalRememberChoice}
+                      onChange={(e) => setModalRememberChoice(e.target.checked)}
+                      className="accent-[#007AFF] rounded w-3.5 h-3.5"
+                    />
+                    <span className="text-[11px] text-[var(--text-secondary)]">
+                      记住选择并作为默认模式（可在偏好设置中随时修改）
+                    </span>
+                  </label>
+                </div>
+              ) : (
+                /* Subsequent Deletes: Clean Confirmation with Mode Badge & Quick Toggle */
+                <div className="mt-4 space-y-2.5">
+                  <div
+                    className={`p-2.5 rounded-xl border text-[11px] flex items-center justify-between ${
+                      modalUseTrash
+                        ? "bg-[#007AFF]/10 border-[#007AFF]/30 text-[#007AFF]"
+                        : "bg-amber-500/10 border-amber-500/30 text-amber-500"
+                    }`}
+                  >
+                    <div className="flex items-center space-x-1.5 truncate">
+                      {modalUseTrash ? (
+                        <ShieldCheck className="w-4 h-4 flex-shrink-0" />
+                      ) : (
+                        <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                      )}
+                      <span>
+                        {modalUseTrash
+                          ? "回收站保护开启：将先自动下载备份至本地回收站"
+                          : "永久删除：将直接从服务器移除，不可撤销"}
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setModalUseTrash(!modalUseTrash)}
+                      className="text-[10.5px] underline hover:opacity-80 flex-shrink-0 ml-2"
+                    >
+                      {modalUseTrash ? "临时改为永久删除" : "临时备份至回收站"}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div className="flex items-center justify-end space-x-2 pt-5">
+                <button
+                  type="button"
+                  onClick={() => setDeleteTarget(null)}
+                  disabled={deleteLoading}
+                  className="px-3.5 py-1.5 text-[12px] rounded-lg text-[var(--text-secondary)] hover:bg-[var(--hover-item)] transition"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmDelete}
+                  disabled={deleteLoading}
+                  className={`px-4 py-1.5 text-[12px] font-medium text-white rounded-lg shadow-sm transition active:scale-95 disabled:opacity-50 flex items-center space-x-1.5 ${
+                    modalUseTrash
+                      ? "bg-[#007AFF] hover:bg-[#0062CC]"
+                      : "bg-rose-500 hover:bg-rose-600"
+                  }`}
+                >
+                  {deleteLoading && <RotateCw className="w-3 h-3 animate-spin" />}
+                  <span>{modalUseTrash ? "备份并删除" : "确认永久删除"}</span>
+                </button>
               </div>
             </div>
           </div>,
