@@ -87,14 +87,16 @@ async fn fs_read_preview(
     sftp_pool: State<'_, SftpPool>,
     session_id: String,
     path: String,
-) -> Result<String, String> {
+    mode: Option<String>,
+    max_bytes: Option<usize>,
+) -> Result<sftp::PreviewResult, String> {
     let opts = pty_mgr
         .get_opts(&session_id)
         .ok_or_else(|| "会话不存在或已关闭".to_string())?;
 
     let pool = sftp_pool.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        sftp::read_file_preview_content(&pool, &opts, &path, 64 * 1024)
+        sftp::read_file_preview_content(&pool, &opts, &path, mode, max_bytes)
     })
     .await
     .map_err(|e| format!("异步执行错误: {}", e))?

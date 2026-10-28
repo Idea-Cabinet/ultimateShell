@@ -2,7 +2,7 @@ use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
@@ -418,44 +418,182 @@ pub fn list_remote_dir(
     })
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PreviewResult {
+    pub content: String,
+    pub total_size: u64,
+    pub is_truncated: bool,
+    pub mode: String,
+    pub line_count: usize,
+}
+
 pub fn read_file_preview_content(
     pool: &SftpPool,
     opts: &SpawnOptions,
     file_path: &str,
-    max_bytes: usize,
-) -> Result<String, String> {
+    mode: Option<String>,
+    max_bytes: Option<usize>,
+) -> Result<PreviewResult, String> {
+    let target = resolve_path_str(pool, opts, file_path);
+    let max_b = max_bytes.unwrap_or(128 * 1024);
+    let is_log = target.ends_with(".log")
+        || target.ends_with(".out")
+        || target.ends_with(".err")
+        || target.contains("/log/")
+        || target.ends_with("syslog")
+        || target.ends_with("messages");
+
     if opts.is_local {
-        let mut f = fs::File::open(file_path).map_err(|e| format!("打开本地文件失败: {}", e))?;
-        use std::io::Read;
-        let mut buf = vec![0u8; max_bytes];
-        let n = f.read(&mut buf).map_err(|e| format!("读取本地文件失败: {}", e))?;
-        buf.truncate(n);
-        String::from_utf8(buf).map_err(|_| "非文本文件或 UTF-8 解码失败".to_string())
+        let mut f = fs::File::open(&target).map_err(|e| format!("打开本地文件失败: {}", e))?;
+        let meta = f.metadata().map_err(|e| format!("读取文件元信息失败: {}", e))?;
+        let total_size = meta.len();
+
+        let chosen_mode = mode.unwrap_or_else(|| {
+            if is_log && total_size > max_b as u64 {
+                "tail".to_string()
+            } else {
+                "head".to_string()
+            }
+        });
+
+        let (buf, is_truncated) = if total_size <= max_b as u64 {
+            let mut b = Vec::with_capacity(total_size as usize);
+            f.read_to_end(&mut b).map_err(|e| format!("读取本地文件失败: {}", e))?;
+            (b, false)
+        } else if chosen_mode == "tail" {
+            let offset = total_size.saturating_sub(max_b as u64);
+            let _ = f.seek(SeekFrom::Start(offset));
+            let mut b = vec![0u8; max_b];
+            let n = f.read(&mut b).map_err(|e| format!("读取本地文件失败: {}", e))?;
+            b.truncate(n);
+            (b, true)
+        } else {
+            let mut b = vec![0u8; max_b];
+            let n = f.read(&mut b).map_err(|e| format!("读取本地文件失败: {}", e))?;
+            b.truncate(n);
+            (b, true)
+        };
+
+        let mut content = String::from_utf8_lossy(&buf).to_string();
+        if is_truncated && chosen_mode == "tail" {
+            if let Some(pos) = content.find('\n') {
+                content = content[pos + 1..].to_string();
+            }
+        }
+        let line_count = content.lines().count();
+        Ok(PreviewResult {
+            content,
+            total_size,
+            is_truncated,
+            mode: chosen_mode,
+            line_count,
+        })
     } else {
         let sess_arc = pool.get_or_connect(opts)?;
         let sess = sess_arc.lock().map_err(|e| e.to_string())?;
-        let sftp = match sess.sftp() {
-            Ok(s) => s,
-            Err(e) => {
-                drop(sess);
-                pool.invalidate(&opts.session_id);
-                return Err(format!("启动 SFTP 失败: {}", e));
+
+        // 1. Try reading via SFTP (fastest, with seek support)
+        let mut sftp_preview: Option<PreviewResult> = None;
+        if let Ok(sftp) = sess.sftp() {
+            if let Ok(mut file) = sftp.open(Path::new(&target)) {
+                if let Ok(stat) = file.stat() {
+                    let total_size = stat.size.unwrap_or(0);
+                    let chosen_mode = mode.clone().unwrap_or_else(|| {
+                        if is_log && total_size > max_b as u64 {
+                            "tail".to_string()
+                        } else {
+                            "head".to_string()
+                        }
+                    });
+
+                    let (buf, is_truncated) = if total_size <= max_b as u64 {
+                        let mut b = Vec::with_capacity(total_size as usize);
+                        let _ = file.read_to_end(&mut b);
+                        (b, false)
+                    } else if chosen_mode == "tail" {
+                        let offset = total_size.saturating_sub(max_b as u64);
+                        let _ = file.seek(SeekFrom::Start(offset));
+                        let mut b = vec![0u8; max_b];
+                        let n = file.read(&mut b).unwrap_or(0);
+                        b.truncate(n);
+                        (b, true)
+                    } else {
+                        let mut b = vec![0u8; max_b];
+                        let n = file.read(&mut b).unwrap_or(0);
+                        b.truncate(n);
+                        (b, true)
+                    };
+
+                    let mut content = String::from_utf8_lossy(&buf).to_string();
+                    if is_truncated && chosen_mode == "tail" {
+                        if let Some(pos) = content.find('\n') {
+                            content = content[pos + 1..].to_string();
+                        }
+                    }
+                    let line_count = content.lines().count();
+                    sftp_preview = Some(PreviewResult {
+                        content,
+                        total_size,
+                        is_truncated,
+                        mode: chosen_mode,
+                        line_count,
+                    });
+                }
             }
-        };
-        let mut file = match sftp.open(Path::new(file_path)) {
-            Ok(f) => f,
-            Err(e) => {
-                drop(sftp);
-                drop(sess);
-                pool.invalidate(&opts.session_id);
-                return Err(format!("打开远程文件失败: {}", e));
+        }
+
+        if let Some(res) = sftp_preview {
+            return Ok(res);
+        }
+
+        // 2. Fallback to SSH command (handles permission-restricted /var/log/* and protected logs)
+        let safe_path = target.replace('\'', "'\\''");
+        let chosen_mode = mode.unwrap_or_else(|| {
+            if is_log {
+                "tail".to_string()
+            } else {
+                "head".to_string()
             }
+        });
+
+        let cmd = if chosen_mode == "tail" {
+            format!(
+                "tail -c {} '{}' 2>/dev/null || sudo -n tail -c {} '{}' 2>/dev/null",
+                max_b, safe_path, max_b, safe_path
+            )
+        } else {
+            format!(
+                "head -c {} '{}' 2>/dev/null || sudo -n head -c {} '{}' 2>/dev/null",
+                max_b, safe_path, max_b, safe_path
+            )
         };
-        use std::io::Read;
-        let mut buf = vec![0u8; max_bytes];
-        let n = file.read(&mut buf).map_err(|e| format!("读取远程文件失败: {}", e))?;
-        buf.truncate(n);
-        String::from_utf8(buf).map_err(|_| "非文本文件或 UTF-8 解码失败".to_string())
+
+        if let Ok(mut ch) = sess.channel_session() {
+            if ch.exec(&cmd).is_ok() {
+                let mut buf = Vec::with_capacity(max_b);
+                let _ = ch.read_to_end(&mut buf);
+                let _ = ch.wait_close();
+                if !buf.is_empty() {
+                    let mut content = String::from_utf8_lossy(&buf).to_string();
+                    let is_truncated = buf.len() >= max_b;
+                    if is_truncated && chosen_mode == "tail" {
+                        if let Some(pos) = content.find('\n') {
+                            content = content[pos + 1..].to_string();
+                        }
+                    }
+                    let line_count = content.lines().count();
+                    return Ok(PreviewResult {
+                        content,
+                        total_size: buf.len() as u64,
+                        is_truncated,
+                        mode: chosen_mode,
+                        line_count,
+                    });
+                }
+            }
+        }
+
+        Err(format!("打开或读取远程文件失败 (权限不足或文件不存在): {}", target))
     }
 }
 

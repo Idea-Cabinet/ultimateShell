@@ -50,6 +50,14 @@ export interface DirResult {
   total_files: number;
 }
 
+export interface PreviewResult {
+  content: string;
+  total_size: number;
+  is_truncated: boolean;
+  mode: "tail" | "head";
+  line_count: number;
+}
+
 export interface SystemPerfStats {
   cpu_usage: number;
   mem_percent: number;

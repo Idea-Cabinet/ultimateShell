@@ -3,6 +3,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { SearchAddon } from "@xterm/addon-search";
+import { WebglAddon } from "@xterm/addon-webgl";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { TabSession } from "../types";
@@ -167,6 +168,17 @@ export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme
     term.open(containerRef.current);
     fitAddon.fit();
 
+    // Enable hardware-accelerated WebGL rendering for 60/120fps smooth log streaming
+    try {
+      const webglAddon = new WebglAddon();
+      webglAddon.onContextLoss(() => {
+        webglAddon.dispose();
+      });
+      term.loadAddon(webglAddon);
+    } catch (e) {
+      console.warn("[TerminalView] WebGL GPU 加速未能加载，回退至 DOM 渲染:", e);
+    }
+
     // Optimize xterm helper textarea for English terminal interaction
     if (term.textarea) {
       term.textarea.setAttribute("autocapitalize", "off");
@@ -186,6 +198,7 @@ export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme
 
     // High-performance display buffer aligned with display refresh rate
     let pendingChunks: string[] = [];
+    let pendingBytes = 0;
     let rafId: number | null = null;
 
     const flushBuffer = () => {
@@ -197,6 +210,7 @@ export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme
 
       const data = pendingChunks.join("");
       pendingChunks = [];
+      pendingBytes = 0;
 
       term.write(data);
     };
@@ -219,21 +233,19 @@ export const TerminalView: React.FC<Props> = ({ session, isActive, resolvedTheme
         const offData = await listen<string>(`pty-data-${session.id}`, (event) => {
           if (disposed) return;
           pendingChunks.push(event.payload);
+          pendingBytes += event.payload.length;
 
-          // Flood protection: if accumulated pending chunks exceed 1MB, keep latest 256KB
-          if (pendingChunks.length > 20) {
-            let total = 0;
-            for (let i = 0; i < pendingChunks.length; i++) total += pendingChunks[i].length;
-            if (total > 1024 * 1024) {
-              let kept: string[] = [];
-              let keptBytes = 0;
-              for (let i = pendingChunks.length - 1; i >= 0; i--) {
-                kept.unshift(pendingChunks[i]);
-                keptBytes += pendingChunks[i].length;
-                if (keptBytes >= 256 * 1024) break;
-              }
-              pendingChunks = kept;
+          // Flood protection: if accumulated pending chunks exceed 1MB, keep latest 256KB with O(1) buffer tracking
+          if (pendingBytes > 1024 * 1024) {
+            let kept: string[] = [];
+            let keptBytes = 0;
+            for (let i = pendingChunks.length - 1; i >= 0; i--) {
+              kept.unshift(pendingChunks[i]);
+              keptBytes += pendingChunks[i].length;
+              if (keptBytes >= 256 * 1024) break;
             }
+            pendingChunks = kept;
+            pendingBytes = keptBytes;
           }
 
           if (rafId === null) {

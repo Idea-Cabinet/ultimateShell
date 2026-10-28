@@ -6,7 +6,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { useTransferManager } from "../context/TransferContext";
-import { DirResult, FileEntry, TabSession } from "../types";
+import { DirResult, FileEntry, TabSession, PreviewResult } from "../types";
 import {
   Folder,
   FolderOpen,
@@ -300,8 +300,10 @@ export function FileExplorer({
 
   // Preview Modal
   const [previewFile, setPreviewFile] = useState<FileEntry | null>(null);
-  const [previewContent, setPreviewContent] = useState<string>("");
+  const [previewResult, setPreviewResult] = useState<PreviewResult | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState<boolean>(false);
+  const [previewWrap, setPreviewWrap] = useState<boolean>(false);
 
   // Global Transfer Manager
   const transferManager = useTransferManager();
@@ -615,28 +617,33 @@ export function FileExplorer({
     }
   };
 
-  // Open file preview modal
-  const openFilePreview = async (entry: FileEntry) => {
+  // Open file preview modal (ultra-fast tail/head chunked preview for logs & text)
+  const openFilePreview = async (entry: FileEntry, requestedMode?: "tail" | "head") => {
     setPreviewFile(entry);
     setPreviewLoading(true);
-    setPreviewContent("");
+    setPreviewError(null);
+
+    const isLog =
+      entry.name.endsWith(".log") ||
+      entry.name.endsWith(".out") ||
+      entry.name.endsWith(".err") ||
+      entry.path.includes("/log/") ||
+      entry.name.includes("syslog") ||
+      entry.name.includes("messages");
+
+    const mode = requestedMode || (isLog ? "tail" : undefined);
 
     try {
-      const content = await invoke<string>("fs_read_preview", {
+      const res = await invoke<PreviewResult>("fs_read_preview", {
         sessionId: session.id,
         path: entry.path,
+        mode,
+        maxBytes: 128 * 1024,
       });
-      // Safety guard: if content exceeds 120KB, truncate with notice to prevent browser DOM rendering lockup
-      const maxChars = 120 * 1024;
-      if (content.length > maxChars) {
-        setPreviewContent(
-          content.slice(0, maxChars) + "\n\n--- [已截断显示前 120KB 内容，以防界面渲染卡死] ---"
-        );
-      } else {
-        setPreviewContent(content);
-      }
+      setPreviewResult(res);
     } catch (err: any) {
-      setPreviewContent(`[无法读取文件预览: ${typeof err === "string" ? err : err?.message || err}]`);
+      setPreviewError(typeof err === "string" ? err : err?.message || String(err));
+      setPreviewResult(null);
     } finally {
       setPreviewLoading(false);
     }
@@ -648,6 +655,8 @@ export function FileExplorer({
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setPreviewFile(null);
+        setPreviewResult(null);
+        setPreviewError(null);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
@@ -1976,34 +1985,85 @@ export function FileExplorer({
           <div
             style={{ zIndex: 9999 }}
             className="fixed inset-0 bg-black/55 backdrop-blur-[2px] flex items-center justify-center p-4 animate-in fade-in duration-100"
-            onClick={() => setPreviewFile(null)}
+            onClick={() => {
+              setPreviewFile(null);
+              setPreviewResult(null);
+              setPreviewError(null);
+            }}
           >
             <div
-              className="w-[740px] max-w-full max-h-[85vh] bg-[var(--bg-app)] border border-[var(--border-subtle)] rounded-xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-120"
+              className="w-[820px] max-w-full max-h-[88vh] bg-[var(--bg-app)] border border-[var(--border-subtle)] rounded-xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-120"
               onClick={(e) => e.stopPropagation()}
             >
               {/* Modal Header */}
               <div className="h-10 px-4 bg-[var(--bg-card)] border-b border-[var(--border-subtle)] flex items-center justify-between select-none">
-                <div className="flex items-center space-x-2 truncate">
+                <div className="flex items-center space-x-2 truncate mr-2">
                   <FileText className="w-4 h-4 text-[#007AFF] flex-shrink-0" />
                   <span className="text-[13px] font-semibold text-[var(--text-primary)] truncate">
                     {previewFile.name}
                   </span>
-                  <span className="text-[11px] text-[var(--text-tertiary)] font-mono">
+                  <span className="text-[11px] text-[var(--text-tertiary)] font-mono flex-shrink-0">
                     ({previewFile.size_formatted})
                   </span>
+                  {previewResult && previewResult.is_truncated && (
+                    <span className="text-[10.5px] px-2 py-0.5 rounded-full bg-[#007AFF]/12 text-[#007AFF] font-medium flex-shrink-0">
+                      已截取{previewResult.mode === "tail" ? "最新尾部" : "文件开头"} ({previewResult.line_count} 行)
+                    </span>
+                  )}
                 </div>
-                <div className="flex items-center space-x-2">
+                <div className="flex items-center space-x-1.5 flex-shrink-0">
+                  {/* Tail / Head Mode Switch */}
+                  {previewResult && previewResult.is_truncated && (
+                    <button
+                      onClick={() =>
+                        openFilePreview(previewFile, previewResult.mode === "tail" ? "head" : "tail")
+                      }
+                      title={previewResult.mode === "tail" ? "切换查看文件开头" : "切换查看最新尾部日志"}
+                      className="px-2 py-1 rounded bg-[var(--hover-item)] hover:bg-[#007AFF]/15 hover:text-[#007AFF] text-[11px] text-[var(--text-secondary)] transition-colors flex items-center space-x-1"
+                    >
+                      <span>{previewResult.mode === "tail" ? "查看开头" : "查看尾部"}</span>
+                    </button>
+                  )}
+                  {/* Refresh button */}
                   <button
-                    onClick={() => navigator.clipboard.writeText(previewContent)}
-                    title="一键复制全部文本内容到剪贴板"
-                    className="px-2.5 py-1 rounded bg-[var(--hover-item)] hover:bg-[#007AFF]/15 hover:text-[#007AFF] text-[11.5px] flex items-center space-x-1.5 transition-colors"
+                    onClick={() => openFilePreview(previewFile, previewResult?.mode || "tail")}
+                    title="重新获取最新日志/文件内容"
+                    className="p-1.5 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[#007AFF] transition"
+                  >
+                    <RotateCw className={`w-3.5 h-3.5 ${previewLoading ? "animate-spin text-[#007AFF]" : ""}`} />
+                  </button>
+                  {/* Wrap lines toggle */}
+                  <button
+                    onClick={() => setPreviewWrap(!previewWrap)}
+                    title={previewWrap ? "取消换行 (横向滚动，速度极快)" : "自动换行"}
+                    className={`px-2 py-1 rounded text-[11px] transition-colors ${
+                      previewWrap
+                        ? "bg-[#007AFF]/15 text-[#007AFF] font-medium"
+                        : "bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                    }`}
+                  >
+                    <span>{previewWrap ? "已换行" : "自动换行"}</span>
+                  </button>
+                  {/* Copy button */}
+                  <button
+                    onClick={() => {
+                      if (previewResult?.content) {
+                        navigator.clipboard.writeText(previewResult.content);
+                      }
+                    }}
+                    title="一键复制当前预览文本"
+                    className="px-2.5 py-1 rounded bg-[var(--hover-item)] hover:bg-[#007AFF]/15 hover:text-[#007AFF] text-[11px] flex items-center space-x-1 transition-colors"
                   >
                     <Copy className="w-3.5 h-3.5" />
-                    <span>复制内容</span>
+                    <span>复制</span>
                   </button>
+                  {/* Close button */}
                   <button
-                    onClick={() => setPreviewFile(null)}
+                    onClick={() => {
+                      setPreviewFile(null);
+                      setPreviewResult(null);
+                      setPreviewError(null);
+                    }}
                     title="关闭预览弹窗 (Esc)"
                     className="p-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition"
                   >
@@ -2013,15 +2073,29 @@ export function FileExplorer({
               </div>
 
               {/* Modal Body */}
-              <div className="flex-1 p-3.5 overflow-y-auto font-mono text-[11.5px] leading-relaxed bg-[var(--bg-terminal)] text-[var(--text-primary)] select-text">
+              <div
+                style={{ contain: "content" }}
+                className="flex-1 p-3.5 overflow-auto font-mono text-[11.5px] leading-relaxed bg-[var(--bg-terminal)] text-[var(--text-primary)] select-text"
+              >
                 {previewLoading ? (
                   <div className="flex items-center justify-center py-16 text-[var(--text-tertiary)] space-x-2">
                     <RotateCw className="w-5 h-5 animate-spin text-[#007AFF]" />
-                    <span>正在读取文件预览...</span>
+                    <span>正在读取日志与文件内容...</span>
                   </div>
-                ) : (
-                  <pre className="whitespace-pre-wrap break-all">{previewContent}</pre>
-                )}
+                ) : previewError ? (
+                  <div className="text-red-400 p-4 font-mono text-xs">
+                    {previewError}
+                  </div>
+                ) : previewResult ? (
+                  <pre
+                    style={{ contain: "content" }}
+                    className={`font-mono text-[11.5px] leading-relaxed ${
+                      previewWrap ? "whitespace-pre-wrap break-all" : "whitespace-pre"
+                    }`}
+                  >
+                    {previewResult.content}
+                  </pre>
+                ) : null}
               </div>
             </div>
           </div>,
