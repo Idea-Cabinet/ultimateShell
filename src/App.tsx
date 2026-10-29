@@ -15,7 +15,9 @@ import { CommandAssistant } from "./components/CommandAssistant";
 import { ServerUserMenu } from "./components/ServerUserMenu";
 import { TransferProvider, useTransferManager } from "./context/TransferContext";
 import { TransferManagerModal } from "./components/TransferManagerModal";
-import { Folder, KeyRound, ShieldCheck, Sun, Moon, Monitor, Activity, HardDrive, Terminal, Globe, Settings, PanelLeft, PanelLeftClose, ArrowUpDown, Network, Server, Workflow } from "lucide-react";
+import { AgentApprovalModal } from "./components/AgentApprovalModal";
+import { AgentGatewayDrawer, GatewayStatusPayload } from "./components/AgentGatewayDrawer";
+import { Folder, KeyRound, ShieldCheck, Sun, Moon, Monitor, Activity, HardDrive, Terminal, Globe, Settings, PanelLeft, PanelLeftClose, ArrowUpDown, Network, Server, Workflow, Bot } from "lucide-react";
 import "./App.css";
 
 interface PasswordUpdateEvent {
@@ -38,6 +40,22 @@ function AppContent() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [editingHost, setEditingHost] = useState<HostProfile | null>(null);
+
+  // Local AI Security Gateway Drawer state & status payload
+  const [isAgentDrawerOpen, setIsAgentDrawerOpen] = useState(false);
+  const [agentGatewayStatus, setAgentGatewayStatus] = useState<GatewayStatusPayload | null>(null);
+
+  const fetchAgentStatus = () => {
+    invoke<GatewayStatusPayload>("agent_get_gateway_status")
+      .then(setAgentGatewayStatus)
+      .catch(() => {});
+  };
+
+  useEffect(() => {
+    fetchAgentStatus();
+    const interval = setInterval(fetchAgentStatus, 4000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Status bar stats for active tab
   const [dirStats, setDirStats] = useState<{ path: string; fileCount: number }>({
@@ -968,6 +986,39 @@ function AppContent() {
               <ArrowUpDown className={`w-3 h-3 ${activeCount > 0 ? "animate-spin text-[#007AFF]" : "text-[var(--text-tertiary)]"}`} />
               <span>{activeCount > 0 ? `${activeCount} 项传输中` : "文件传输"}</span>
             </button>
+
+            {/* AI Agent Gateway Trigger Pill */}
+            <button
+              onClick={() => setIsAgentDrawerOpen(true)}
+              className={`flex items-center space-x-1.5 px-2 py-0.5 rounded text-[10px] border transition-all flex-shrink-0 ${
+                isAgentDrawerOpen
+                  ? "bg-purple-500/20 text-purple-400 border-purple-500/40 font-semibold"
+                  : agentGatewayStatus?.pending_approvals_count && agentGatewayStatus.pending_approvals_count > 0
+                  ? "bg-amber-500/20 text-amber-400 border-amber-500/50 animate-pulse font-bold"
+                  : "bg-[var(--hover-item)] text-[var(--text-secondary)] border-[var(--border-subtle)] hover:border-[var(--border-strong)]"
+              }`}
+              title="本地 AI 安全隧道网关（外部 Agent 零密码操控服务器 · 三级本地审批）"
+            >
+              <Bot className="w-3 h-3 text-purple-400" />
+              <span>AI 网关</span>
+              {agentGatewayStatus?.is_running && (
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+              )}
+              {agentGatewayStatus?.policy && (
+                <span className="text-[9px] opacity-75 font-mono">
+                  {agentGatewayStatus.policy === "strict"
+                    ? "🛡️"
+                    : agentGatewayStatus.policy === "smart"
+                    ? "🤖"
+                    : "⚡"}
+                </span>
+              )}
+              {agentGatewayStatus?.pending_approvals_count ? (
+                <span className="px-1 py-0.1 text-[9px] rounded-full bg-amber-500 text-black font-bold">
+                  {agentGatewayStatus.pending_approvals_count}
+                </span>
+              ) : null}
+            </button>
           </div>
 
           <div className="flex items-center space-x-2 text-[10.5px] flex-shrink-0">
@@ -1109,6 +1160,15 @@ function AppContent() {
 
       {/* Global Collapsible File Transfer Operations Modal / Floating Pill */}
       <TransferManagerModal />
+
+      {/* AI Agent Approval Floating Modal */}
+      <AgentApprovalModal onApprovalResolved={fetchAgentStatus} />
+
+      {/* AI Agent Gateway Configuration & Audit Drawer */}
+      <AgentGatewayDrawer
+        isOpen={isAgentDrawerOpen}
+        onClose={() => setIsAgentDrawerOpen(false)}
+      />
     </div>
   );
 }

@@ -9,6 +9,7 @@ mod sftp;
 mod transfer;
 mod vault;
 mod tunnel;
+mod agent_gateway;
 
 use hosts::{load_hosts, save_hosts, HostProfile};
 use ops::{DiskPartition, ProcessEntry};
@@ -17,6 +18,7 @@ use pty::{PtyManager, SpawnOptions};
 use sftp::{DirResult, SftpPool};
 use transfer::TransferState;
 use tunnel::{TunnelEntry, TunnelManager};
+use agent_gateway::{AgentGateway, ApprovalPolicy, AuditLogEntry, GatewayStatusPayload};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -733,6 +735,88 @@ fn tunnel_list(
     Ok(tunnel_mgr.list_tunnels(session_id.as_deref()))
 }
 
+#[tauri::command]
+fn agent_get_gateway_status(
+    gateway: State<'_, AgentGateway>,
+) -> Result<GatewayStatusPayload, String> {
+    let pty_sessions_count = gateway.pty_mgr.sessions.lock().unwrap().len();
+    let audit_count = gateway.audit_logs.lock().unwrap().len();
+    let pending_count = gateway.pending_approvals.lock().unwrap().len();
+    let policy = *gateway.policy.lock().unwrap();
+
+    Ok(GatewayStatusPayload {
+        is_running: gateway.is_running.load(std::sync::atomic::Ordering::SeqCst),
+        port: gateway.port,
+        token: gateway.token.clone(),
+        policy,
+        active_servers_count: pty_sessions_count,
+        audit_count,
+        pending_approvals_count: pending_count,
+    })
+}
+
+#[tauri::command]
+fn agent_set_gateway_policy(
+    gateway: State<'_, AgentGateway>,
+    policy: String,
+) -> Result<ApprovalPolicy, String> {
+    let new_policy = match policy.as_str() {
+        "strict" => ApprovalPolicy::Strict,
+        "auto" => ApprovalPolicy::Auto,
+        _ => ApprovalPolicy::Smart,
+    };
+    *gateway.policy.lock().unwrap() = new_policy;
+    Ok(new_policy)
+}
+
+#[tauri::command]
+fn agent_resolve_approval(
+    gateway: State<'_, AgentGateway>,
+    id: String,
+    approved: bool,
+    switch_to_auto: Option<bool>,
+) -> Result<(), String> {
+    if switch_to_auto == Some(true) {
+        *gateway.policy.lock().unwrap() = ApprovalPolicy::Auto;
+    }
+
+    let mut pending = gateway.pending_approvals.lock().unwrap();
+    if let Some(sender) = pending.remove(&id) {
+        let _ = sender.send(approved);
+        Ok(())
+    } else {
+        Err("审批已超时或不存在".to_string())
+    }
+}
+
+#[tauri::command]
+fn agent_get_audit_logs(
+    gateway: State<'_, AgentGateway>,
+) -> Result<Vec<AuditLogEntry>, String> {
+    Ok(gateway.audit_logs.lock().unwrap().clone())
+}
+
+#[tauri::command]
+fn agent_clear_audit_logs(
+    gateway: State<'_, AgentGateway>,
+) -> Result<(), String> {
+    gateway.audit_logs.lock().unwrap().clear();
+    Ok(())
+}
+
+#[tauri::command]
+fn agent_toggle_gateway(
+    gateway: State<'_, AgentGateway>,
+    enabled: bool,
+) -> Result<bool, String> {
+    if enabled {
+        gateway.start_server();
+    } else {
+        gateway.stop_server();
+    }
+    Ok(gateway.is_running.load(std::sync::atomic::Ordering::SeqCst))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let pty_mgr = PtyManager::new();
@@ -740,6 +824,9 @@ pub fn run() {
     let perf_mgr = PerfManager::new();
     let transfer_state = TransferState::new();
     let tunnel_mgr = TunnelManager::new();
+
+    let pty_mgr_gw = pty_mgr.clone();
+    let sftp_pool_gw = sftp_pool.clone();
 
     tauri::Builder::default()
         .manage(pty_mgr)
@@ -750,6 +837,10 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            let gateway = AgentGateway::new(pty_mgr_gw, sftp_pool_gw, app.handle().clone());
+            gateway.start_server();
+            app.manage(gateway);
+
             let show_item = MenuItem::with_id(app, "show", "显示主窗口", true, None::<&str>)?;
             let new_term_item = MenuItem::with_id(app, "new_term", "新建本地终端", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "退出 UltimateShell", true, None::<&str>)?;
@@ -878,6 +969,12 @@ pub fn run() {
             tunnel_start,
             tunnel_stop,
             tunnel_list,
+            agent_get_gateway_status,
+            agent_set_gateway_policy,
+            agent_resolve_approval,
+            agent_get_audit_logs,
+            agent_clear_audit_logs,
+            agent_toggle_gateway,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
