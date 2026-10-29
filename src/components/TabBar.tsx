@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { usePointerReorder } from "../hooks/usePointerReorder";
 import { useI18n } from "../i18n";
 import { TabSession } from "../types";
@@ -131,6 +132,7 @@ export const TabBar: React.FC<Props> = ({
       <div
         data-tauri-drag-region
         onMouseDown={(e) => {
+          if (e.button !== 0) return;
           const target = e.target as HTMLElement;
           if (
             target.closest("button") ||
@@ -139,11 +141,9 @@ export const TabBar: React.FC<Props> = ({
           ) {
             return;
           }
-          if (e.button === 0) {
-            import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
-              getCurrentWindow().startDragging();
-            });
-          }
+          getCurrentWindow().startDragging().catch((err) => {
+            console.error("[TabBar] startDragging failed:", err);
+          });
         }}
         onDoubleClick={(e) => {
           const target = e.target as HTMLElement;
@@ -154,8 +154,8 @@ export const TabBar: React.FC<Props> = ({
           ) {
             return;
           }
-          import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
-            getCurrentWindow().toggleMaximize();
+          getCurrentWindow().toggleMaximize().catch((err) => {
+            console.error("[TabBar] toggleMaximize failed:", err);
           });
         }}
         className={`app-titlebar apple-vibrancy-toolbar border-b border-[var(--border-subtle)] flex items-center px-3 space-x-1.5 select-none z-10 transition-[padding] duration-160 ease-[var(--ease-drawer)] ${
@@ -284,14 +284,14 @@ export const TabBar: React.FC<Props> = ({
           data-tauri-drag-region
           onMouseDown={(e) => {
             if (e.button === 0) {
-              import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
-                getCurrentWindow().startDragging();
+              getCurrentWindow().startDragging().catch((err) => {
+                console.error("[TabBar trailing] startDragging failed:", err);
               });
             }
           }}
           onDoubleClick={() => {
-            import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
-              getCurrentWindow().toggleMaximize();
+            getCurrentWindow().toggleMaximize().catch((err) => {
+              console.error("[TabBar trailing] toggleMaximize failed:", err);
             });
           }}
           className="flex-1 h-full min-w-[30px] cursor-default"

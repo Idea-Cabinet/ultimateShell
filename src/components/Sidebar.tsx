@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { HostProfile, TabSession, isDefaultGroup } from "../types";
 import { ServerPerfMonitor } from "./ServerPerfMonitor";
 import { useI18n } from "../i18n";
@@ -272,16 +273,16 @@ export const Sidebar: React.FC<Props> = ({
           const target = e.target as HTMLElement;
           if (target.closest("button") || target.closest("input")) return;
           if (e.button === 0) {
-            import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
-              getCurrentWindow().startDragging();
+            getCurrentWindow().startDragging().catch((err) => {
+              console.error("[Sidebar] startDragging failed:", err);
             });
           }
         }}
         onDoubleClick={(e) => {
           const target = e.target as HTMLElement;
           if (target.closest("button") || target.closest("input")) return;
-          import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
-            getCurrentWindow().toggleMaximize();
+          getCurrentWindow().toggleMaximize().catch((err) => {
+            console.error("[Sidebar] toggleMaximize failed:", err);
           });
         }}
         className="app-titlebar app-titlebar-controls flex items-center justify-between px-3 border-b border-[var(--border-subtle)] select-none flex-shrink-0"

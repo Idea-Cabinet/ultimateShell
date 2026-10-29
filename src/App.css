@@ -179,8 +179,23 @@ button:active, [role="button"]:active, .apple-clickable:active {
   height: var(--app-titlebar-height);
   min-height: var(--app-titlebar-height);
   flex-shrink: 0;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .app-titlebar-controls {
   padding-left: var(--app-titlebar-controls-width);
+}
+
+[data-tauri-drag-region] {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-app-region: drag;
+}
+
+[data-tauri-drag-region="false"],
+[data-tauri-drag-region] button,
+[data-tauri-drag-region] input,
+[data-tauri-drag-region] [data-reorder-id] {
+  -webkit-app-region: no-drag;
 }
