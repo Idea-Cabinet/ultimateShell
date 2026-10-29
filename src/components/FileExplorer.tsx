@@ -629,14 +629,37 @@ export function FileExplorer({
     }
   };
 
-  // Open explorer at user home directory "~" and auto-load outermost directory tree
+  // Open explorer at terminal cwd or user home directory "~" and auto-load outermost directory tree
   useEffect(() => {
     if (isOpen && session.id) {
-      setCurrentPath("~");
-      setHistory(["~"]);
-      setHistoryIdx(0);
       setSelectedEntry(null);
-      loadDirectory("~", false);
+      if (session.isLocal) {
+        invoke<string>("fs_get_terminal_cwd", { sessionId: session.id })
+          .then((cwd) => {
+            if (cwd && cwd.trim() && cwd.trim() !== "/") {
+              setCurrentPath(cwd.trim());
+              setHistory([cwd.trim()]);
+              setHistoryIdx(0);
+              loadDirectory(cwd.trim(), false);
+            } else {
+              setCurrentPath("~");
+              setHistory(["~"]);
+              setHistoryIdx(0);
+              loadDirectory("~", false);
+            }
+          })
+          .catch(() => {
+            setCurrentPath("~");
+            setHistory(["~"]);
+            setHistoryIdx(0);
+            loadDirectory("~", false);
+          });
+      } else {
+        setCurrentPath("~");
+        setHistory(["~"]);
+        setHistoryIdx(0);
+        loadDirectory("~", false);
+      }
 
       // Requirement 1: If outermost directory tree has not been loaded yet, auto-load it!
       const cached = rootNodesCache.current[session.id];
@@ -820,6 +843,10 @@ export function FileExplorer({
 
   // Upload files via file picker dialog
   const handleUploadClick = async () => {
+    if (session.isLocal && (currentPath === "/" || currentPath === "")) {
+      alert("当前位于 macOS 系统根目录 (/)，该目录受系统完整性保护 (SIP) 锁定为只读，无法直接写入文件。\n\n请点击主页图标 (~) 切换至您的用户主目录后再进行文件上传或操作。");
+      return;
+    }
     try {
       const selected = await open({
         multiple: true,
@@ -1188,6 +1215,11 @@ export function FileExplorer({
     setIsDragOver(false);
     dragCounterRef.current = 0;
 
+    if (session.isLocal && (currentPath === "/" || currentPath === "")) {
+      alert("当前位于 macOS 系统根目录 (/)，该目录受系统完整性保护 (SIP) 锁定为只读，无法直接写入文件。\n\n请点击主页图标 (~) 切换至您的用户主目录后再进行文件上传或操作。");
+      return;
+    }
+
     const files = e.dataTransfer.files;
     if (files && files.length > 0) {
       const now = Date.now();
@@ -1216,6 +1248,10 @@ export function FileExplorer({
     if (!isOpen) return;
     let unlisten: (() => void) | null = null;
     listen<{ paths: string[] }>("tauri://drag-drop", async (event) => {
+      if (session.isLocal && (currentPath === "/" || currentPath === "")) {
+        alert("当前位于 macOS 系统根目录 (/)，该目录受系统完整性保护 (SIP) 锁定为只读，无法直接写入文件。\n\n请点击主页图标 (~) 切换至您的用户主目录后再进行文件上传或操作。");
+        return;
+      }
       const paths = event.payload?.paths;
       if (paths && paths.length > 0) {
         const now = Date.now();

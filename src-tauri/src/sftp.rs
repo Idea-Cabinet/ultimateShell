@@ -1057,15 +1057,18 @@ pub fn download_file(
     let chunk_size = 64 * 1024; // 64KB
     let mut buf = vec![0u8; chunk_size];
 
-    if let Some(parent) = Path::new(local_path).parent() {
+    let resolved_remote = resolve_path_str(pool, opts, remote_path);
+    let resolved_local = resolve_path_str(pool, opts, local_path);
+
+    if let Some(parent) = Path::new(&resolved_local).parent() {
         let _ = fs::create_dir_all(parent);
     }
 
-    let mut writer = fs::File::create(local_path)
+    let mut writer = fs::File::create(&resolved_local)
         .map_err(|e| format!("创建本地目标文件失败: {}", e))?;
 
     if opts.is_local {
-        let mut reader = fs::File::open(remote_path)
+        let mut reader = fs::File::open(&resolved_remote)
             .map_err(|e| format!("打开本地源文件失败: {}", e))?;
         let total_size = reader.metadata().map(|m| m.len()).unwrap_or(0);
 
@@ -1076,7 +1079,7 @@ pub fn download_file(
         loop {
             if cancel_flag.load(Ordering::Relaxed) {
                 drop(writer);
-                let _ = fs::remove_file(local_path);
+                let _ = fs::remove_file(&resolved_local);
                 let _ = app.emit(
                     "file-transfer-status",
                     TransferStatusPayload {
@@ -1135,7 +1138,7 @@ pub fn download_file(
             }
         };
 
-        let mut remote_file = match sftp.open(Path::new(remote_path)) {
+        let mut remote_file = match sftp.open(Path::new(&resolved_remote)) {
             Ok(file) => file,
             Err(e) => {
                 drop(sftp);
@@ -1156,7 +1159,7 @@ pub fn download_file(
                 drop(remote_file);
                 drop(sftp);
                 drop(sess);
-                let _ = fs::remove_file(local_path);
+                let _ = fs::remove_file(&resolved_local);
                 let _ = app.emit(
                     "file-transfer-status",
                     TransferStatusPayload {
@@ -1226,24 +1229,27 @@ fn upload_dir_recursive(
     task_id: &str,
     cancel_flag: Arc<AtomicBool>,
 ) -> Result<(), String> {
+    let resolved_remote = resolve_path_str(pool, opts, remote_dir);
+    let resolved_local = resolve_path_str(pool, opts, local_dir);
+
     if opts.is_local {
-        fs::create_dir_all(remote_dir).map_err(|e| format!("创建本地文件夹失败: {}", e))?;
+        fs::create_dir_all(&resolved_remote).map_err(|e| format!("创建本地文件夹失败: {}", e))?;
     } else {
         let sess_arc = pool.get_or_connect(opts)?;
         let sess = sess_arc.lock().map_err(|e| e.to_string())?;
         if let Ok(sftp) = sess.sftp() {
-            let _ = sftp.mkdir(Path::new(remote_dir), 0o755);
+            let _ = sftp.mkdir(Path::new(&resolved_remote), 0o755);
         }
     }
 
-    if let Ok(entries) = fs::read_dir(local_dir) {
+    if let Ok(entries) = fs::read_dir(&resolved_local) {
         for entry in entries.flatten() {
             if cancel_flag.load(Ordering::Relaxed) {
                 return Err("传输已取消".to_string());
             }
             let sub_local = entry.path().to_string_lossy().to_string();
             let file_name = entry.file_name().to_string_lossy().to_string();
-            let sub_remote = format!("{}/{}", remote_dir.trim_end_matches('/'), file_name);
+            let sub_remote = format!("{}/{}", resolved_remote.trim_end_matches('/'), file_name);
             let meta = entry.metadata().map_err(|e| e.to_string())?;
             if meta.is_dir() {
                 upload_dir_recursive(app, pool, opts, &sub_local, &sub_remote, task_id, cancel_flag.clone())?;
@@ -1266,24 +1272,50 @@ pub fn upload_file(
 ) -> Result<(), String> {
     use std::io::{Read, Write};
 
-    let local_meta = fs::metadata(local_path).map_err(|e| format!("读取本地文件失败: {}", e))?;
+    let resolved_remote = resolve_path_str(pool, opts, remote_path);
+    let resolved_local = resolve_path_str(pool, opts, local_path);
+
+    let local_meta = fs::metadata(&resolved_local).map_err(|e| format!("读取本地文件失败: {}", e))?;
     if local_meta.is_dir() {
-        return upload_dir_recursive(&app, pool, opts, local_path, remote_path, task_id, cancel_flag);
+        return upload_dir_recursive(&app, pool, opts, &resolved_local, &resolved_remote, task_id, cancel_flag);
     }
 
     let chunk_size = 64 * 1024; // 64KB
     let mut buf = vec![0u8; chunk_size];
 
     let mut local_file =
-        fs::File::open(local_path).map_err(|e| format!("打开本地源文件失败: {}", e))?;
+        fs::File::open(&resolved_local).map_err(|e| format!("打开本地源文件失败: {}", e))?;
     let total_size = local_meta.len();
 
     if opts.is_local {
-        if let Some(parent) = Path::new(remote_path).parent() {
+        // If source and destination are the exact same path, skip to avoid truncate
+        if let (Ok(can_src), Ok(can_dest)) = (
+            fs::canonicalize(&resolved_local),
+            fs::canonicalize(&resolved_remote),
+        ) {
+            if can_src == can_dest {
+                return Ok(());
+            }
+        }
+
+        if let Some(parent) = Path::new(&resolved_remote).parent() {
             let _ = fs::create_dir_all(parent);
         }
-        let mut f = fs::File::create(remote_path)
-            .map_err(|e| format!("创建本地目标文件失败: {}", e))?;
+        let mut f = match fs::File::create(&resolved_remote) {
+            Ok(file) => file,
+            Err(e) => {
+                let err_str = match e.raw_os_error() {
+                    Some(30) => {
+                        format!("无法在只读文件系统「{}」中写入。\n说明：macOS 根目录 (/) 为只读 APFS 镜像卷。请导航至您的主目录 (~) 或拥有写入权限的目录后再进行操作。", resolved_remote)
+                    }
+                    Some(13) => {
+                        format!("权限不足 (Permission Denied): 无法在目标目录「{}」中写入文件。请在终端提权 (sudo/root) 或导航至主目录 (~) 进行操作。", resolved_remote)
+                    }
+                    _ => format!("创建本地目标文件失败: {}", e),
+                };
+                return Err(err_str);
+            }
+        };
 
         let mut transferred: u64 = 0;
         let mut last_emit = std::time::Instant::now();
@@ -1349,17 +1381,17 @@ pub fn upload_file(
             }
         };
 
-        if let Some(parent) = Path::new(remote_path).parent() {
+        if let Some(parent) = Path::new(&resolved_remote).parent() {
             let _ = sftp.mkdir(parent, 0o755);
         }
 
-        let mut remote_file = match sftp.create(Path::new(remote_path)) {
+        let mut remote_file = match sftp.create(Path::new(&resolved_remote)) {
             Ok(file) => file,
             Err(e) => {
                 drop(sftp);
                 drop(sess);
                 pool.invalidate(&opts.session_id);
-                return Err(format!("创建远程目标文件失败: {} (目标路径: {})", e, remote_path));
+                return Err(format!("创建远程目标文件失败: {} (目标路径: {})", e, resolved_remote));
             }
         };
 
