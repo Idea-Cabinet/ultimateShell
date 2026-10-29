@@ -1179,6 +1179,9 @@ export function FileExplorer({
     e.stopPropagation();
   };
 
+  // Deduplication ref for drag-and-drop file upload
+  const recentUploadsRef = useRef<Map<string, number>>(new Map());
+
   const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -1187,10 +1190,15 @@ export function FileExplorer({
 
     const files = e.dataTransfer.files;
     if (files && files.length > 0) {
+      const now = Date.now();
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
         const localPath = (file as any).path;
         if (localPath) {
+          const lastTime = recentUploadsRef.current.get(localPath) || 0;
+          if (now - lastTime < 1000) continue;
+          recentUploadsRef.current.set(localPath, now);
+
           await transferManager.startUpload(
             session.id,
             session.title || "服务器",
@@ -1210,7 +1218,12 @@ export function FileExplorer({
     listen<{ paths: string[] }>("tauri://drag-drop", async (event) => {
       const paths = event.payload?.paths;
       if (paths && paths.length > 0) {
+        const now = Date.now();
         for (const localPath of paths) {
+          const lastTime = recentUploadsRef.current.get(localPath) || 0;
+          if (now - lastTime < 1000) continue;
+          recentUploadsRef.current.set(localPath, now);
+
           await transferManager.startUpload(
             session.id,
             session.title || "服务器",
@@ -1227,6 +1240,23 @@ export function FileExplorer({
       if (unlisten) unlisten();
     };
   }, [isOpen, session.id, session.title, currentPath]);
+
+  // Listen for file transfer completion to automatically refresh folder listing
+  useEffect(() => {
+    if (!isOpen) return;
+    let unlisten: (() => void) | null = null;
+    listen<{ task_id: string; status: string }>("file-transfer-status", (event) => {
+      if (event.payload?.status === "completed") {
+        loadDirectory(currentPath);
+      }
+    }).then((fn) => {
+      unlisten = fn;
+    });
+
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [isOpen, currentPath]);
 
   // Sorting columns
   const handleSort = (field: SortField) => {
@@ -1646,7 +1676,7 @@ export function FileExplorer({
                   <RotateCw className={`w-2.5 h-2.5 ${isTreeLoading ? "animate-spin text-[#007AFF]" : ""}`} />
                 </button>
               </div>
-              <div className="flex-1 overflow-y-auto px-1 pb-4">
+              <div className="flex-1 overflow-y-auto px-1 pb-6">
                 {isTreeLoading ? (
                   <div className="py-8 px-2 flex flex-col items-center justify-center text-center space-y-2 text-[var(--text-tertiary)]">
                     <RotateCw className="w-4 h-4 animate-spin text-[#007AFF]" />
@@ -1706,13 +1736,13 @@ export function FileExplorer({
             </div>
           )}
           {errorMsg ? (
-            <div className="flex-1 flex flex-col items-center justify-center py-16 px-6 text-center select-none">
-              <FolderOpen className="w-10 h-10 text-[var(--text-tertiary)] opacity-35 mb-3 stroke-1" />
-              <div className="text-[13px] font-medium text-[var(--text-secondary)]">{t("files.emptyTitle")}</div>
-              <div className="text-[11.5px] text-[var(--text-tertiary)] mt-1 max-w-xs leading-relaxed">
+            <div className="flex-1 flex flex-col items-center justify-center py-6 px-4 text-center select-none overflow-y-auto">
+              <FolderOpen className="w-8 h-8 text-[var(--text-tertiary)] opacity-35 mb-2 stroke-1" />
+              <div className="text-[12.5px] font-medium text-[var(--text-secondary)]">{t("files.emptyTitle")}</div>
+              <div className="text-[11px] text-[var(--text-tertiary)] mt-1 max-w-xs leading-relaxed">
                 {t("files.emptySubtitle")}
               </div>
-              <div className="flex items-center space-x-2 mt-4">
+              <div className="flex items-center space-x-2 mt-3 mb-2">
                 {parentPath && parentPath !== currentPath && (
                   <button
                     onClick={() => {
@@ -1793,7 +1823,7 @@ export function FileExplorer({
               </div>
 
               {/* Table Rows */}
-              <div className="flex-1 overflow-y-auto overflow-x-auto">
+              <div className="flex-1 overflow-y-auto overflow-x-auto pb-4">
                 {loading && filteredEntries.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-12 text-[var(--text-tertiary)] text-[12px]">
                     <RotateCw className="w-6 h-6 animate-spin text-[#007AFF] mb-2" />
@@ -1848,7 +1878,7 @@ export function FileExplorer({
       </div>
 
       {/* 3. Explorer Bottom Status Bar */}
-      <div className="h-[34px] min-h-[34px] flex-shrink-0 bg-[var(--bg-card)] border-t border-[var(--border-subtle)] px-3 py-1 flex items-center justify-between text-[11px] text-[var(--text-secondary)] select-none relative z-10">
+      <div className="h-9 min-h-[36px] flex-shrink-0 bg-[var(--bg-card)] border-t border-[var(--border-subtle)] px-3 pt-1.5 pb-1 flex items-center justify-between text-[11.5px] text-[var(--text-secondary)] select-none relative z-10 shadow-xs">
         <div className="flex items-center space-x-3 truncate">
           <span>
             {t("files.itemsCount", { total: totalCount, dirs: totalDirs, files: totalFiles })}

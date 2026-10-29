@@ -244,10 +244,11 @@ async fn fs_download_file(
     let cancel_flag = transfer_state.register(&task_id);
     let t_state = transfer_state.inner().clone();
     let tid = task_id.clone();
+    let app_clone = app.clone();
 
     tauri::async_runtime::spawn_blocking(move || {
         let res = sftp::download_file(
-            app,
+            app_clone.clone(),
             &pool,
             &opts,
             &remote_path,
@@ -255,6 +256,17 @@ async fn fs_download_file(
             &tid,
             cancel_flag,
         );
+        if let Err(ref e) = res {
+            eprintln!("[fs_download_file] 下载失败 ({}): {}", tid, e);
+            let _ = app_clone.emit(
+                "file-transfer-status",
+                crate::transfer::TransferStatusPayload {
+                    task_id: tid.clone(),
+                    status: "error".to_string(),
+                    error: Some(e.clone()),
+                },
+            );
+        }
         t_state.remove(&tid);
         res
     })
@@ -281,10 +293,11 @@ async fn fs_upload_file(
     let cancel_flag = transfer_state.register(&task_id);
     let t_state = transfer_state.inner().clone();
     let tid = task_id.clone();
+    let app_clone = app.clone();
 
     tauri::async_runtime::spawn_blocking(move || {
         let res = sftp::upload_file(
-            app,
+            app_clone.clone(),
             &pool,
             &opts,
             &local_path,
@@ -292,6 +305,17 @@ async fn fs_upload_file(
             &tid,
             cancel_flag,
         );
+        if let Err(ref e) = res {
+            eprintln!("[fs_upload_file] 上传失败 ({}): {}", tid, e);
+            let _ = app_clone.emit(
+                "file-transfer-status",
+                crate::transfer::TransferStatusPayload {
+                    task_id: tid.clone(),
+                    status: "error".to_string(),
+                    error: Some(e.clone()),
+                },
+            );
+        }
         t_state.remove(&tid);
         res
     })
