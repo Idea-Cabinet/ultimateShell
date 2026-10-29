@@ -997,10 +997,10 @@ function AppContent() {
                   ? "bg-amber-500/20 text-amber-400 border-amber-500/50 animate-pulse font-bold"
                   : "bg-[var(--hover-item)] text-[var(--text-secondary)] border-[var(--border-subtle)] hover:border-[var(--border-strong)]"
               }`}
-              title="本地 AI 安全隧道网关（外部 Agent 零密码操控服务器 · 三级本地审批）"
+              title={`本地 AI 双轨安全网关 (HTTP :${agentGatewayStatus?.port || 39281} | 原生 SSH :${agentGatewayStatus?.ssh_port || 2222}) · 零密码泄露与三级本地审批`}
             >
               <Bot className="w-3 h-3 text-purple-400" />
-              <span>AI 网关</span>
+              <span>AI 双轨网关</span>
               {agentGatewayStatus?.is_running && (
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
               )}

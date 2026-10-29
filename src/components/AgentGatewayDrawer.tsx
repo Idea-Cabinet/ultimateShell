@@ -39,6 +39,8 @@ export interface AuditLogEntry {
 export interface GatewayStatusPayload {
   is_running: boolean;
   port: number;
+  ssh_port: number;
+  ssh_running: boolean;
   token: string;
   policy: ApprovalPolicy;
   active_servers_count: number;
@@ -57,6 +59,8 @@ export const AgentGatewayDrawer: React.FC<Props> = ({ isOpen, onClose }) => {
   const [copiedToken, setCopiedToken] = useState(false);
   const [copiedSkill, setCopiedSkill] = useState(false);
   const [copiedMcp, setCopiedMcp] = useState(false);
+  const [copiedSshCmd, setCopiedSshCmd] = useState(false);
+  const [copiedSshConfig, setCopiedSshConfig] = useState(false);
   const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"logs" | "guide">("logs");
   const [filterRisk, setFilterRisk] = useState<string>("all");
@@ -144,56 +148,37 @@ export const AgentGatewayDrawer: React.FC<Props> = ({ isOpen, onClose }) => {
 
   const skillMarkdown = useMemo(() => {
     const port = status?.port || 39281;
+    const sshPort = status?.ssh_port || 2222;
     const token = status?.token || "<YOUR_TOKEN>";
-    return `# UltimateShell AI Agent Security Gateway Skill
+    return `# UltimateShell AI Agent Security Gateway Skill (双轨制)
 
 ## 概述
-你已连接到用户的本地 UltimateShell 安全代理网关。
+你已连接到用户的本地 UltimateShell AI 安全代理双轨网关。
 你可以安全地代表用户对服务器执行巡检、状态读取和维护操作。
 **所有服务器密码和 SSH 私钥均严格保存在用户本地 Rust 安全保险库中，外部 Agent 完全无需也无法读取密码或密钥。**
 
-## 网关基础连接信息
-- 本地地址: \`http://127.0.0.1:${port}\`
+## 双轨连接规范
+
+### 轨道 1：原生 SSH 协议直接连接 (适用于 Claude Code CLI, 终端脚本与命令行 Agent)
+- 本地地址: \`127.0.0.1\`
+- SSH 端口: \`${sshPort}\`
+- 命令行直接执行示例:
+  \`\`\`bash
+  ssh -p ${sshPort} <目标服务器名称或Host>@127.0.0.1 "<command>"
+  \`\`\`
+- 说明:
+  - 回环本地连接无需输入真实服务器私钥或密码。
+  - 遇到高危或写操作时，SSH 终端将实时提示 \`Waiting for user approval...\`，并在桌面弹窗批准后自动继续执行。
+
+### 轨道 2：HTTP / MCP API 工具调用 (适用于 Claude Desktop, Cursor, Web Agents)
+- 本地接口: \`http://127.0.0.1:${port}\`
 - 鉴权头: \`Authorization: Bearer ${token}\`
-
-## 可用 API 工具
-
-### 1. 获取用户所有服务器列表 (list_servers)
-- 接口: \`GET http://127.0.0.1:${port}/api/servers\`
-- 返回: 当前所有可用主机名、状态、活跃终端标签。
-
-### 2. 执行终端命令 (exec_command)
-- 接口: \`POST http://127.0.0.1:${port}/api/exec\`
-- 请求体:
-  \`\`\`json
-  {
-    "server": "服务器名称或Host",
-    "command": "nginx -t",
-    "agent_name": "Antigravity/Claude"
-  }
-  \`\`\`
-- 审批规则:
-  - 只读命令 (如 \`ps\`, \`cat\`, \`nginx -t\`) 自动放行。
-  - 增删改与重启等命令将由用户根据当前策略自动或弹窗批准。
-  - 用户批准前命令挂起等待；用户可在客户端界面点击批准或拒绝。
-
-### 3. 读取远程文件内容 (read_file)
-- 接口: \`POST http://127.0.0.1:${port}/api/read_file\`
-- 请求体:
-  \`\`\`json
-  {
-    "server": "服务器名称",
-    "path": "/etc/nginx/nginx.conf"
-  }
-  \`\`\`
-
-## 推荐工作流 (用户问法示例)
-当用户对你说: "帮我看看xxx服务器的nginx是否正常"
-1. 调用 \`GET /api/servers\` 匹配用户提到的服务器。
-2. 调用 \`POST /api/exec\` 执行 \`systemctl status nginx\` 或 \`nginx -t\`。
-3. 检查返回的 stdout/stderr 结果，提炼出排查结论并回复用户。
+- 可用工具接口:
+  - 获取主机: \`GET /api/servers\`
+  - 执行命令: \`POST /api/exec\` (参数: \`server\`, \`command\`, \`agent_name\`)
+  - 读取文件: \`POST /api/read_file\` (参数: \`server\`, \`path\`)
 `;
-  }, [status?.port, status?.token]);
+  }, [status?.port, status?.ssh_port, status?.token]);
 
   const mcpConfigJson = useMemo(() => {
     const port = status?.port || 39281;
@@ -247,13 +232,19 @@ export const AgentGatewayDrawer: React.FC<Props> = ({ isOpen, onClose }) => {
             <div>
               <div className="flex items-center space-x-2">
                 <h2 className="text-[14px] font-semibold tracking-tight">
-                  本地 AI 安全隧道网关
+                  本地 AI 双轨安全网关
                 </h2>
                 {status?.is_running ? (
-                  <span className="flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] bg-emerald-500/15 text-emerald-500 border border-emerald-500/30 font-medium">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                    <span>监听中 :{status.port}</span>
-                  </span>
+                  <div className="flex items-center space-x-1.5">
+                    <span className="flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] bg-emerald-500/15 text-emerald-500 border border-emerald-500/30 font-medium">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      <span>HTTP :{status.port}</span>
+                    </span>
+                    <span className="flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] bg-blue-500/15 text-blue-500 border border-blue-500/30 font-medium">
+                      <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                      <span>原生 SSH :{status.ssh_port || 2222}</span>
+                    </span>
+                  </div>
                 ) : (
                   <span className="px-2 py-0.5 rounded-full text-[10px] bg-red-500/15 text-red-500 border border-red-500/30">
                     已暂停
@@ -544,12 +535,65 @@ export const AgentGatewayDrawer: React.FC<Props> = ({ isOpen, onClose }) => {
           ) : (
             /* Guide Tab */
             <div className="space-y-4 text-[12px]">
-              {/* Token & Endpoint Card */}
+              {/* Native SSH Gateway Card (Track 1) */}
+              <div className="p-3.5 rounded-xl border border-blue-500/30 bg-blue-500/5 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-[12.5px] flex items-center space-x-1.5 text-blue-400">
+                    <Terminal className="w-4 h-4 text-blue-400" />
+                    <span>轨道 1：原生 SSH 命令行直连 (推荐 Claude Code / CLI)</span>
+                  </span>
+                  <div className="flex items-center space-x-2">
+                    <button
+                      onClick={() =>
+                        copyToClipboard(
+                          `ssh -p ${status?.ssh_port || 2222} <server>@127.0.0.1 "systemctl status nginx"`,
+                          setCopiedSshCmd
+                        )
+                      }
+                      className="flex items-center space-x-1 px-2 py-0.5 rounded text-[11px] bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 transition-all"
+                    >
+                      {copiedSshCmd ? (
+                        <Check className="w-3 h-3 text-emerald-500" />
+                      ) : (
+                        <Copy className="w-3 h-3" />
+                      )}
+                      <span>{copiedSshCmd ? "已复制命令" : "复制 SSH 命令"}</span>
+                    </button>
+                    <button
+                      onClick={() =>
+                        copyToClipboard(
+                          `# UltimateShell 本地 AI 原生 SSH 堡垒配置 (~/.ssh/config)\nHost ai-*\n  HostName 127.0.0.1\n  Port ${status?.ssh_port || 2222}\n  UserKnownHostsFile /dev/null\n  StrictHostKeyChecking no\n`,
+                          setCopiedSshConfig
+                        )
+                      }
+                      className="flex items-center space-x-1 px-2 py-0.5 rounded text-[11px] bg-[var(--hover-item)] text-[var(--text-primary)] hover:border-[var(--border-strong)] border border-[var(--border-subtle)]"
+                    >
+                      {copiedSshConfig ? (
+                        <Check className="w-3 h-3 text-emerald-500" />
+                      ) : (
+                        <Copy className="w-3 h-3" />
+                      )}
+                      <span>{copiedSshConfig ? "已复制" : "复制 .ssh/config"}</span>
+                    </button>
+                  </div>
+                </div>
+
+                <p className="text-[11px] text-[var(--text-secondary)] leading-relaxed">
+                  无需任何 HTTP 客户端。AI Agent 只需在终端中敲原生 \`ssh\`，由本地网关截获并执行三级安全审批，凭证零泄露：
+                </p>
+
+                <div className="bg-[var(--bg-terminal,rgba(0,0,0,0.5))] rounded-lg p-2.5 font-mono text-[11px] text-emerald-400 border border-[var(--border-subtle)]">
+                  <div className="text-gray-500 mb-1"># 终端直连示例 (端口: {status?.ssh_port || 2222})</div>
+                  <div>$ ssh -p {status?.ssh_port || 2222} 目标服务器@127.0.0.1 "systemctl status nginx"</div>
+                </div>
+              </div>
+
+              {/* Token & Endpoint Card (Track 2) */}
               <div className="p-3.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-card)] space-y-2.5">
                 <div className="flex items-center justify-between">
                   <span className="font-semibold text-[12.5px] flex items-center space-x-1.5">
                     <Lock className="w-3.5 h-3.5 text-purple-400" />
-                    <span>网关本地认证凭证</span>
+                    <span>轨道 2：HTTP / MCP API 本地认证凭证</span>
                   </span>
                   <button
                     onClick={() =>
@@ -571,11 +615,7 @@ export const AgentGatewayDrawer: React.FC<Props> = ({ isOpen, onClose }) => {
                 </div>
 
                 <p className="text-[11px] text-[var(--text-tertiary)] leading-relaxed">
-                  本凭证仅限本机回环网络 (\`127.0.0.1\`) 访问使用。外部 Agent
-                  通过本网关调用命令时，由 UltimateShell 调度真实 SSH 连接，
-                  <strong>
-                    您的主机密码、SSH 私钥绝对不会传递给 AI Agent。
-                  </strong>
+                  本地接口: \`http://127.0.0.1:{status?.port || 39281}\` · 仅限本机回环访问，用于支持 Tool Calling 或 MCP 的外部 AI Agent。
                 </p>
               </div>
 

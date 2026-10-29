@@ -31,6 +31,9 @@ ssh2 = "0.9.6"
 chrono = "0.4.45"
 tauri-plugin-dialog = "2.8.3"
 tiny_http = "0.12.0"
+russh = "0.65.0"
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "net", "sync", "io-util", "time"] }
+rand = "0.10.3"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

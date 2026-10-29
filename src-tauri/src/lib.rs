@@ -747,6 +747,8 @@ fn agent_get_gateway_status(
     Ok(GatewayStatusPayload {
         is_running: gateway.is_running.load(std::sync::atomic::Ordering::SeqCst),
         port: gateway.port,
+        ssh_port: gateway.ssh_port.load(std::sync::atomic::Ordering::SeqCst),
+        ssh_running: gateway.ssh_running.load(std::sync::atomic::Ordering::SeqCst),
         token: gateway.token.clone(),
         policy,
         active_servers_count: pty_sessions_count,

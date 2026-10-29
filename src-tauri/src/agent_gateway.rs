@@ -2,12 +2,18 @@ use chrono::Local;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::Read;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 use tiny_http::{Header, Method, Response, Server, StatusCode};
+
+use russh::server::{
+    Auth as RusshAuth, ChannelOpenHandle, Handler as RusshHandler, Msg,
+    Server as RusshServer, Session as RusshSession, VerifiedPublicKey,
+};
+use russh::{Channel, ChannelId};
 
 use crate::hosts::load_hosts;
 use crate::pty::{PtyManager, SpawnOptions};
@@ -59,6 +65,8 @@ pub struct ApprovalRequestPayload {
 pub struct GatewayStatusPayload {
     pub is_running: bool,
     pub port: u16,
+    pub ssh_port: u16,
+    pub ssh_running: bool,
     pub token: String,
     pub policy: ApprovalPolicy,
     pub active_servers_count: usize,
@@ -220,6 +228,8 @@ pub fn redact_sensitive_output(raw: &str) -> String {
 #[derive(Clone)]
 pub struct AgentGateway {
     pub port: u16,
+    pub ssh_port: Arc<AtomicU16>,
+    pub ssh_running: Arc<AtomicBool>,
     pub token: String,
     pub policy: Arc<Mutex<ApprovalPolicy>>,
     pub is_running: Arc<AtomicBool>,
@@ -235,9 +245,13 @@ impl AgentGateway {
         // Generate a random bearer token for this app session
         let token = format!("us_gate_{}", uuid::Uuid::new_v4().to_string().replace('-', ""));
         let port = 39281;
+        let ssh_port = Arc::new(AtomicU16::new(2222));
+        let ssh_running = Arc::new(AtomicBool::new(false));
 
         Self {
             port,
+            ssh_port,
+            ssh_running,
             token,
             policy: Arc::new(Mutex::new(ApprovalPolicy::Smart)), // Default: "帮我批准"
             is_running: Arc::new(AtomicBool::new(false)),
@@ -257,40 +271,98 @@ impl AgentGateway {
         let gateway = self.clone();
         gateway.is_running.store(true, Ordering::SeqCst);
 
+        // 1. Start HTTP Gateway thread (for REST & MCP)
+        let gw_http = gateway.clone();
         thread::spawn(move || {
-            let addr = format!("127.0.0.1:{}", gateway.port);
+            let addr = format!("127.0.0.1:{}", gw_http.port);
             let server = match Server::http(&addr) {
                 Ok(s) => s,
                 Err(e) => {
-                    eprintln!("[AgentGateway] 无法绑定本地网关端口 {}: {}", addr, e);
-                    gateway.is_running.store(false, Ordering::SeqCst);
+                    eprintln!("[AgentGateway] 无法绑定本地 HTTP 网关端口 {}: {}", addr, e);
+                    gw_http.is_running.store(false, Ordering::SeqCst);
                     return;
                 }
             };
 
-            println!("[AgentGateway] 本地 AI 安全网关已启动在 http://{}", addr);
+            println!("[AgentGateway] 本地 AI HTTP/MCP 网关已启动在 http://{}", addr);
 
-            while gateway.is_running.load(Ordering::SeqCst) {
+            while gw_http.is_running.load(Ordering::SeqCst) {
                 match server.recv() {
                     Ok(request) => {
-                        let gw_clone = gateway.clone();
+                        let gw_clone = gw_http.clone();
                         thread::spawn(move || {
                             gw_clone.handle_http_request(request);
                         });
                     }
                     Err(e) => {
-                        if gateway.is_running.load(Ordering::SeqCst) {
-                            eprintln!("[AgentGateway] 接收请求异常: {}", e);
+                        if gw_http.is_running.load(Ordering::SeqCst) {
+                            eprintln!("[AgentGateway] HTTP 接收请求异常: {}", e);
                         }
                         break;
                     }
                 }
             }
         });
+
+        // 2. Start Native SSH Gateway thread (for native `ssh -p 2222 ...`)
+        let gw_ssh = gateway.clone();
+        thread::spawn(move || {
+            let rt = match tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("[AgentGateway] 无法创建 Tokio 异步运行时: {}", e);
+                    return;
+                }
+            };
+
+            rt.block_on(async move {
+                let preferred_port = 2222;
+                let fallback_port = 39222;
+
+                let (bound_port, listener) = match tokio::net::TcpListener::bind(("127.0.0.1", preferred_port)).await {
+                    Ok(l) => (preferred_port, l),
+                    Err(_) => match tokio::net::TcpListener::bind(("127.0.0.1", fallback_port)).await {
+                        Ok(l) => (fallback_port, l),
+                        Err(e) => {
+                            eprintln!("[AgentGateway] 无法绑定本地 SSH 网关端口 2222 或 39222: {}", e);
+                            return;
+                        }
+                    },
+                };
+
+                gw_ssh.ssh_port.store(bound_port, Ordering::SeqCst);
+                gw_ssh.ssh_running.store(true, Ordering::SeqCst);
+                println!("[AgentGateway] 本地 AI 原生 SSH 堡垒已启动在 127.0.0.1:{}", bound_port);
+
+                let config = russh::server::Config {
+                    inactivity_timeout: Some(std::time::Duration::from_secs(3600)),
+                    auth_rejection_time: std::time::Duration::from_secs(0),
+                    auth_rejection_time_initial: Some(std::time::Duration::from_secs(0)),
+                    keys: vec![
+                        russh::keys::PrivateKey::random(&mut rand::rng(), russh::keys::Algorithm::Ed25519)
+                            .unwrap(),
+                    ],
+                    ..Default::default()
+                };
+                let config = Arc::new(config);
+
+                let mut server = AgentSshServer {
+                    gateway: gw_ssh.clone(),
+                };
+
+                let running_server = server.run_on_socket(config, &listener);
+                let _ = running_server.await;
+                gw_ssh.ssh_running.store(false, Ordering::SeqCst);
+            });
+        });
     }
 
     pub fn stop_server(&self) {
         self.is_running.store(false, Ordering::SeqCst);
+        self.ssh_running.store(false, Ordering::SeqCst);
     }
 
     fn check_auth(&self, req: &tiny_http::Request) -> bool {
@@ -871,6 +943,270 @@ impl AgentGateway {
         let exit_code = channel.exit_status().unwrap_or(0);
 
         Ok((exit_code, stdout, stderr))
+    }
+}
+
+#[derive(Clone)]
+pub struct AgentSshServer {
+    pub gateway: AgentGateway,
+}
+
+impl RusshServer for AgentSshServer {
+    type Handler = AgentSshHandler;
+
+    fn new_client(&mut self, _: Option<std::net::SocketAddr>) -> Self::Handler {
+        AgentSshHandler {
+            gateway: self.gateway.clone(),
+            target_user: String::new(),
+        }
+    }
+}
+
+pub struct AgentSshHandler {
+    pub gateway: AgentGateway,
+    pub target_user: String,
+}
+
+impl RusshHandler for AgentSshHandler {
+    type Error = russh::Error;
+
+    async fn channel_open_session(
+        &mut self,
+        _channel: Channel<Msg>,
+        reply: ChannelOpenHandle,
+        _session: &mut RusshSession,
+    ) -> Result<(), Self::Error> {
+        reply.accept().await;
+        Ok(())
+    }
+
+    async fn auth_none(&mut self, user: &str) -> Result<RusshAuth, Self::Error> {
+        self.target_user = user.to_string();
+        Ok(RusshAuth::Accept)
+    }
+
+    async fn auth_password(&mut self, user: &str, _password: &str) -> Result<RusshAuth, Self::Error> {
+        self.target_user = user.to_string();
+        Ok(RusshAuth::Accept)
+    }
+
+    async fn auth_publickey(&mut self, user: &str, _key: VerifiedPublicKey<'_>) -> Result<RusshAuth, Self::Error> {
+        self.target_user = user.to_string();
+        Ok(RusshAuth::Accept)
+    }
+
+    async fn pty_request(
+        &mut self,
+        channel: ChannelId,
+        _term: &str,
+        _col_width: u32,
+        _row_height: u32,
+        _pix_width: u32,
+        _pix_height: u32,
+        _modes: &[(russh::Pty, u32)],
+        session: &mut RusshSession,
+    ) -> Result<(), Self::Error> {
+        let _ = session.channel_success(channel);
+        Ok(())
+    }
+
+    async fn shell_request(
+        &mut self,
+        channel: ChannelId,
+        session: &mut RusshSession,
+    ) -> Result<(), Self::Error> {
+        let _ = session.channel_success(channel);
+        let banner = format!(
+            "\r\n\x1b[1;36m=====================================================\x1b[0m\r\n\
+            \x1b[1;32m   UltimateShell 本地 AI 原生 SSH 堡垒机网关   \x1b[0m\r\n\
+            \x1b[1;36m=====================================================\x1b[0m\r\n\
+            当前指定目标主机: \x1b[1m{}\x1b[0m\r\n\
+            安全模式: 本地凭证绝对隔离 · 三级策略拦截\r\n\r\n\
+            \x1b[33m提示:\x1b[0m 建议 AI Agent 使用非交互式单行执行命令:\r\n\
+            $ \x1b[32mssh -p {} {}@127.0.0.1 \"<command>\"\x1b[0m\r\n\r\n$ ",
+            if self.target_user.is_empty() { "default" } else { &self.target_user },
+            self.gateway.ssh_port.load(Ordering::SeqCst),
+            if self.target_user.is_empty() { "server_name" } else { &self.target_user }
+        );
+        let _ = session.data(channel, banner.into_bytes());
+        Ok(())
+    }
+
+    async fn exec_request(
+        &mut self,
+        channel: ChannelId,
+        data: &[u8],
+        session: &mut RusshSession,
+    ) -> Result<(), Self::Error> {
+        let cmd = String::from_utf8_lossy(data).trim().to_string();
+        if cmd.is_empty() {
+            let _ = session.channel_failure(channel);
+            return Ok(());
+        }
+        let _ = session.channel_success(channel);
+
+        // Determine target server name
+        let target = if self.target_user.is_empty() || self.target_user == "root" {
+            // Check if command has a server prefix like "server: cmd" or "server> cmd"
+            if let Some(pos) = cmd.find(": ") {
+                let s = cmd[..pos].trim();
+                let actual_cmd = cmd[pos + 2..].trim();
+                if !s.contains(' ') && !actual_cmd.is_empty() {
+                    s.to_string()
+                } else {
+                    self.target_user.clone()
+                }
+            } else {
+                self.target_user.clone()
+            }
+        } else {
+            self.target_user.clone()
+        };
+
+        let agent_name = "Native SSH Client".to_string();
+        let risk = classify_command(&cmd);
+        let current_policy = *self.gateway.policy.lock().unwrap();
+
+        // Approval Check
+        let needs_approval = needs_user_approval(risk, current_policy);
+        let approved_by_user;
+
+        if !needs_approval {
+            approved_by_user = true;
+        } else {
+            // Send waiting prompt to SSH stderr
+            let notice = format!(
+                "\r\n\x1b[33m[UltimateShell Gateway]\x1b[0m ⚠️ 命令涉及敏感/写操作，已挂起等待客户端审批...\r\n\
+                 \x1b[33m[UltimateShell Gateway]\x1b[0m 目标服务器: {}\r\n\
+                 \x1b[33m[UltimateShell Gateway]\x1b[0m 执行命令: {}\r\n\
+                 \x1b[33m[UltimateShell Gateway]\x1b[0m 风险等级: {:?} (策略: {:?})\r\n\
+                 \x1b[33m[UltimateShell Gateway]\x1b[0m 请在 UltimateShell 桌面弹窗中点击 [批准] (60s超时)...\r\n\r\n",
+                target, cmd, risk, current_policy
+            );
+            let _ = session.extended_data(channel, 1, notice.into_bytes());
+
+            let approval_id = uuid::Uuid::new_v4().to_string();
+            let (tx, rx) = mpsc::channel();
+            {
+                let mut pending = self.gateway.pending_approvals.lock().unwrap();
+                pending.insert(approval_id.clone(), tx);
+            }
+
+            let req_payload = ApprovalRequestPayload {
+                id: approval_id.clone(),
+                server_target: target.clone(),
+                command: cmd.clone(),
+                risk_level: risk,
+                policy: current_policy,
+                timestamp: Local::now().format("%H:%M:%S").to_string(),
+            };
+            let _ = self.gateway.app_handle.emit("agent_approval_needed", req_payload);
+
+            // Wait for GUI click with 60s timeout
+            approved_by_user = match rx.recv_timeout(Duration::from_secs(60)) {
+                Ok(val) => val,
+                Err(_) => {
+                    let mut pending = self.gateway.pending_approvals.lock().unwrap();
+                    pending.remove(&approval_id);
+                    false
+                }
+            };
+        }
+
+        if !approved_by_user {
+            let reject_msg = "\r\n\x1b[31m[UltimateShell Gateway] ❌ 操作已被用户拒绝或审批超时。\x1b[0m\r\n";
+            let _ = session.extended_data(channel, 1, reject_msg.as_bytes().to_vec());
+            let _ = session.exit_status_request(channel, 1);
+            let _ = session.eof(channel);
+            let _ = session.close(channel);
+
+            self.gateway.record_audit_log(AuditLogEntry {
+                id: uuid::Uuid::new_v4().to_string(),
+                timestamp: Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+                agent_name,
+                server_target: target,
+                command: cmd,
+                risk_level: risk,
+                policy_applied: current_policy,
+                approved_by_user: false,
+                status: "denied".to_string(),
+                exit_code: Some(1),
+                output_snippet: Some("操作已被用户拒绝或审批超时".to_string()),
+                duration_ms: 0,
+            });
+            return Ok(());
+        }
+
+        let notice_exec = "\x1b[32m[UltimateShell Gateway] ✅ 审批通过，正在通过安全通道执行...\x1b[0m\r\n";
+        let _ = session.extended_data(channel, 1, notice_exec.as_bytes().to_vec());
+
+        let start_time = Instant::now();
+        let exec_res = self.gateway.execute_on_target(&target, &cmd);
+        let duration_ms = start_time.elapsed().as_millis() as u64;
+
+        match exec_res {
+            Ok((exit_code, stdout, stderr)) => {
+                let redacted_stdout = redact_sensitive_output(&stdout);
+                let redacted_stderr = redact_sensitive_output(&stderr);
+
+                if !redacted_stdout.is_empty() {
+                    let _ = session.data(channel, redacted_stdout.as_bytes().to_vec());
+                }
+                if !redacted_stderr.is_empty() {
+                    let _ = session.extended_data(channel, 1, redacted_stderr.as_bytes().to_vec());
+                }
+                let _ = session.exit_status_request(channel, exit_code as u32);
+                let _ = session.eof(channel);
+                let _ = session.close(channel);
+
+                let snippet = if !redacted_stdout.is_empty() {
+                    Some(redacted_stdout.chars().take(500).collect())
+                } else if !redacted_stderr.is_empty() {
+                    Some(redacted_stderr.chars().take(500).collect())
+                } else {
+                    None
+                };
+
+                self.gateway.record_audit_log(AuditLogEntry {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    timestamp: Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+                    agent_name,
+                    server_target: target,
+                    command: cmd,
+                    risk_level: risk,
+                    policy_applied: current_policy,
+                    approved_by_user,
+                    status: if exit_code == 0 { "success".to_string() } else { "error".to_string() },
+                    exit_code: Some(exit_code),
+                    output_snippet: snippet,
+                    duration_ms,
+                });
+            }
+            Err(e) => {
+                let err_msg = format!("\r\n\x1b[31m[UltimateShell Gateway] 执行错误: {}\x1b[0m\r\n", e);
+                let _ = session.extended_data(channel, 1, err_msg.as_bytes().to_vec());
+                let _ = session.exit_status_request(channel, 1);
+                let _ = session.eof(channel);
+                let _ = session.close(channel);
+
+                self.gateway.record_audit_log(AuditLogEntry {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    timestamp: Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+                    agent_name,
+                    server_target: target,
+                    command: cmd,
+                    risk_level: risk,
+                    policy_applied: current_policy,
+                    approved_by_user,
+                    status: "failed".to_string(),
+                    exit_code: Some(1),
+                    output_snippet: Some(e),
+                    duration_ms,
+                });
+            }
+        }
+
+        Ok(())
     }
 }
 
