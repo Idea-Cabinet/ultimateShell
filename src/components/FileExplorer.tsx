@@ -1580,7 +1580,7 @@ export function FileExplorer({
                     >
                       {crumb.label}
                     </span>
-                    {idx < breadcrumbs.length - 1 && (
+                    {idx < breadcrumbs.length - 1 && crumb.label !== "/" && (
                       <span className="text-[var(--text-tertiary)] text-[10px]">/</span>
                     )}
                   </div>
@@ -1967,7 +1967,7 @@ export function FileExplorer({
             style={{
               position: "fixed",
               left: `${Math.max(10, Math.min(contextMenu.x, window.innerWidth - 210))}px`,
-              top: `${Math.max(10, Math.min(contextMenu.y, window.innerHeight - 280))}px`,
+              top: `${Math.max(10, Math.min(contextMenu.y, window.innerHeight - 390))}px`,
               zIndex: 9999,
             }}
             className="w-48 bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-lg shadow-xl py-1 text-[12px] apple-vibrancy-popover animate-in fade-in zoom-in-95 duration-100 select-none"
