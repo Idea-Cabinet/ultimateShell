@@ -9,6 +9,7 @@ import { listen } from "@tauri-apps/api/event";
 import { TabSession } from "../types";
 import { ResolvedTheme } from "../hooks/useTheme";
 import { AppSettings } from "../hooks/useAppSettings";
+import { useFileDrop } from "../hooks/useFileDrop";
 import { useTransferManager } from "../context/TransferContext";
 import {
   Search,
@@ -89,104 +90,17 @@ export const TerminalView: React.FC<Props> = ({
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const onBroadcastDataRef = useRef(onBroadcastData);
 
-  // Drag and Drop Files handling: Directly upload to terminal cwd (FinalShell style, no prompt)
-  const [isDragOver, setIsDragOver] = useState(false);
-  const dragCounterRef = useRef(0);
-  const recentDropRef = useRef(0);
-
-  const resolveTargetCwd = useCallback(async (): Promise<string> => {
-    try {
-      const cwd = await invoke<string>("fs_get_terminal_cwd", { sessionId: session.id });
-      if (cwd && cwd.trim() && cwd.trim() !== "/") {
-        return cwd.trim();
-      }
-    } catch {
-      // ignore
+  const { isDragOver, error: dropError, clearError: clearDropError } = useFileDrop(containerRef, isActive, async (paths) => {
+    let targetCwd = transferManager.directories[session.id]?.path;
+    if (!targetCwd) {
+      targetCwd = await invoke<string>("fs_get_terminal_cwd", { sessionId: session.id });
+      transferManager.followTerminalDirectory(session.id, targetCwd);
     }
-    return session.isLocal ? "~" : "/root";
-  }, [session.id, session.isLocal]);
-
-  const handleTriggerDrop = useCallback(async (rawPaths: string[]) => {
-    if (!rawPaths || rawPaths.length === 0) return;
-    const now = Date.now();
-    if (now - recentDropRef.current < 600) return;
-    recentDropRef.current = now;
-
-    const targetCwd = await resolveTargetCwd();
-    for (const localPath of rawPaths) {
-      transferManager.startUpload(
-        session.id,
-        session.title || (session.isLocal ? "本地终端" : "远程服务器"),
-        localPath,
-        targetCwd
-      );
-    }
-  }, [resolveTargetCwd, session.id, session.title, session.isLocal, transferManager]);
-
-  // HTML5 Drag Events for visual feedback
-  const handleDragEnter = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    dragCounterRef.current += 1;
-    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
-      setIsDragOver(true);
-    }
-  };
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-  };
-
-  const handleDragLeave = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    dragCounterRef.current -= 1;
-    if (dragCounterRef.current <= 0) {
-      setIsDragOver(false);
-      dragCounterRef.current = 0;
-    }
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragOver(false);
-    dragCounterRef.current = 0;
-
-    const files = e.dataTransfer.files;
-    const extractedPaths: string[] = [];
-    if (files && files.length > 0) {
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        const p = (file as any).path;
-        if (p) {
-          extractedPaths.push(p);
-        }
-      }
-    }
-    if (extractedPaths.length > 0) {
-      handleTriggerDrop(extractedPaths);
-    }
-  };
-
-  // Tauri native drag-drop listener for macOS WebKit
-  useEffect(() => {
-    if (!isActive) return;
-    let unlisten: (() => void) | null = null;
-    listen<{ paths: string[] }>("tauri://drag-drop", (event) => {
-      const paths = event.payload?.paths;
-      if (paths && paths.length > 0) {
-        handleTriggerDrop(paths);
-      }
-    }).then((un) => {
-      unlisten = un;
-    });
-
-    return () => {
-      if (unlisten) unlisten();
-    };
-  }, [isActive, handleTriggerDrop]);
+    if (!targetCwd || (!targetCwd.startsWith("/") && targetCwd !== "~")) throw new Error("无法确认终端当前目录，已停止上传。请在文件列表中选择目标目录后上传。");
+    await Promise.all(paths.map(localPath => transferManager.startUpload(
+      session.id, session.title, localPath, targetCwd!,
+    )));
+  });
 
   useEffect(() => {
     onBroadcastDataRef.current = onBroadcastData;
@@ -484,12 +398,12 @@ export const TerminalView: React.FC<Props> = ({
 
   return (
     <div
-      onDragEnter={handleDragEnter}
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
       className={`relative w-full h-full ${isActive ? "block" : "hidden"}`}
     >
+      {dropError && <div role="alert" className="absolute bottom-2 left-2 right-2 z-40 rounded-lg border border-orange-400 bg-[var(--bg-card)] p-3 text-xs text-[var(--text-primary)] shadow-md">
+        <button onClick={clearDropError} className="float-right ml-2" aria-label="关闭上传错误">×</button>
+        {dropError}
+      </div>}
       {/* Drag & Drop File Upload Overlay */}
       {isDragOver && (
         <div className="absolute inset-0 z-40 bg-[#007AFF]/12 backdrop-blur-[2px] border-2 border-dashed border-[#007AFF] rounded-lg m-2 flex flex-col items-center justify-center space-y-2 pointer-events-none animate-in fade-in duration-100 select-none">
@@ -497,7 +411,7 @@ export const TerminalView: React.FC<Props> = ({
             <Upload className="w-6 h-6" />
           </div>
           <div className="text-[14px] font-semibold text-[#007AFF]">
-            松开鼠标立即上传至终端工作目录
+            松开鼠标上传至文件树当前目录
           </div>
         </div>
       )}

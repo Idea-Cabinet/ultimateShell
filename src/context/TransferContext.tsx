@@ -1,10 +1,14 @@
-import React, { createContext, useContext, useState, useEffect, useRef } from "react";
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { followTerminalDirectory as followDirectory, SessionDirectory } from "../utils/sessionDirectory";
 import { TransferTask } from "../types";
 
 interface TransferContextValue {
   tasks: TransferTask[];
+  directories: Record<string, SessionDirectory>;
+  setDirectory: (sessionId: string, path: string) => void;
+  followTerminalDirectory: (sessionId: string, path: string) => void;
   isOpen: boolean;
   setIsOpen: (open: boolean) => void;
   isCollapsed: boolean;
@@ -52,10 +56,34 @@ export const TransferProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return [];
   });
 
+  const [directories, setDirectories] = useState<Record<string, SessionDirectory>>({});
+  const setDirectory = useCallback((sessionId: string, path: string) => {
+    setDirectories(prev => prev[sessionId]?.path === path ? prev : {
+      ...prev, [sessionId]: { ...prev[sessionId], path },
+    });
+  }, []);
+  const followTerminalDirectory = useCallback((sessionId: string, path: string) => {
+    setDirectories(prev => {
+      const next = followDirectory(prev[sessionId], path);
+      return !next || next === prev[sessionId] ? prev : { ...prev, [sessionId]: next };
+    });
+  }, []);
   const [isOpen, setIsOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const tasksRef = useRef(tasks);
   tasksRef.current = tasks;
+
+  const uploadsRef = useRef(new Map<string, Promise<string>>());
+  const cancelledRef = useRef(new Set<string>());
+  const queueRef = useRef<{ running: number; jobs: (() => Promise<void>)[] }>({ running: 0, jobs: [] });
+  const pumpUploads = () => {
+    const queue = queueRef.current;
+    while (queue.running < 2 && queue.jobs.length) {
+      const job = queue.jobs.shift()!;
+      queue.running++;
+      void job().finally(() => { queue.running--; pumpUploads(); });
+    }
+  };
 
   // Persist tasks to localStorage
   useEffect(() => {
@@ -77,7 +105,7 @@ export const TransferProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const { task_id, transferred, total, speed } = event.payload;
         setTasks((prev) =>
           prev.map((t) => {
-            if (t.id === task_id) {
+            if (t.id === task_id && (t.status === "pending" || t.status === "transferring")) {
               const progress = total > 0 ? Math.min(100, Math.round((transferred / total) * 100)) : 0;
               return {
                 ...t,
@@ -107,7 +135,7 @@ export const TransferProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             if (t.id === task_id) {
               return {
                 ...t,
-                status: status as any,
+                status: t.status === "cancelled" ? "cancelled" : status as TransferTask["status"],
                 errorMsg: error,
                 speed: 0,
                 progress: status === "completed" ? 100 : t.progress,
@@ -193,7 +221,7 @@ export const TransferProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }).catch((err) => {
       setTasks((prev) =>
         prev.map((t) =>
-          t.id === taskId
+          t.id === taskId && t.status !== "cancelled"
             ? {
                 ...t,
                 status: "error",
@@ -208,69 +236,65 @@ export const TransferProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return taskId;
   };
 
-  const startUpload = async (
+  const startUpload = (
     sessionId: string,
     hostName: string,
     localPath: string,
     remoteDir: string,
     customFileName?: string
   ): Promise<string> => {
-    const rawName = localPath.split(/[/\\]/).pop() || "upload.bin";
-    const fileName = customFileName || rawName;
+    if (!localPath || !remoteDir?.trim()) return Promise.reject(new Error("上传源文件或目标目录为空，已停止上传。"));
+    const fileName = customFileName || localPath.replace(/[/\\]+$/, "").split(/[/\\]/).pop();
+    if (!fileName || fileName === "." || fileName === ".." || /[/\\]/.test(fileName)) {
+      return Promise.reject(new Error("上传文件名无效。"));
+    }
     const remotePath = `${remoteDir.replace(/\/$/, "")}/${fileName}`;
-
-    const taskId = `up-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    const key = JSON.stringify([sessionId, localPath, remotePath]);
+    const existing = uploadsRef.current.get(key);
+    if (existing) return existing;
+    const taskId = `up-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
     const newTask: TransferTask = {
-      id: taskId,
-      sessionId,
-      hostName,
-      type: "upload",
-      fileName,
-      srcPath: localPath,
-      destPath: remotePath,
-      totalSize: 0,
-      transferredSize: 0,
-      speed: 0,
-      progress: 0,
-      status: "pending",
-      startTime: Date.now(),
+      id: taskId, sessionId, hostName, type: "upload", fileName,
+      srcPath: localPath, destPath: remotePath, totalSize: 0,
+      transferredSize: 0, speed: 0, progress: 0, status: "pending", startTime: Date.now(),
     };
-
-    setTasks((prev) => [newTask, ...prev]);
+    setTasks(prev => [newTask, ...prev]);
     setIsOpen(true);
     setIsCollapsed(false);
-
-    // Trigger backend upload
-    invoke("fs_upload_file", {
-      sessionId,
-      localPath,
-      remotePath,
-      taskId,
-    }).catch((err) => {
-      setTasks((prev) =>
-        prev.map((t) =>
-          t.id === taskId
-            ? {
-                ...t,
-                status: "error",
-                errorMsg: typeof err === "string" ? err : err?.message || "上传失败",
-                endTime: Date.now(),
-              }
-            : t
-        )
-      );
+    let finish!: (id: string) => void;
+    const result = new Promise<string>(resolve => { finish = resolve; });
+    uploadsRef.current.set(key, result);
+    queueRef.current.jobs.push(async () => {
+      try {
+        if (cancelledRef.current.has(taskId)) return;
+        await invoke("fs_upload_file", { sessionId, localPath, remotePath, taskId });
+        const cancelled = cancelledRef.current.has(taskId);
+        setTasks(prev => prev.map(t => t.id !== taskId ? t : cancelled || t.status === "cancelled"
+          ? { ...t, status: "cancelled", speed: 0, endTime: Date.now() }
+          : { ...t, status: "completed", progress: 100, speed: 0, errorMsg: undefined, endTime: Date.now() }));
+      } catch (err) {
+        const cancelled = cancelledRef.current.has(taskId);
+        setTasks(prev => prev.map(t => t.id !== taskId ? t : cancelled || t.status === "cancelled"
+          ? { ...t, status: "cancelled", speed: 0, endTime: Date.now() }
+          : { ...t, status: "error", speed: 0, errorMsg: String(err), endTime: Date.now() }));
+      } finally {
+        uploadsRef.current.delete(key);
+        cancelledRef.current.delete(taskId);
+        finish(taskId);
+      }
     });
-
-    return taskId;
+    pumpUploads();
+    return result;
   };
 
   const cancelTransfer = async (taskId: string) => {
+    if (tasksRef.current.some(t => t.id === taskId && t.type === "upload")) cancelledRef.current.add(taskId);
     try {
       await invoke("fs_cancel_transfer", { taskId });
     } catch {}
     setTasks((prev) =>
       prev.map((t) =>
-        t.id === taskId
+        t.id === taskId && (t.status === "pending" || t.status === "transferring")
           ? { ...t, status: "cancelled", speed: 0, endTime: Date.now() }
           : t
       )
@@ -314,7 +338,7 @@ export const TransferProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   return (
     <TransferContext.Provider
       value={{
-        tasks,
+        tasks, directories, setDirectory, followTerminalDirectory,
         isOpen,
         setIsOpen,
         isCollapsed,

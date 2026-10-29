@@ -28,7 +28,7 @@ interface PasswordUpdateEvent {
 }
 
 function AppContent() {
-  const { activeCount, isOpen: isTransferOpen, setIsOpen: setIsTransferOpen, setIsCollapsed: setIsTransferCollapsed } = useTransferManager();
+  const { followTerminalDirectory, activeCount, isOpen: isTransferOpen, setIsOpen: setIsTransferOpen, setIsCollapsed: setIsTransferCollapsed } = useTransferManager();
   const { themeMode, setThemeMode, resolvedTheme } = useTheme();
   const { settings, updateSettings } = useAppSettings();
   const { t, lang, setLang, toggleLang } = useI18n();
@@ -36,6 +36,25 @@ function AppContent() {
   const [hosts, setHosts] = useState<HostProfile[]>([]);
   const [tabs, setTabs] = useState<TabSession[]>([]);
   const [activeTabId, setActiveTabId] = useState<string>("");
+  // One-way synchronization: terminal cd updates the tree; browsing never writes to the PTY.
+  useEffect(() => {
+    if (!activeTabId) return;
+    let disposed = false;
+    let busy = false;
+    const poll = async () => {
+      if (busy) return;
+      busy = true;
+      try {
+        const path = await invoke<string>("fs_get_terminal_cwd", { sessionId: activeTabId });
+        if (!disposed) followTerminalDirectory(activeTabId, path);
+      } catch { /* A failed lookup must preserve the selected file-tree directory. */ }
+      finally { busy = false; }
+    };
+    void poll();
+    const timer = setInterval(poll, 2000);
+    return () => { disposed = true; clearInterval(timer); };
+  }, [activeTabId, followTerminalDirectory]);
+
   const initialTabCreatedRef = useRef(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);

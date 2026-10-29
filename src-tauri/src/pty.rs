@@ -26,6 +26,7 @@ pub struct PtySession {
     pub opts: SpawnOptions,
     pub password_tracker: Option<Arc<Mutex<PasswordTracker>>>,
     pub active_user: Arc<Mutex<String>>,
+    pub remote_tty: Arc<Mutex<Option<String>>>,
     pub had_root: Arc<Mutex<bool>>,
 }
 
@@ -145,6 +146,10 @@ impl PtyManager {
                 }
             }
 
+            c.arg("-tt");
+            c.arg("-o");
+            c.arg(format!("RemoteCommand={}", crate::terminal_location::remote_shell_command(&auth_token)));
+
             // 3. Proxy handling: Jump Host (ProxyJump) or Client Proxy (ProxyCommand)
             if let Some(ref ptype) = opts.proxy_type {
                 if ptype == "jump" {
@@ -252,6 +257,9 @@ impl PtyManager {
         let had_root = Arc::new(Mutex::new(is_base_root));
         let had_root_clone = Arc::clone(&had_root);
 
+        let remote_tty = Arc::new(Mutex::new(None));
+        let tty_clone = Arc::clone(&remote_tty);
+        let mut tty_tracker = crate::terminal_location::TtyTracker::new(&auth_token);
         let writer_clone = Arc::clone(&writer);
 
         // Channel decouples raw PTY reads from IPC batching
@@ -289,6 +297,9 @@ impl PtyManager {
                 }
 
                 let mut chunk = String::from_utf8_lossy(&raw_batch).to_string();
+                if let Some(tty) = tty_tracker.observe(&chunk) {
+                    if let Ok(mut current) = tty_clone.lock() { *current = Some(tty); }
+                }
                 let mut is_login_success = false;
 
                 if let Some(user) = extract_prompt_username(&chunk) {
@@ -397,6 +408,7 @@ impl PtyManager {
                 opts: opts.clone(),
                 password_tracker: tracker,
                 active_user,
+                remote_tty,
                 had_root,
             },
         );
@@ -512,6 +524,11 @@ impl PtyManager {
         } else {
             Err("会话不存在".to_string())
         }
+    }
+
+    pub fn get_remote_tty(&self, session_id: &str) -> Option<String> {
+        let sessions = self.sessions.lock().ok()?;
+        sessions.get(session_id)?.remote_tty.lock().ok()?.clone()
     }
 
     pub fn get_opts(&self, session_id: &str) -> Option<SpawnOptions> {

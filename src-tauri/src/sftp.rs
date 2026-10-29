@@ -3,7 +3,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::net::{TcpStream, ToSocketAddrs};
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -13,6 +12,66 @@ use tauri::{AppHandle, Emitter};
 
 use crate::pty::SpawnOptions;
 use crate::transfer::{TransferProgressPayload, TransferStatusPayload};
+
+pub fn authenticate(sess: &ssh2::Session, opts: &SpawnOptions) -> Result<(), String> {
+    let user = opts.username.as_deref().unwrap_or("root");
+    let mut authed = false;
+    // 1. Try identity file
+    if let Some(ref kp) = opts.identity_file {
+        let s = kp.trim();
+        if !s.is_empty() {
+            let resolved_path = if s.starts_with("~/") {
+                if let Ok(home) = std::env::var("HOME") {
+                    std::path::PathBuf::from(home).join(&s[2..])
+                } else {
+                    std::path::PathBuf::from(s)
+                }
+            } else {
+                std::path::PathBuf::from(s)
+            };
+
+            let pub_path = resolved_path.with_extension("pub");
+            let pub_ref = if pub_path.exists() {
+                Some(pub_path.as_path())
+            } else {
+                None
+            };
+
+            if sess
+                .userauth_pubkey_file(user, pub_ref, resolved_path.as_path(), None)
+                .is_ok()
+            {
+                authed = true;
+            }
+        }
+    }
+
+    // 2. Try hardware vault password
+    if !authed {
+        if let Some(ref hid) = opts.host_id {
+            if let Some(pass) = crate::vault::get_password(hid) {
+                if sess.userauth_password(user, &pass).is_ok() {
+                    authed = true;
+                }
+            }
+        }
+    }
+
+    // 3. Try SSH agent
+    if !authed {
+        if sess.userauth_agent(user).is_ok() {
+            authed = true;
+        }
+    }
+
+    if authed {
+        Ok(())
+    } else {
+        Err(format!(
+            "SFTP 认证失败（账号：{user}）：请检查保存的密码、私钥或 SSH Agent。终端登录不代表独立文件连接已认证。"
+        ))
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileEntry {
@@ -93,35 +152,19 @@ impl SftpPool {
             }
         }
 
-        // Step 3: Perform network connection OUTSIDE of self.sessions lock!
-        let host = opts.host.as_deref().unwrap_or("127.0.0.1");
-        let port = opts.port.unwrap_or(22);
-        let user = opts.username.as_deref().unwrap_or("root");
-
-        let addr = format!("{}:{}", host, port)
-            .to_socket_addrs()
-            .map_err(|e| format!("无法解析地址 {}:{}: {}", host, port, e))?
-            .next()
-            .ok_or_else(|| format!("无法解析主机地址: {}", host))?;
-
-        let tcp = match TcpStream::connect_timeout(&addr, Duration::from_millis(2500)) {
-            Ok(t) => t,
-            Err(e) => {
-                if let Ok(mut cd) = self.cooldowns.lock() {
-                    cd.insert(opts.session_id.clone(), Instant::now());
-                }
-                return Err(format!("连接超时 (2.5s) {}:{}: {}", host, port, e));
+        let tcp = match crate::transport::connect(opts) {
+            Ok(stream) => stream,
+            Err(error) => {
+                if let Ok(mut cd) = self.cooldowns.lock() { cd.insert(opts.session_id.clone(), Instant::now()); }
+                return Err(error);
             }
         };
-        tcp.set_nodelay(true).ok();
-        tcp.set_read_timeout(Some(Duration::from_millis(3500))).ok();
-        tcp.set_write_timeout(Some(Duration::from_millis(3500))).ok();
 
         let mut sess = match ssh2::Session::new() {
             Ok(s) => s,
             Err(e) => return Err(e.to_string()),
         };
-        sess.set_timeout(3500); // 3.5s timeout for SSH operations
+        sess.set_timeout(15000); // Bound stalls, allowing normal proxy and long-distance latency.
         sess.set_tcp_stream(tcp);
         if let Err(e) = sess.handshake() {
             if let Ok(mut cd) = self.cooldowns.lock() {
@@ -130,57 +173,9 @@ impl SftpPool {
             return Err(format!("SSH 握手失败: {}", e));
         }
 
-        let mut authed = false;
-        // 1. Try identity file
-        if let Some(ref kp) = opts.identity_file {
-            let s = kp.trim();
-            if !s.is_empty() {
-                let resolved_path = if s.starts_with("~/") {
-                    if let Ok(home) = std::env::var("HOME") {
-                        std::path::PathBuf::from(home).join(&s[2..])
-                    } else {
-                        std::path::PathBuf::from(s)
-                    }
-                } else {
-                    std::path::PathBuf::from(s)
-                };
-
-                let pub_path = resolved_path.with_extension("pub");
-                let pub_ref = if pub_path.exists() {
-                    Some(pub_path.as_path())
-                } else {
-                    None
-                };
-
-                if sess.userauth_pubkey_file(user, pub_ref, resolved_path.as_path(), None).is_ok() {
-                    authed = true;
-                }
-            }
-        }
-
-        // 2. Try hardware vault password
-        if !authed {
-            if let Some(ref hid) = opts.host_id {
-                if let Some(pass) = crate::vault::get_password(hid) {
-                    if sess.userauth_password(user, &pass).is_ok() {
-                        authed = true;
-                    }
-                }
-            }
-        }
-
-        // 3. Try SSH agent
-        if !authed {
-            if sess.userauth_agent(user).is_ok() {
-                authed = true;
-            }
-        }
-
-        if !authed {
-            if let Ok(mut cd) = self.cooldowns.lock() {
-                cd.insert(opts.session_id.clone(), Instant::now());
-            }
-            return Err("SFTP 认证失败：无有效密码或私钥".to_string());
+        if let Err(error) = authenticate(&sess, opts) {
+            if let Ok(mut cd) = self.cooldowns.lock() { cd.insert(opts.session_id.clone(), Instant::now()); }
+            return Err(error);
         }
 
         let arc_sess = Arc::new(Mutex::new(sess));
@@ -1220,315 +1215,62 @@ pub fn download_file(
     Ok(())
 }
 
-fn upload_dir_recursive(
-    app: &AppHandle,
-    pool: &SftpPool,
-    opts: &SpawnOptions,
-    local_dir: &str,
-    remote_dir: &str,
-    task_id: &str,
-    cancel_flag: Arc<AtomicBool>,
-) -> Result<(), String> {
-    let resolved_remote = resolve_path_str(pool, opts, remote_dir);
-    let resolved_local = resolve_path_str(pool, opts, local_dir);
-
-    if opts.is_local {
-        fs::create_dir_all(&resolved_remote).map_err(|e| format!("创建本地文件夹失败: {}", e))?;
-    } else {
-        let sess_arc = pool.get_or_connect(opts)?;
-        let sess = sess_arc.lock().map_err(|e| e.to_string())?;
-        if let Ok(sftp) = sess.sftp() {
-            let _ = sftp.mkdir(Path::new(&resolved_remote), 0o755);
-        }
-    }
-
-    if let Ok(entries) = fs::read_dir(&resolved_local) {
-        for entry in entries.flatten() {
-            if cancel_flag.load(Ordering::Relaxed) {
-                return Err("传输已取消".to_string());
-            }
-            let sub_local = entry.path().to_string_lossy().to_string();
-            let file_name = entry.file_name().to_string_lossy().to_string();
-            let sub_remote = format!("{}/{}", resolved_remote.trim_end_matches('/'), file_name);
-            let meta = entry.metadata().map_err(|e| e.to_string())?;
-            if meta.is_dir() {
-                upload_dir_recursive(app, pool, opts, &sub_local, &sub_remote, task_id, cancel_flag.clone())?;
-            } else {
-                upload_file(app.clone(), pool, opts, &sub_local, &sub_remote, task_id, cancel_flag.clone())?;
-            }
-        }
-    }
-    Ok(())
-}
-
-pub fn upload_file(
-    app: AppHandle,
-    pool: &SftpPool,
-    opts: &SpawnOptions,
-    local_path: &str,
-    remote_path: &str,
-    task_id: &str,
-    cancel_flag: Arc<AtomicBool>,
-) -> Result<(), String> {
-    use std::io::{Read, Write};
-
-    let resolved_remote = resolve_path_str(pool, opts, remote_path);
-    let resolved_local = resolve_path_str(pool, opts, local_path);
-
-    let local_meta = fs::metadata(&resolved_local).map_err(|e| format!("读取本地文件失败: {}", e))?;
-    if local_meta.is_dir() {
-        return upload_dir_recursive(&app, pool, opts, &resolved_local, &resolved_remote, task_id, cancel_flag);
-    }
-
-    let chunk_size = 64 * 1024; // 64KB
-    let mut buf = vec![0u8; chunk_size];
-
-    let mut local_file =
-        fs::File::open(&resolved_local).map_err(|e| format!("打开本地源文件失败: {}", e))?;
-    let total_size = local_meta.len();
-
-    if opts.is_local {
-        // If source and destination are the exact same path, skip to avoid truncate
-        if let (Ok(can_src), Ok(can_dest)) = (
-            fs::canonicalize(&resolved_local),
-            fs::canonicalize(&resolved_remote),
-        ) {
-            if can_src == can_dest {
-                return Ok(());
-            }
-        }
-
-        if let Some(parent) = Path::new(&resolved_remote).parent() {
-            let _ = fs::create_dir_all(parent);
-        }
-        let mut f = match fs::File::create(&resolved_remote) {
-            Ok(file) => file,
-            Err(e) => {
-                let err_str = match e.raw_os_error() {
-                    Some(30) => {
-                        format!("无法在只读文件系统「{}」中写入。\n说明：macOS 根目录 (/) 为只读 APFS 镜像卷。请导航至您的主目录 (~) 或拥有写入权限的目录后再进行操作。", resolved_remote)
-                    }
-                    Some(13) => {
-                        format!("权限不足 (Permission Denied): 无法在目标目录「{}」中写入文件。请在终端提权 (sudo/root) 或导航至主目录 (~) 进行操作。", resolved_remote)
-                    }
-                    _ => format!("创建本地目标文件失败: {}", e),
-                };
-                return Err(err_str);
-            }
-        };
-
-        let mut transferred: u64 = 0;
-        let mut last_emit = std::time::Instant::now();
-        let mut last_bytes = 0u64;
-
-        loop {
-            if cancel_flag.load(Ordering::Relaxed) {
-                let _ = app.emit(
-                    "file-transfer-status",
-                    TransferStatusPayload {
-                        task_id: task_id.to_string(),
-                        status: "cancelled".to_string(),
-                        error: Some("用户已取消传输".to_string()),
-                    },
-                );
-                return Err("传输已取消".to_string());
-            }
-
-            let n = local_file
-                .read(&mut buf)
-                .map_err(|e| format!("读取本地源文件块失败: {}", e))?;
-            if n == 0 {
-                break;
-            }
-
-            f.write_all(&buf[..n])
-                .map_err(|e| format!("写入本地目标文件失败: {}", e))?;
-            transferred += n as u64;
-
-            let elapsed = last_emit.elapsed();
-            if elapsed.as_millis() >= 120 || transferred == total_size {
-                let bytes_since = transferred.saturating_sub(last_bytes);
-                let speed = if elapsed.as_secs_f64() > 0.0 {
-                    (bytes_since as f64 / elapsed.as_secs_f64()) as u64
-                } else {
-                    0
-                };
-                last_emit = std::time::Instant::now();
-                last_bytes = transferred;
-
-                let _ = app.emit(
-                    "file-transfer-progress",
-                    TransferProgressPayload {
-                        task_id: task_id.to_string(),
-                        transferred,
-                        total: total_size,
-                        speed,
-                    },
-                );
-            }
-        }
-
-        let _ = f.flush();
-    } else {
-        let sess_arc = pool.get_or_connect(opts)?;
-        let sess = sess_arc.lock().map_err(|e| e.to_string())?;
-        let sftp = match sess.sftp() {
-            Ok(s) => s,
-            Err(e) => {
-                drop(sess);
-                pool.invalidate(&opts.session_id);
-                return Err(format!("启动 SFTP 失败: {}", e));
-            }
-        };
-
-        if let Some(parent) = Path::new(&resolved_remote).parent() {
-            let _ = sftp.mkdir(parent, 0o755);
-        }
-
-        let mut remote_file = match sftp.create(Path::new(&resolved_remote)) {
-            Ok(file) => file,
-            Err(e) => {
-                drop(sftp);
-                drop(sess);
-                pool.invalidate(&opts.session_id);
-                return Err(format!("创建远程目标文件失败: {} (目标路径: {})", e, resolved_remote));
-            }
-        };
-
-        let mut transferred: u64 = 0;
-        let mut last_emit = std::time::Instant::now();
-        let mut last_bytes = 0u64;
-
-        loop {
-            if cancel_flag.load(Ordering::Relaxed) {
-                drop(remote_file);
-                drop(sftp);
-                drop(sess);
-                let _ = app.emit(
-                    "file-transfer-status",
-                    TransferStatusPayload {
-                        task_id: task_id.to_string(),
-                        status: "cancelled".to_string(),
-                        error: Some("用户已取消传输".to_string()),
-                    },
-                );
-                return Err("传输已取消".to_string());
-            }
-
-            let n = local_file
-                .read(&mut buf)
-                .map_err(|e| format!("读取本地源文件块失败: {}", e))?;
-            if n == 0 {
-                break;
-            }
-
-            remote_file
-                .write_all(&buf[..n])
-                .map_err(|e| format!("写入远程文件块失败: {}", e))?;
-            transferred += n as u64;
-
-            let elapsed = last_emit.elapsed();
-            if elapsed.as_millis() >= 120 || transferred == total_size {
-                let bytes_since = transferred.saturating_sub(last_bytes);
-                let speed = if elapsed.as_secs_f64() > 0.0 {
-                    (bytes_since as f64 / elapsed.as_secs_f64()) as u64
-                } else {
-                    0
-                };
-                last_emit = std::time::Instant::now();
-                last_bytes = transferred;
-
-                let _ = app.emit(
-                    "file-transfer-progress",
-                    TransferProgressPayload {
-                        task_id: task_id.to_string(),
-                        transferred,
-                        total: total_size,
-                        speed,
-                    },
-                );
-            }
-        }
-
-        let _ = remote_file.flush();
-    }
-
-    let _ = app.emit(
-        "file-transfer-status",
-        TransferStatusPayload {
-            task_id: task_id.to_string(),
-            status: "completed".to_string(),
-            error: None,
-        },
-    );
-
-    Ok(())
-}
-
 pub fn get_terminal_cwd(
     pool: &SftpPool,
     opts: &SpawnOptions,
     local_pid: Option<u32>,
+    remote_tty: Option<&str>,
 ) -> Result<String, String> {
     if opts.is_local {
-        if let Some(pid) = local_pid {
-            #[cfg(target_os = "macos")]
-            {
-                if let Ok(output) = std::process::Command::new("lsof")
-                    .args(["-a", "-d", "cwd", "-p", &pid.to_string(), "-Fn"])
-                    .output()
-                {
-                    let text = String::from_utf8_lossy(&output.stdout);
-                    for line in text.lines() {
-                        if line.starts_with('n') && line.len() > 1 {
-                            return Ok(line[1..].to_string());
-                        }
-                    }
-                }
-            }
-            #[cfg(target_os = "linux")]
-            {
-                if let Ok(link) = std::fs::read_link(format!("/proc/{}/cwd", pid)) {
-                    return Ok(link.to_string_lossy().to_string());
-                }
-            }
+        let pid = local_pid.ok_or("本地终端不存在或已关闭")?;
+        let output = std::process::Command::new("ps")
+            .args(["-p", &pid.to_string(), "-o", "tty="])
+            .output()
+            .map_err(|e| format!("读取本地终端标识失败：{e}"))?;
+        let tty = format!(
+            "/dev/{}",
+            String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .trim_start_matches("/dev/")
+        );
+        let command = crate::terminal_location::cwd_command(&tty)?;
+        let output = std::process::Command::new("/bin/sh")
+            .args(["-c", &command])
+            .output()
+            .map_err(|e| format!("查询本地终端目录失败：{e}"))?;
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if path.starts_with('/') && !path.contains('\n') {
+            Ok(path)
+        } else {
+            Err("无法读取当前本地终端前台进程的目录，请检查文件权限，或在文件列表选择目录。".into())
         }
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
-        Ok(home)
     } else {
         let sess_arc = pool.get_or_connect(opts)?;
         let sess = sess_arc.lock().map_err(|e| e.to_string())?;
-        let user = opts.username.as_deref().unwrap_or("root");
-
-        // Inspect remote process tree of the logged-in user on active pts
-        let cmd = format!(
-            "sh -c 'TTY=$(w -h {} 2>/dev/null | awk \"{{print \\$2}}\" | tail -n 1); \
-             if [ -n \"$TTY\" ]; then \
-                 PID=$(pgrep -t \"$TTY\" 2>/dev/null | tail -n 1); \
-                 [ -n \"$PID\" ] && readlink \"/proc/$PID/cwd\" 2>/dev/null; \
-             fi'",
-            user
-        );
-        if let Ok(mut ch) = sess.channel_session() {
-            if ch.exec(&cmd).is_ok() {
-                let mut out = String::new();
-                let _ = ch.read_to_string(&mut out);
-                let _ = ch.wait_close();
-                let trimmed = out.trim();
-                if !trimmed.is_empty() && trimmed.starts_with('/') {
-                    return Ok(trimmed.to_string());
-                }
-            }
+        let tty = remote_tty
+            .filter(|tty| crate::terminal_location::valid_tty(tty))
+            .ok_or("尚未收到当前会话的终端标识，请重新连接后重试，或在文件列表选择上传目录。")?;
+        let cmd = crate::terminal_location::cwd_command(tty)?;
+        let mut channel = sess
+            .channel_session()
+            .map_err(|e| format!("查询终端目录失败：{e}"))?;
+        channel
+            .exec(&cmd)
+            .map_err(|e| format!("查询终端目录失败：{e}"))?;
+        let mut output = String::new();
+        channel
+            .read_to_string(&mut output)
+            .map_err(|e| format!("读取终端目录失败：{e}"))?;
+        channel.wait_close().map_err(|e| e.to_string())?;
+        let cwd = output.trim();
+        if cwd.starts_with('/') && !cwd.contains('\n') {
+            Ok(cwd.to_string())
+        } else {
+            Err(format!(
+                "无法确认当前终端目录（文件连接账号：{}）。终端中的 sudo/su 不会改变文件连接权限，请在文件列表中选择该账号可写的目录。",
+                opts.username.as_deref().unwrap_or("root")
+            ))
         }
-
-        // Fallback: sftp realpath(".")
-        if let Ok(sftp) = sess.sftp() {
-            if let Ok(p) = sftp.realpath(Path::new(".")) {
-                return Ok(p.to_string_lossy().to_string());
-            }
-        }
-
-        Ok("/root".to_string())
     }
 }
 

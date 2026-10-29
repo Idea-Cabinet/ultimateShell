@@ -1,5 +1,8 @@
 #[cfg(target_os = "macos")]
 mod native_menu;
+mod error_log;
+mod terminal_location;
+mod upload;
 mod hosts;
 mod ops;
 mod perf;
@@ -7,6 +10,7 @@ mod pty;
 mod ssh_auth;
 mod sftp;
 mod transfer;
+mod transport;
 mod vault;
 mod tunnel;
 mod agent_gateway;
@@ -254,21 +258,34 @@ async fn fs_download_file(
             &remote_path,
             &local_path,
             &tid,
-            cancel_flag,
+            cancel_flag.clone(),
         );
-        if let Err(ref e) = res {
-            eprintln!("[fs_download_file] 下载失败 ({}): {}", tid, e);
+        let cancelled = cancel_flag.load(std::sync::atomic::Ordering::Relaxed) && res.is_err();
+        if let Err(ref error) = res {
+            if !cancelled {
+                error_log::record(
+                    &app_clone,
+                    error_log::ErrorEntry {
+                        operation: "download",
+                        session_id: &session_id,
+                        account: opts.username.as_deref().unwrap_or("local"),
+                        source: &remote_path,
+                        target: &local_path,
+                        error,
+                    },
+                );
+            }
             let _ = app_clone.emit(
                 "file-transfer-status",
-                crate::transfer::TransferStatusPayload {
+                transfer::TransferStatusPayload {
                     task_id: tid.clone(),
-                    status: "error".to_string(),
-                    error: Some(e.clone()),
+                    status: if cancelled { "cancelled" } else { "error" }.into(),
+                    error: Some(error.clone()),
                 },
             );
         }
         t_state.remove(&tid);
-        res
+        if cancelled { Ok(()) } else { res }
     })
     .await
     .map_err(|e| format!("异步执行错误: {}", e))?
@@ -285,42 +302,93 @@ async fn fs_upload_file(
     remote_path: String,
     task_id: String,
 ) -> Result<(), String> {
-    let opts = pty_mgr
-        .get_opts(&session_id)
-        .ok_or_else(|| "会话不存在或已关闭".to_string())?;
-
+    let opts = match pty_mgr.get_opts(&session_id) {
+        Some(opts) => opts,
+        None => {
+            let error = "会话不存在或已关闭，请重新连接后上传".to_string();
+            error_log::record(
+                &app,
+                error_log::ErrorEntry {
+                    operation: "upload",
+                    session_id: &session_id,
+                    account: "",
+                    source: &local_path,
+                    target: &remote_path,
+                    error: &error,
+                },
+            );
+            return Err(error);
+        }
+    };
     let pool = sftp_pool.inner().clone();
     let cancel_flag = transfer_state.register(&task_id);
     let t_state = transfer_state.inner().clone();
-    let tid = task_id.clone();
-    let app_clone = app.clone();
-
     tauri::async_runtime::spawn_blocking(move || {
-        let res = sftp::upload_file(
-            app_clone.clone(),
+        let result = upload::upload(
+            &app,
             &pool,
             &opts,
             &local_path,
             &remote_path,
-            &tid,
-            cancel_flag,
+            &task_id,
+            &cancel_flag,
         );
-        if let Err(ref e) = res {
-            eprintln!("[fs_upload_file] 上传失败 ({}): {}", tid, e);
-            let _ = app_clone.emit(
-                "file-transfer-status",
-                crate::transfer::TransferStatusPayload {
-                    task_id: tid.clone(),
-                    status: "error".to_string(),
-                    error: Some(e.clone()),
-                },
-            );
+        let cancelled = cancel_flag.load(std::sync::atomic::Ordering::Relaxed) && result.is_err();
+        if let Err(ref error) = result {
+            if !cancelled {
+                error_log::record(
+                    &app,
+                    error_log::ErrorEntry {
+                        operation: "upload",
+                        session_id: &session_id,
+                        account: opts.username.as_deref().unwrap_or("local"),
+                        source: &local_path,
+                        target: &remote_path,
+                        error,
+                    },
+                );
+            }
         }
-        t_state.remove(&tid);
-        res
+        let _ = app.emit(
+            "file-transfer-status",
+            transfer::TransferStatusPayload {
+                task_id: task_id.clone(),
+                status: if cancelled {
+                    "cancelled"
+                } else if result.is_ok() {
+                    "completed"
+                } else {
+                    "error"
+                }
+                .into(),
+                error: result.as_ref().err().cloned(),
+            },
+        );
+        t_state.remove(&task_id);
+        if cancelled { Ok(()) } else { result }
     })
     .await
-    .map_err(|e| format!("异步执行错误: {}", e))?
+    .map_err(|e| format!("异步执行错误: {e}"))?
+}
+
+#[tauri::command]
+fn fs_log_error(app: AppHandle, operation: String, message: String) {
+    error_log::record(
+        &app,
+        error_log::ErrorEntry {
+            operation: &operation,
+            session_id: "",
+            account: "",
+            source: "",
+            target: "",
+            error: &message,
+        },
+    );
+}
+
+#[tauri::command]
+fn fs_get_error_log_path(app: AppHandle) -> Result<String, String> {
+    error_log::path(&app).map(|p| p.to_string_lossy().into_owned())
 }
 
 #[tauri::command]
@@ -337,6 +405,7 @@ fn fs_get_default_download_dir() -> String {
 
 #[tauri::command]
 async fn fs_get_terminal_cwd(
+    app: AppHandle,
     pty_mgr: State<'_, PtyManager>,
     sftp_pool: State<'_, SftpPool>,
     session_id: String,
@@ -346,12 +415,28 @@ async fn fs_get_terminal_cwd(
         .ok_or_else(|| "会话不存在或已关闭".to_string())?;
 
     let local_pid = pty_mgr.get_local_pid(&session_id);
+    let remote_tty = pty_mgr.get_remote_tty(&session_id);
     let pool = sftp_pool.inner().clone();
+    let app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        sftp::get_terminal_cwd(&pool, &opts, local_pid)
+        let result = sftp::get_terminal_cwd(&pool, &opts, local_pid, remote_tty.as_deref());
+        if let Err(ref error) = result {
+            error_log::record(
+                &app,
+                error_log::ErrorEntry {
+                    operation: "terminal-upload-directory",
+                    session_id: &session_id,
+                    account: opts.username.as_deref().unwrap_or("local"),
+                    source: "",
+                    target: "",
+                    error,
+                },
+            );
+        }
+        result
     })
     .await
-    .map_err(|e| format!("异步执行错误: {}", e))?
+    .map_err(|e| format!("异步执行错误: {e}"))?
 }
 
 #[tauri::command]
@@ -980,6 +1065,8 @@ pub fn run() {
             fs_clear_trash,
             fs_download_file,
             fs_upload_file,
+            fs_log_error,
+            fs_get_error_log_path,
             fs_cancel_transfer,
             fs_get_default_download_dir,
             fs_get_terminal_cwd,

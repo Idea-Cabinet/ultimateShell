@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
+import { useFileDrop, reportTransferError } from "../hooks/useFileDrop";
 import { usePointerReorder } from "../hooks/usePointerReorder";
 import { useI18n } from "../i18n";
 import { invoke } from "@tauri-apps/api/core";
@@ -211,8 +212,14 @@ export function FileExplorer({
   onClose,
   onSendToTerminal,
 }: FileExplorerProps) {
-  // Always default to user home directory "~"
-  const [currentPath, setCurrentPath] = useState<string>("~");
+  const transferManager = useTransferManager();
+  const transferTasksRef = useRef(transferManager.tasks);
+  transferTasksRef.current = transferManager.tasks;
+  // Keep the path paired with its session even before tab-change effects run.
+  const [directoryState, setDirectoryState] = useState({ sessionId: session.id, path: "~" });
+  const currentPath = directoryState.sessionId === session.id
+    ? directoryState.path : transferManager.directories[session.id]?.path || "~";
+  const setCurrentPath = (path: string) => setDirectoryState({ sessionId: session.id, path });
   const [parentPath, setParentPath] = useState<string | undefined>(undefined);
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [totalCount, setTotalCount] = useState<number>(0);
@@ -369,12 +376,12 @@ export function FileExplorer({
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [saveSuccess, setSaveSuccess] = useState<boolean>(false);
 
-  // Global Transfer Manager
-  const transferManager = useTransferManager();
-
   // Drag & drop state for file upload
-  const [isDragOver, setIsDragOver] = useState(false);
-  const dragCounterRef = useRef(0);
+  const dropAreaRef = useRef<HTMLDivElement>(null);
+  const { isDragOver, error: dropError, clearError: clearDropError } = useFileDrop(dropAreaRef, isOpen, async paths => {
+    const targetDir = currentPath;
+    await Promise.all(paths.map(path => transferManager.startUpload(session.id, session.title, path, targetDir)));
+  });
 
   // Rename states
   const [renamingEntry, setRenamingEntry] = useState<FileEntry | null>(null);
@@ -474,6 +481,7 @@ export function FileExplorer({
       if (reqId !== activeReqId.current) return; // Stale response discarded
 
       setCurrentPath(res.current_path);
+      transferManager.setDirectory(session.id, res.current_path);
       setParentPath(res.parent_path);
       setEntries(res.entries);
       setTotalCount(res.total_count);
@@ -633,33 +641,11 @@ export function FileExplorer({
   useEffect(() => {
     if (isOpen && session.id) {
       setSelectedEntry(null);
-      if (session.isLocal) {
-        invoke<string>("fs_get_terminal_cwd", { sessionId: session.id })
-          .then((cwd) => {
-            if (cwd && cwd.trim() && cwd.trim() !== "/") {
-              setCurrentPath(cwd.trim());
-              setHistory([cwd.trim()]);
-              setHistoryIdx(0);
-              loadDirectory(cwd.trim(), false);
-            } else {
-              setCurrentPath("~");
-              setHistory(["~"]);
-              setHistoryIdx(0);
-              loadDirectory("~", false);
-            }
-          })
-          .catch(() => {
-            setCurrentPath("~");
-            setHistory(["~"]);
-            setHistoryIdx(0);
-            loadDirectory("~", false);
-          });
-      } else {
-        setCurrentPath("~");
-        setHistory(["~"]);
-        setHistoryIdx(0);
-        loadDirectory("~", false);
-      }
+      const desired = transferManager.directories[session.id]?.path || "~";
+      setCurrentPath(desired);
+      setHistory([desired]);
+      setHistoryIdx(0);
+      loadDirectory(desired, false);
 
       // Requirement 1: If outermost directory tree has not been loaded yet, auto-load it!
       const cached = rootNodesCache.current[session.id];
@@ -672,6 +658,14 @@ export function FileExplorer({
       }
     }
   }, [isOpen, session.id]);
+
+  const sessionDirectory = transferManager.directories[session.id]?.path;
+  useEffect(() => {
+    if (isOpen && sessionDirectory && sessionDirectory !== currentPath) {
+      setCurrentPath(sessionDirectory);
+      void loadDirectory(sessionDirectory);
+    }
+  }, [isOpen, session.id, sessionDirectory]);
 
   // Reload when showHidden toggles
   useEffect(() => {
@@ -863,7 +857,8 @@ export function FileExplorer({
         }
       }
     } catch (err) {
-      console.error("打开文件选择器失败:", err);
+      reportTransferError("upload-file-picker", err);
+      alert(`无法开始上传：${String(err)}`);
     }
   };
 
@@ -928,7 +923,7 @@ export function FileExplorer({
       const errStr = typeof err === "string" ? err : err?.message || String(err);
       if (errStr.includes("permission denied") || errStr.includes("SFTP(3)") || errStr.includes("Permission denied")) {
         alert(
-          `创建${createModal.type === "file" ? "文件" : "文件夹"}失败: 权限不足 (Permission Denied)\n\n当前用户无权在目录「${currentPath}」中写入。\n\n提示：若需在根目录或受保护的系统目录（如 / 或 /etc）中创建，请在终端切换为 root 身份；或点击主页图标 (~) 导航至您的主目录进行操作。`
+          `创建${createModal.type === "file" ? "文件" : "文件夹"}失败: 权限不足 (Permission Denied)\n\n当前用户无权在目录「${currentPath}」中写入。\n\n提示：若需在根目录或受保护的系统目录（如 / 或 /etc）中创建，请使用有写入权限的 SSH 账号连接，或切换到该账号可写的目录。终端中的 sudo/su 不会改变文件连接权限。`
         );
       } else {
         alert(`创建${createModal.type === "file" ? "文件" : "文件夹"}失败: ${errStr}`);
@@ -1179,111 +1174,18 @@ export function FileExplorer({
   };
 
   // Drag and Drop event handlers
-  const handleDragEnter = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    dragCounterRef.current += 1;
-    if (e.dataTransfer?.types?.includes("Files")) {
-      setIsDragOver(true);
-    }
-  };
-
-  const handleDragLeave = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    dragCounterRef.current -= 1;
-    if (dragCounterRef.current <= 0) {
-      setIsDragOver(false);
-      dragCounterRef.current = 0;
-    }
-  };
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-  };
-
-  // Deduplication ref for drag-and-drop file upload
-  const recentUploadsRef = useRef<Map<string, number>>(new Map());
-
-  const handleDrop = async (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragOver(false);
-    dragCounterRef.current = 0;
-
-    const targetDir = currentPath || "~";
-
-    const files = e.dataTransfer.files;
-    if (files && files.length > 0) {
-      const now = Date.now();
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        const localPath = (file as any).path;
-        if (localPath) {
-          const lastTime = recentUploadsRef.current.get(localPath) || 0;
-          if (now - lastTime < 1000) continue;
-          recentUploadsRef.current.set(localPath, now);
-
-          await transferManager.startUpload(
-            session.id,
-            session.title || "服务器",
-            localPath,
-            targetDir,
-            file.name
-          );
-        }
-      }
-    }
-  };
-
-  // Listen for Tauri window native drag-drop
+  // Refresh only this session, and dispose registrations that resolve after navigation.
   useEffect(() => {
     if (!isOpen) return;
+    let disposed = false;
     let unlisten: (() => void) | null = null;
-    listen<{ paths: string[] }>("tauri://drag-drop", async (event) => {
-      const targetDir = currentPath || "~";
-      const paths = event.payload?.paths;
-      if (paths && paths.length > 0) {
-        const now = Date.now();
-        for (const localPath of paths) {
-          const lastTime = recentUploadsRef.current.get(localPath) || 0;
-          if (now - lastTime < 1000) continue;
-          recentUploadsRef.current.set(localPath, now);
-
-          await transferManager.startUpload(
-            session.id,
-            session.title || "服务器",
-            localPath,
-            targetDir
-          );
-        }
-      }
-    }).then((fn) => {
-      unlisten = fn;
-    });
-
-    return () => {
-      if (unlisten) unlisten();
-    };
-  }, [isOpen, session.id, session.title, currentPath]);
-
-  // Listen for file transfer completion to automatically refresh folder listing
-  useEffect(() => {
-    if (!isOpen) return;
-    let unlisten: (() => void) | null = null;
-    listen<{ task_id: string; status: string }>("file-transfer-status", (event) => {
-      if (event.payload?.status === "completed") {
-        loadDirectory(currentPath);
-      }
-    }).then((fn) => {
-      unlisten = fn;
-    });
-
-    return () => {
-      if (unlisten) unlisten();
-    };
-  }, [isOpen, currentPath]);
+    listen<{ task_id: string; status: string }>("file-transfer-status", event => {
+      if (disposed || event.payload.status !== "completed") return;
+      const task = transferTasksRef.current.find(task => task.id === event.payload.task_id);
+      if (task?.sessionId === session.id) void loadDirectory(currentPath, false);
+    }).then(stop => { if (disposed) stop(); else unlisten = stop; });
+    return () => { disposed = true; unlisten?.(); };
+  }, [isOpen, currentPath, session.id]);
 
   // Sorting columns
   const handleSort = (field: SortField) => {
@@ -1736,11 +1638,7 @@ export function FileExplorer({
         )}
 
         {/* Right Details Explorer Table (Supports Drag-and-Drop File Upload) */}
-        <div
-          onDragEnter={handleDragEnter}
-          onDragLeave={handleDragLeave}
-          onDragOver={handleDragOver}
-          onDrop={handleDrop}
+        <div ref={dropAreaRef}
           onContextMenu={(e) => {
             e.preventDefault();
             setContextMenu(null);
@@ -1748,6 +1646,10 @@ export function FileExplorer({
           }}
           className="flex-1 flex flex-col bg-[var(--bg-app)] overflow-hidden relative"
         >
+      {dropError && <div role="alert" className="absolute bottom-2 left-2 right-2 z-40 rounded-lg border border-orange-400 bg-[var(--bg-card)] p-3 text-xs text-[var(--text-primary)] shadow-md">
+        <button onClick={clearDropError} className="float-right ml-2" aria-label="关闭上传错误">×</button>
+        {dropError}
+      </div>}
           {/* Drag & Drop File Upload Overlay */}
           {isDragOver && (
             <div className="absolute inset-0 z-40 bg-[#007AFF]/12 backdrop-blur-[2px] border-2 border-dashed border-[#007AFF] rounded-lg m-1.5 flex flex-col items-center justify-center space-y-2 pointer-events-none animate-in fade-in duration-100 select-none">
@@ -1910,6 +1812,8 @@ export function FileExplorer({
           <span>
             {t("files.itemsCount", { total: totalCount, dirs: totalDirs, files: totalFiles })}
           </span>
+
+          {!session.isLocal && <span className="font-mono" title="文件操作使用此 SSH 登录账号。终端中的 sudo/su 不改变 SFTP 身份。">SFTP: {session.hostProfile?.username || "root"}</span>}
 
           {/* Current Active User Badge with subtle color distinction */}
           <div className="flex items-center space-x-1.5 pl-2 border-l border-[var(--border-subtle)]">
