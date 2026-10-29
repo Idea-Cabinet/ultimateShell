@@ -47,7 +47,7 @@ export const OpsDrawer: React.FC<Props> = ({
       }`}
     >
       {/* Main Content Area without duplicate top tab button strip */}
-      <div style={{ height: isMaximized ? "100%" : `${height}px` }} className="flex-1 overflow-hidden flex flex-col min-h-0">
+      <div className="flex-1 overflow-hidden flex flex-col min-h-0">
         {activeTab === "files" && (
           <FileExplorer
             session={session}

@@ -202,7 +202,7 @@ export const parsePermissionsToOctal = (permStr: string, isDir: boolean): string
 
 export function FileExplorer({
   session,
-  height,
+  height: _height,
   isOpen,
   isMaximized,
   currentUser,
@@ -1432,10 +1432,7 @@ export function FileExplorer({
 
   return (
     <div
-      style={hideHeaderControls ? undefined : { height: isMaximized ? "100%" : `${height ?? 340}px` }}
-      className={`w-full flex flex-col bg-[var(--bg-app)] select-none overflow-hidden relative ${
-        hideHeaderControls ? "h-full flex-1" : "border-t border-[var(--border-subtle)] z-20"
-      }`}
+      className="w-full h-full flex-1 flex flex-col bg-[var(--bg-app)] select-none overflow-hidden relative z-20 min-h-0"
     >
       {/* 1. Header Toolbar (Navigation, Breadcrumbs, Search, Toggles) */}
       <div className="h-9 px-2.5 bg-[var(--bg-card)] border-b border-[var(--border-subtle)] flex items-center justify-between space-x-2 text-[12px]">
@@ -1626,7 +1623,7 @@ export function FileExplorer({
       </div>
 
       {/* 2. Main Dual-Pane Body */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden min-h-0">
         {/* Left Tree Pane (Pure Lazy Loading with Horizontal Resizing) */}
         {showTreePane && (
           <>
@@ -1851,7 +1848,7 @@ export function FileExplorer({
       </div>
 
       {/* 3. Explorer Bottom Status Bar */}
-      <div className="h-6 bg-[var(--bg-card)] border-t border-[var(--border-subtle)] px-3 flex items-center justify-between text-[11px] text-[var(--text-tertiary)] select-none">
+      <div className="h-7 min-h-[28px] flex-shrink-0 bg-[var(--bg-card)] border-t border-[var(--border-subtle)] px-3 flex items-center justify-between text-[11px] text-[var(--text-tertiary)] select-none">
         <div className="flex items-center space-x-3 truncate">
           <span>
             {t("files.itemsCount", { total: totalCount, dirs: totalDirs, files: totalFiles })}
