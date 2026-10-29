@@ -1445,7 +1445,7 @@ export function FileExplorer({
             onClick={handleGoBack}
             disabled={historyIdx <= 0}
             className="p-1 rounded hover:bg-[var(--hover-item)] disabled:opacity-30 disabled:hover:bg-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
-            title="后退 (返回上一个浏览历史路径)"
+            title={t("files.goBack")}
           >
             <ArrowLeft className="w-3.5 h-3.5" />
           </button>
@@ -1453,7 +1453,7 @@ export function FileExplorer({
             onClick={handleGoForward}
             disabled={historyIdx >= history.length - 1}
             className="p-1 rounded hover:bg-[var(--hover-item)] disabled:opacity-30 disabled:hover:bg-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
-            title="前进 (进入下一个浏览历史路径)"
+            title={t("files.goForward")}
           >
             <ArrowRight className="w-3.5 h-3.5" />
           </button>
@@ -1461,21 +1461,21 @@ export function FileExplorer({
             onClick={handleGoUp}
             disabled={!parentPath || parentPath === currentPath}
             className="p-1 rounded hover:bg-[var(--hover-item)] disabled:opacity-30 disabled:hover:bg-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
-            title="上一级目录 (跳转到父目录: ..)"
+            title={t("files.goUp")}
           >
             <ArrowUp className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={handleRefresh}
             className="p-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
-            title="刷新当前目录 (重新拉取文件与文件夹列表)"
+            title={t("common.refresh")}
           >
             <RotateCw className={`w-3.5 h-3.5 ${loading ? "animate-spin text-[#007AFF]" : ""}`} />
           </button>
           <button
             onClick={handleGoHome}
             className="p-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
-            title="主目录 (跳转至用户 ~ 路径)"
+            title={t("files.goHome")}
           >
             <Home className="w-3.5 h-3.5" />
           </button>
@@ -1483,10 +1483,10 @@ export function FileExplorer({
             onClick={handleSyncTerminalCwd}
             disabled={isSyncingCwd}
             className="px-1.5 py-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors flex items-center space-x-1 disabled:opacity-50"
-            title="跟随终端 (获取终端当前所在目录并跳转)"
+            title={t("files.followTerminalTip")}
           >
             <Terminal className={`w-3.5 h-3.5 text-[#007AFF] ${isSyncingCwd ? "animate-pulse" : ""}`} />
-            <span className="text-[11px] font-medium hidden sm:inline">跟随终端</span>
+            <span className="text-[11px] font-medium hidden sm:inline">{t("files.followTerminal")}</span>
           </button>
         </div>
 
@@ -1501,7 +1501,7 @@ export function FileExplorer({
                 onBlur={() => setIsEditingPath(false)}
                 autoFocus
                 className="w-full h-6 px-2 text-[12px] font-mono bg-[var(--bg-app)] border border-[#007AFF] rounded focus:outline-none text-[var(--text-primary)]"
-                placeholder="输入绝对路径并回车..."
+                placeholder={t("files.inputPathPlaceholder")}
               />
             </form>
           ) : (
@@ -1583,7 +1583,7 @@ export function FileExplorer({
                 ? "bg-[#007AFF]/15 text-[#007AFF]"
                 : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--hover-item)]"
             }`}
-            title={showHidden ? "隐藏以点开头的文件 (隐藏 .dotfiles)" : "显示隐藏文件 (查看 .bashrc/.ssh 等隐藏项)"}
+            title={showHidden ? t("files.hideHidden") : t("files.showHidden")}
           >
             {showHidden ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
           </button>
@@ -1596,7 +1596,7 @@ export function FileExplorer({
                 ? "bg-[var(--hover-item)] text-[var(--text-primary)]"
                 : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--hover-item)]"
             }`}
-            title={showTreePane ? "收起左侧目录树 (增大详细列表区域)" : "展开左侧目录树 (查看树状结构)"}
+            title={t("files.toggleTree")}
           >
             <Layers className="w-3.5 h-3.5" />
           </button>
@@ -1606,7 +1606,7 @@ export function FileExplorer({
             <button
               onClick={onToggleMaximize}
               className="p-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
-              title={isMaximized ? "还原视口高度 (恢复半屏分栏)" : "最大化文件树 (全屏浏览文件系统)"}
+              title={isMaximized ? t("common.restore") : t("common.maximize")}
             >
               {isMaximized ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
             </button>
@@ -1617,7 +1617,7 @@ export function FileExplorer({
             <button
               onClick={onClose}
               className="p-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
-              title="关闭文件管理器 (可在底部状态栏随时再次展开)"
+              title={t("files.close")}
             >
               <X className="w-3.5 h-3.5" />
             </button>

@@ -138,6 +138,12 @@ export const translations = {
     "files.itemsCount": "共 {total} 项 ({dirs} 个文件夹, {files} 个文件)",
     "files.toggleTree": "展开/收起目录树",
     "files.close": "关闭文件管理器",
+    "files.followTerminal": "跟随终端",
+    "files.followTerminalTip": "跟随终端 (获取终端当前所在目录并跳转)",
+    "files.goBack": "后退 (返回上一个浏览历史路径)",
+    "files.goForward": "前进 (进入下一个浏览历史路径)",
+    "files.goHome": "主目录 (~)",
+    "files.inputPathPlaceholder": "输入绝对路径并回车...",
 
     // Performance
     "perf.title": "实时系统指标",
@@ -493,6 +499,12 @@ export const translations = {
     "files.itemsCount": "{total} items ({dirs} folders, {files} files)",
     "files.toggleTree": "Toggle Directory Tree",
     "files.close": "Close File Explorer",
+    "files.followTerminal": "Follow Terminal",
+    "files.followTerminalTip": "Follow Terminal (Navigate to terminal current directory)",
+    "files.goBack": "Back (Previous path)",
+    "files.goForward": "Forward (Next path)",
+    "files.goHome": "Home (~)",
+    "files.inputPathPlaceholder": "Enter absolute path and press Enter...",
 
     // Performance
     "perf.title": "System Metrics",
@@ -848,6 +860,12 @@ export const translations = {
     "files.itemsCount": "計 {total} 項目 ({dirs} フォルダ, {files} ファイル)",
     "files.toggleTree": "ツリーの開閉",
     "files.close": "ファイルマネージャーを閉じる",
+    "files.followTerminal": "端末に追従",
+    "files.followTerminalTip": "端末に追従 (端末のカレントディレクトリへ移動)",
+    "files.goBack": "戻る (前のパス)",
+    "files.goForward": "進む (次のパス)",
+    "files.goHome": "ホーム (~)",
+    "files.inputPathPlaceholder": "絶対パスを入力してEnter...",
 
     // Performance
     "perf.title": "システムメトリクス",
@@ -1203,6 +1221,12 @@ export const translations = {
     "files.itemsCount": "총 {total}개 ({dirs}개 폴더, {files}개 파일)",
     "files.toggleTree": "트리 접기/펼치기",
     "files.close": "파일 탐색기 닫기",
+    "files.followTerminal": "터미널 따라가기",
+    "files.followTerminalTip": "터미널 따라가기 (터미널의 현재 디렉터리로 이동)",
+    "files.goBack": "뒤로 (이전 경로)",
+    "files.goForward": "앞으로 (다음 경로)",
+    "files.goHome": "홈 디렉터리 (~)",
+    "files.inputPathPlaceholder": "절대 경로 입력 후 Enter...",
 
     // Performance
     "perf.title": "실시간 성능 지표",
@@ -1558,6 +1582,12 @@ export const translations = {
     "files.itemsCount": "Gesamt {total} ({dirs} Ordner, {files} Dateien)",
     "files.toggleTree": "Baum umschalten",
     "files.close": "Dateimanager schließen",
+    "files.followTerminal": "Terminal folgen",
+    "files.followTerminalTip": "Terminal folgen (Zum aktuellen Arbeitsverzeichnis des Terminals wechseln)",
+    "files.goBack": "Zurück (Vorheriger Pfad)",
+    "files.goForward": "Vorwärts (Nächster Pfad)",
+    "files.goHome": "Home-Verzeichnis (~)",
+    "files.inputPathPlaceholder": "Absoluten Pfad eingeben und Enter drücken...",
 
     // Performance
     "perf.title": "Systemmetriken",
@@ -1913,6 +1943,12 @@ export const translations = {
     "files.itemsCount": "Всего {total} ({dirs} папок, {files} файлов)",
     "files.toggleTree": "Свернуть/развернуть дерево",
     "files.close": "Закрыть проводник",
+    "files.followTerminal": "Следовать за терминалом",
+    "files.followTerminalTip": "Следовать за терминалом (перейти в текущую папку терминала)",
+    "files.goBack": "Назад (Предыдущий путь)",
+    "files.goForward": "Вперед (Следующий путь)",
+    "files.goHome": "Домашняя папка (~)",
+    "files.inputPathPlaceholder": "Введите абсолютный путь и нажмите Enter...",
 
     // Performance
     "perf.title": "Системные показатели",
@@ -2268,6 +2304,12 @@ export const translations = {
     "files.itemsCount": "Total {total} ({dirs} dossiers, {files} fichiers)",
     "files.toggleTree": "Afficher/Masquer l'arborescence",
     "files.close": "Fermer le gestionnaire de fichiers",
+    "files.followTerminal": "Suivre le terminal",
+    "files.followTerminalTip": "Suivre le terminal (accéder au répertoire actuel du terminal)",
+    "files.goBack": "Précédent (chemin précédent)",
+    "files.goForward": "Suivant (chemin suivant)",
+    "files.goHome": "Dossier personnel (~)",
+    "files.inputPathPlaceholder": "Entrez un chemin absolu et appuyez sur Entrée...",
 
     // Performance
     "perf.title": "Métriques système",
