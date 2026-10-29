@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
-import { useI18n, Lang } from "../i18n";
+import { useI18n, Lang, SUPPORTED_LANGS } from "../i18n";
 import { AppSettings } from "../hooks/useAppSettings";
 import { ThemeMode } from "../hooks/useTheme";
 import {
@@ -127,29 +127,24 @@ export const SettingsModal: React.FC<Props> = ({
                   <div className="text-[11px] text-[var(--text-secondary)]">
                     {t("settings.langDesc")}
                   </div>
-                  <div className="grid grid-cols-2 gap-2 pt-1">
-                    <button
-                      onClick={() => onLangChange("zh-CN")}
-                      className={`p-2.5 rounded-xl border flex items-center justify-between transition ${
-                        lang === "zh-CN"
-                          ? "border-[#007AFF] bg-[#007AFF]/10 text-[#007AFF] font-medium"
-                          : "border-[var(--border-subtle)] hover:bg-[var(--hover-item)]"
-                      }`}
-                    >
-                      <span>简体中文 (Chinese)</span>
-                      {lang === "zh-CN" && <Check className="w-3.5 h-3.5" />}
-                    </button>
-                    <button
-                      onClick={() => onLangChange("en-US")}
-                      className={`p-2.5 rounded-xl border flex items-center justify-between transition ${
-                        lang === "en-US"
-                          ? "border-[#007AFF] bg-[#007AFF]/10 text-[#007AFF] font-medium"
-                          : "border-[var(--border-subtle)] hover:bg-[var(--hover-item)]"
-                      }`}
-                    >
-                      <span>English</span>
-                      {lang === "en-US" && <Check className="w-3.5 h-3.5" />}
-                    </button>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 pt-1">
+                    {SUPPORTED_LANGS.map((item) => (
+                      <button
+                        key={item.code}
+                        onClick={() => onLangChange(item.code)}
+                        className={`p-2 rounded-xl border flex items-center justify-between text-[11.5px] transition ${
+                          lang === item.code
+                            ? "border-[#007AFF] bg-[#007AFF]/10 text-[#007AFF] font-medium"
+                            : "border-[var(--border-subtle)] hover:bg-[var(--hover-item)] text-[var(--text-primary)]"
+                        }`}
+                      >
+                        <span className="flex items-center space-x-1.5 truncate">
+                          <span>{item.flag}</span>
+                          <span className="truncate">{item.label}</span>
+                        </span>
+                        {lang === item.code && <Check className="w-3.5 h-3.5 text-[#007AFF] flex-shrink-0" />}
+                      </button>
+                    ))}
                   </div>
                 </div>
 

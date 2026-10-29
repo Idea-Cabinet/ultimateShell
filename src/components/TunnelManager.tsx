@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { TabSession, TunnelEntry, TunnelType } from "../types";
+import { useI18n } from "../i18n";
 import {
   RotateCw,
   Plus,
@@ -26,6 +27,7 @@ export const TunnelManager: React.FC<Props> = ({
   onToggleMaximize,
   onClose,
 }) => {
+  const { t } = useI18n();
   const [tunnels, setTunnels] = useState<TunnelEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -166,7 +168,7 @@ export const TunnelManager: React.FC<Props> = ({
             className="px-2.5 py-1 bg-[#007AFF] hover:bg-[#0062CC] text-white rounded text-[11px] font-medium flex items-center space-x-1 transition active:scale-95 shadow-xs"
           >
             <Plus className="w-3 h-3" />
-            <span>新建隧道</span>
+            <span>{t("tunnel.new")}</span>
           </button>
 
           <button

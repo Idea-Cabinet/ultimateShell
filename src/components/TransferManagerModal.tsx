@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useTransferManager } from "../context/TransferContext";
+import { useI18n } from "../i18n";
 import { revealItemInDir, openPath } from "@tauri-apps/plugin-opener";
 import {
   ArrowDownLeft,
@@ -18,6 +19,7 @@ import {
 } from "lucide-react";
 
 export const TransferManagerModal: React.FC = () => {
+  const { t } = useI18n();
   const {
     tasks,
     isOpen,
@@ -138,7 +140,7 @@ export const TransferManagerModal: React.FC = () => {
               </div>
               <div>
                 <div className="font-semibold text-[13px] flex items-center space-x-2">
-                  <span>文件传输管理</span>
+                  <span>{t("transfer.title")}</span>
                   {activeCount > 0 && (
                     <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-[#007AFF]/20 text-[#007AFF] font-medium animate-pulse">
                       {activeCount} 进行中
@@ -165,7 +167,7 @@ export const TransferManagerModal: React.FC = () => {
                   className="px-2 py-1 text-[11px] text-[var(--text-tertiary)] hover:text-rose-500 hover:bg-rose-500/10 rounded-md transition flex items-center space-x-1 mr-1"
                 >
                   <Trash2 className="w-3 h-3" />
-                  <span>清空完成</span>
+                  <span>{t("transfer.clearAll")}</span>
                 </button>
               )}
 

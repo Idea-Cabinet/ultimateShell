@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { TabSession, SystemdService } from "../types";
+import { useI18n } from "../i18n";
 import {
   Search,
   RotateCw,
@@ -30,6 +31,7 @@ export const ServiceManager: React.FC<Props> = ({
   onToggleMaximize,
   onClose,
 }) => {
+  const { t } = useI18n();
   const [services, setServices] = useState<SystemdService[]>([]);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -165,7 +167,7 @@ export const ServiceManager: React.FC<Props> = ({
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="搜索服务名称或描述..."
+              placeholder={t("service.searchPlaceholder")}
               className="h-6 w-full pl-6 pr-5 text-[11px] bg-[var(--bg-app)] border border-[var(--border-subtle)] focus:border-[#007AFF] rounded outline-none text-[var(--text-primary)]"
             />
             {searchQuery && (
@@ -285,11 +287,11 @@ export const ServiceManager: React.FC<Props> = ({
           <table className="w-full border-collapse text-[11.5px] text-left">
             <thead className="sticky top-0 bg-[var(--bg-app)] border-b border-[var(--border-subtle)] text-[var(--text-secondary)] shadow-xs z-10 font-medium">
               <tr>
-                <th className="py-1.5 px-3 min-w-[200px]">服务单元名称</th>
-                <th className="py-1.5 px-3 w-28">运行状态</th>
-                <th className="py-1.5 px-3 w-24">子状态</th>
-                <th className="py-1.5 px-3">描述信息</th>
-                <th className="py-1.5 px-3 text-right w-44">控制操作</th>
+                <th className="py-1.5 px-3 min-w-[200px]">{t("service.colName")}</th>
+                <th className="py-1.5 px-3 w-28">{t("service.colStatus")}</th>
+                <th className="py-1.5 px-3 w-24">{t("service.colEnable")}</th>
+                <th className="py-1.5 px-3">{t("service.colDesc")}</th>
+                <th className="py-1.5 px-3 text-right w-44">{t("service.action")}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[var(--border-subtle)]/40 text-[var(--text-primary)]">

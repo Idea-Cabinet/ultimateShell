@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { TabSession, PortEntry } from "../types";
+import { useI18n } from "../i18n";
 import {
   Search,
   RotateCw,
@@ -29,6 +30,7 @@ export const PortManager: React.FC<Props> = ({
   onToggleMaximize,
   onClose,
 }) => {
+  const { t } = useI18n();
   const [ports, setPorts] = useState<PortEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -160,7 +162,7 @@ export const PortManager: React.FC<Props> = ({
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="搜索端口号 / 进程名 / IP..."
+              placeholder={t("port.searchPlaceholder")}
               className="h-6 w-full pl-6 pr-5 text-[11px] bg-[var(--bg-app)] border border-[var(--border-subtle)] focus:border-[#007AFF] rounded outline-none text-[var(--text-primary)]"
             />
             {searchQuery && (
@@ -221,13 +223,13 @@ export const PortManager: React.FC<Props> = ({
               onChange={(e) => setAutoRefresh(e.target.checked)}
               className="rounded accent-[#007AFF] w-3 h-3"
             />
-            <span>自动刷新 (3s)</span>
+            <span>{t("port.autoRefresh")}</span>
           </label>
 
           <button
             onClick={fetchPorts}
             className="p-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition"
-            title="刷新端口列表"
+            title={t("port.refresh")}
           >
             <RotateCw className={`w-3.5 h-3.5 ${loading ? "animate-spin text-[#007AFF]" : ""}`} />
           </button>
@@ -276,30 +278,30 @@ export const PortManager: React.FC<Props> = ({
                   onClick={() => handleSort("proto")}
                   className="py-1.5 px-3 cursor-pointer hover:text-[var(--text-primary)] w-20"
                 >
-                  协议 {sortField === "proto" && (sortAsc ? "↑" : "↓")}
+                  {t("port.colProto")} {sortField === "proto" && (sortAsc ? "↑" : "↓")}
                 </th>
                 <th
                   onClick={() => handleSort("port")}
                   className="py-1.5 px-3 cursor-pointer hover:text-[var(--text-primary)] w-28"
                 >
-                  端口号 {sortField === "port" && (sortAsc ? "↑" : "↓")}
+                  {t("port.colPort")} {sortField === "port" && (sortAsc ? "↑" : "↓")}
                 </th>
-                <th className="py-1.5 px-3 w-36">绑定地址 (IP)</th>
+                <th className="py-1.5 px-3 w-36">{t("port.colAddress")}</th>
                 <th className="py-1.5 px-3 w-24">状态</th>
                 <th
                   onClick={() => handleSort("program")}
                   className="py-1.5 px-3 cursor-pointer hover:text-[var(--text-primary)] min-w-[120px]"
                 >
-                  占用进程 {sortField === "program" && (sortAsc ? "↑" : "↓")}
+                  {t("port.colProgram")} {sortField === "program" && (sortAsc ? "↑" : "↓")}
                 </th>
                 <th
                   onClick={() => handleSort("pid")}
                   className="py-1.5 px-3 cursor-pointer hover:text-[var(--text-primary)] w-20"
                 >
-                  PID {sortField === "pid" && (sortAsc ? "↑" : "↓")}
+                  {t("port.colPid")} {sortField === "pid" && (sortAsc ? "↑" : "↓")}
                 </th>
-                <th className="py-1.5 px-3 w-24">用户</th>
-                <th className="py-1.5 px-3 text-right w-24">操作</th>
+                <th className="py-1.5 px-3 w-24">{t("port.colUser")}</th>
+                <th className="py-1.5 px-3 text-right w-24">{t("port.action")}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[var(--border-subtle)]/40 text-[var(--text-primary)] font-mono">
@@ -393,7 +395,7 @@ export const PortManager: React.FC<Props> = ({
                             className="opacity-0 group-hover:opacity-100 px-2 py-0.5 text-[10.5px] rounded bg-rose-500/10 hover:bg-rose-500 text-rose-500 hover:text-white transition flex items-center space-x-1 ml-auto"
                           >
                             <Skull className="w-2.5 h-2.5" />
-                            <span>杀进程</span>
+                            <span>{t("port.kill")}</span>
                           </button>
                         ) : (
                           <span className="text-[var(--text-tertiary)] text-[10px]">-</span>
@@ -425,13 +427,14 @@ export const PortManager: React.FC<Props> = ({
               </div>
               <div className="flex-1 min-w-0">
                 <div className="text-[14px] font-semibold tracking-tight">
-                  终止占用端口的进程
+                  {t("port.confirmKill")}
                 </div>
                 <div className="text-[11.5px] text-[var(--text-secondary)] mt-1 truncate">
-                  端口：<span className="font-mono font-bold text-[#007AFF]">:{killTarget.port}</span>
-                  <span className="mx-1.5 text-[var(--text-tertiary)]">·</span>
-                  进程：<span className="font-mono font-medium">{killTarget.program}</span>
-                  <span className="text-[var(--text-tertiary)] ml-1">(PID: {killTarget.pid})</span>
+                  {t("port.confirmKillDesc", {
+                    port: killTarget.port,
+                    pid: killTarget.pid || "?",
+                    prog: killTarget.program || "?",
+                  })}
                 </div>
               </div>
             </div>

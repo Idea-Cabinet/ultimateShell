@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { useI18n } from "../i18n";
 import {
   ShieldAlert,
   AlertTriangle,
@@ -26,6 +27,7 @@ interface Props {
 }
 
 export const AgentApprovalModal: React.FC<Props> = ({ onApprovalResolved }) => {
+  const { t } = useI18n();
   const [requests, setRequests] = useState<ApprovalRequest[]>([]);
   const [countdown, setCountdown] = useState<number>(60);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -228,7 +230,7 @@ export const AgentApprovalModal: React.FC<Props> = ({ onApprovalResolved }) => {
             className="flex-1 flex items-center justify-center space-x-1 px-3 py-2 rounded-xl text-[12px] font-medium border border-red-500/30 text-red-500 hover:bg-red-500/10 active:scale-95 transition-all disabled:opacity-50"
           >
             <X className="w-3.5 h-3.5" />
-            <span>拒绝执行</span>
+            <span>{t("agent.reject")}</span>
           </button>
 
           {/* Approve Once */}
@@ -238,7 +240,7 @@ export const AgentApprovalModal: React.FC<Props> = ({ onApprovalResolved }) => {
             className="flex-1 flex items-center justify-center space-x-1 px-3 py-2 rounded-xl text-[12px] font-medium bg-[#007AFF] text-white hover:bg-[#007AFF]/90 active:scale-95 transition-all shadow-sm disabled:opacity-50"
           >
             <Check className="w-3.5 h-3.5" />
-            <span>批准本次</span>
+            <span>{t("agent.approveOnce")}</span>
           </button>
 
           {/* Switch to Auto & Approve */}
@@ -249,7 +251,7 @@ export const AgentApprovalModal: React.FC<Props> = ({ onApprovalResolved }) => {
             className="flex-1 flex items-center justify-center space-x-1 px-3 py-2 rounded-xl text-[12px] font-medium bg-emerald-600 text-white hover:bg-emerald-500 active:scale-95 transition-all shadow-sm disabled:opacity-50"
           >
             <Zap className="w-3.5 h-3.5" />
-            <span>全部批准并放行</span>
+            <span>{t("agent.approveAuto")}</span>
           </button>
         </div>
       </div>

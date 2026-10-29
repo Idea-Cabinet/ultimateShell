@@ -4,7 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { HostProfile, TabSession, isDefaultGroup } from "./types";
 import { useTheme } from "./hooks/useTheme";
 import { useAppSettings } from "./hooks/useAppSettings";
-import { useI18n } from "./i18n";
+import { useI18n, SUPPORTED_LANGS } from "./i18n";
 import { Sidebar } from "./components/Sidebar";
 import { TabBar } from "./components/TabBar";
 import { TerminalView } from "./components/TerminalView";
@@ -947,7 +947,7 @@ function AppContent() {
               title="SSH 端口转发与隧道管理（本地打洞 -L、内网穿透 -R、动态 SOCKS5 代理 -D）"
             >
               <Workflow className="w-3 h-3 text-emerald-500" />
-              <span>隧道</span>
+              <span>{t("status.tunnels")}</span>
             </button>
 
             {/* Toggle Command Assistant Bar */}
@@ -984,7 +984,7 @@ function AppContent() {
               title="全局文件传输任务管理器 (下载/上传任务、速度、进度、历史记录)"
             >
               <ArrowUpDown className={`w-3 h-3 ${activeCount > 0 ? "animate-spin text-[#007AFF]" : "text-[var(--text-tertiary)]"}`} />
-              <span>{activeCount > 0 ? `${activeCount} 项传输中` : "文件传输"}</span>
+              <span>{activeCount > 0 ? `${activeCount} ${t("transfer.inProgress")}` : t("status.transfer")}</span>
             </button>
 
             {/* AI Agent Gateway Trigger Pill */}
@@ -1000,7 +1000,7 @@ function AppContent() {
               title={`本地 AI 双轨安全网关 (HTTP :${agentGatewayStatus?.port || 39281} | 原生 SSH :${agentGatewayStatus?.ssh_port || 2222}) · 零密码泄露与三级本地审批`}
             >
               <Bot className="w-3 h-3 text-purple-400" />
-              <span>AI 双轨网关</span>
+              <span>{t("agent.pill")}</span>
               {agentGatewayStatus?.is_running && (
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
               )}
@@ -1023,7 +1023,7 @@ function AppContent() {
 
           <div className="flex items-center space-x-2 text-[10.5px] flex-shrink-0">
             <span title="当前标签栏中打开的所有终端会话总数" className="cursor-default pr-1">
-              {tabs.length} {lang === "zh-CN" ? "个会话" : "tabs"}
+              {t("status.sessionsCount", { count: tabs.length })}
             </span>
 
             {/* Language Switcher Button */}
@@ -1033,7 +1033,7 @@ function AppContent() {
               className="px-1.5 py-0.5 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-all active:scale-95 flex items-center space-x-1 font-mono text-[10px] font-semibold border border-[var(--border-subtle)]"
             >
               <Globe className="w-3 h-3 text-[#007AFF]" />
-              <span>{lang === "zh-CN" ? "中" : "EN"}</span>
+              <span>{SUPPORTED_LANGS.find((l) => l.code === lang)?.short || "EN"}</span>
             </button>
 
             {/* Theme Toggle Button: Cycles System -> Light -> Dark -> System */}

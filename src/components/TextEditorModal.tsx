@@ -18,6 +18,7 @@ import {
   Redo2,
 } from "lucide-react";
 import { FileEntry, PreviewResult } from "../types";
+import { useI18n } from "../i18n";
 
 export type SupportedLanguage =
   | "html"
@@ -633,6 +634,7 @@ export const TextEditorModal: React.FC<TextEditorModalProps> = ({
   onClose,
   onReload,
 }) => {
+  const { t } = useI18n();
   const [content, setContent] = useState<string>("");
   const [isWrap, setIsWrap] = useState<boolean>(true);
   const [cursorPos, setCursorPos] = useState<{ line: number; col: number }>({ line: 1, col: 1 });
@@ -1157,7 +1159,7 @@ export const TextEditorModal: React.FC<TextEditorModalProps> = ({
                 type="button"
                 onClick={handleUndo}
                 disabled={!canUndo}
-                title="撤销 (⌘Z / Ctrl+Z)"
+                title={`${t("editor.undo")} (⌘Z / Ctrl+Z)`}
                 className="p-1 rounded hover:bg-[var(--hover-item)] disabled:opacity-30 disabled:pointer-events-none text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition cursor-pointer"
               >
                 <Undo2 className="w-3.5 h-3.5" />
@@ -1166,7 +1168,7 @@ export const TextEditorModal: React.FC<TextEditorModalProps> = ({
                 type="button"
                 onClick={handleRedo}
                 disabled={!canRedo}
-                title="重做 (⇧⌘Z / Ctrl+Y)"
+                title={`${t("editor.redo")} (⇧⌘Z / Ctrl+Y)`}
                 className="p-1 rounded hover:bg-[var(--hover-item)] disabled:opacity-30 disabled:pointer-events-none text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition cursor-pointer"
               >
                 <Redo2 className="w-3.5 h-3.5" />
@@ -1269,17 +1271,17 @@ export const TextEditorModal: React.FC<TextEditorModalProps> = ({
               {saveSuccess ? (
                 <>
                   <Check className="w-3.5 h-3.5" />
-                  <span>已保存</span>
+                  <span>{t("editor.saveSuccess")}</span>
                 </>
               ) : isSaving ? (
                 <>
                   <RotateCw className="w-3.5 h-3.5 animate-spin" />
-                  <span>保存中...</span>
+                  <span>{t("common.loading")}</span>
                 </>
               ) : (
                 <>
                   <Save className="w-3.5 h-3.5" />
-                  <span>保存{isDirty ? "*" : ""} (⌘S)</span>
+                  <span>{t("editor.save")}{isDirty ? "*" : ""} (⌘S)</span>
                 </>
               )}
             </button>

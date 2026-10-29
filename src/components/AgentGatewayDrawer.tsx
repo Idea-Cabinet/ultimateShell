@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { useI18n } from "../i18n";
 import {
   Bot,
   Shield,
@@ -54,6 +55,7 @@ interface Props {
 }
 
 export const AgentGatewayDrawer: React.FC<Props> = ({ isOpen, onClose }) => {
+  const { t } = useI18n();
   const [status, setStatus] = useState<GatewayStatusPayload | null>(null);
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
   const [copiedToken, setCopiedToken] = useState(false);
@@ -232,7 +234,7 @@ export const AgentGatewayDrawer: React.FC<Props> = ({ isOpen, onClose }) => {
             <div>
               <div className="flex items-center space-x-2">
                 <h2 className="text-[14px] font-semibold tracking-tight">
-                  本地 AI 双轨安全网关
+                  {t("agent.title")}
                 </h2>
                 {status?.is_running ? (
                   <div className="flex items-center space-x-1.5">
@@ -242,17 +244,17 @@ export const AgentGatewayDrawer: React.FC<Props> = ({ isOpen, onClose }) => {
                     </span>
                     <span className="flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] bg-blue-500/15 text-blue-500 border border-blue-500/30 font-medium">
                       <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
-                      <span>原生 SSH :{status.ssh_port || 2222}</span>
+                      <span>SSH :{status.ssh_port || 2222}</span>
                     </span>
                   </div>
                 ) : (
                   <span className="px-2 py-0.5 rounded-full text-[10px] bg-red-500/15 text-red-500 border border-red-500/30">
-                    已暂停
+                    {t("agent.stopped")}
                   </span>
                 )}
               </div>
               <p className="text-[11px] text-[var(--text-tertiary)] mt-0.5">
-                让外部 AI Agent 零密码操控服务器 · 本地隔离保护与三级审批
+                AI Agent Proxy · Zero Password Leakage · Approval Gate
               </p>
             </div>
           </div>
@@ -266,7 +268,7 @@ export const AgentGatewayDrawer: React.FC<Props> = ({ isOpen, onClose }) => {
                   : "bg-emerald-500/10 text-emerald-500 border-emerald-500/30 hover:bg-emerald-500/20"
               }`}
             >
-              {status?.is_running ? "暂停网关" : "启动网关"}
+              {status?.is_running ? t("service.stop") : t("service.start")}
             </button>
             <button
               onClick={onClose}
@@ -280,14 +282,13 @@ export const AgentGatewayDrawer: React.FC<Props> = ({ isOpen, onClose }) => {
         {/* Policy Selector Banner */}
         <div className="p-4 border-b border-[var(--border-subtle)] bg-[var(--hover-item)]/30">
           <div className="text-[11.5px] font-medium text-[var(--text-secondary)] mb-2 flex items-center justify-between">
-            <span>🛡️ 命令执行审批策略:</span>
+            <span>🛡️ {t("agent.policy")}:</span>
             <span className="text-[10.5px] text-[var(--text-tertiary)]">
-              当前:{" "}
               {status?.policy === "strict"
-                ? "请求批准 (严格)"
+                ? t("agent.policyStrict")
                 : status?.policy === "auto"
-                ? "全部批准 (放行)"
-                : "帮我批准 (智能)"}
+                ? t("agent.policyAuto")
+                : t("agent.policySmart")}
             </span>
           </div>
 
@@ -303,10 +304,10 @@ export const AgentGatewayDrawer: React.FC<Props> = ({ isOpen, onClose }) => {
             >
               <div className="flex items-center space-x-1.5 font-semibold text-[11.5px]">
                 <Shield className="w-3.5 h-3.5" />
-                <span>请求批准</span>
+                <span>{t("agent.policyStrict")}</span>
               </div>
               <p className="text-[10px] text-[var(--text-tertiary)] mt-1 leading-tight">
-                所有增删改操作均需人工在界面弹窗逐条确认
+                {t("agent.policyStrictDesc")}
               </p>
             </button>
 
@@ -321,10 +322,10 @@ export const AgentGatewayDrawer: React.FC<Props> = ({ isOpen, onClose }) => {
             >
               <div className="flex items-center space-x-1.5 font-semibold text-[11.5px]">
                 <Bot className="w-3.5 h-3.5" />
-                <span>帮我批准 (推荐)</span>
+                <span>{t("agent.policySmart")}</span>
               </div>
               <p className="text-[10px] text-[var(--text-tertiary)] mt-1 leading-tight">
-                只读与常见运维自动放行，仅 rm -rf 等高危指令弹窗
+                {t("agent.policySmartDesc")}
               </p>
             </button>
 
@@ -339,10 +340,10 @@ export const AgentGatewayDrawer: React.FC<Props> = ({ isOpen, onClose }) => {
             >
               <div className="flex items-center space-x-1.5 font-semibold text-[11.5px]">
                 <Zap className="w-3.5 h-3.5" />
-                <span>全部批准</span>
+                <span>{t("agent.policyAuto")}</span>
               </div>
               <p className="text-[10px] text-[var(--text-tertiary)] mt-1 leading-tight">
-                免打扰全自动执行，所有命令与脱敏输出完整计入审计
+                {t("agent.policyAutoDesc")}
               </p>
             </button>
           </div>
@@ -359,7 +360,7 @@ export const AgentGatewayDrawer: React.FC<Props> = ({ isOpen, onClose }) => {
             }`}
           >
             <Terminal className="w-3.5 h-3.5" />
-            <span>实时审计日志</span>
+            <span>{t("agent.auditLogs")}</span>
             {auditLogs.length > 0 && (
               <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-[var(--hover-item)] font-mono text-[var(--text-secondary)]">
                 {auditLogs.length}
@@ -557,7 +558,7 @@ export const AgentGatewayDrawer: React.FC<Props> = ({ isOpen, onClose }) => {
                       ) : (
                         <Copy className="w-3 h-3" />
                       )}
-                      <span>{copiedSshCmd ? "已复制命令" : "复制 SSH 命令"}</span>
+                      <span>{copiedSshCmd ? t("common.success") : t("agent.copySsh")}</span>
                     </button>
                     <button
                       onClick={() =>
@@ -573,13 +574,13 @@ export const AgentGatewayDrawer: React.FC<Props> = ({ isOpen, onClose }) => {
                       ) : (
                         <Copy className="w-3 h-3" />
                       )}
-                      <span>{copiedSshConfig ? "已复制" : "复制 .ssh/config"}</span>
+                      <span>{copiedSshConfig ? t("common.success") : "复制 .ssh/config"}</span>
                     </button>
                   </div>
                 </div>
 
                 <p className="text-[11px] text-[var(--text-secondary)] leading-relaxed">
-                  无需任何 HTTP 客户端。AI Agent 只需在终端中敲原生 \`ssh\`，由本地网关截获并执行三级安全审批，凭证零泄露：
+                  无需任何 HTTP 客户端。AI Agent 只需在终端中敲原生 `ssh`，由本地网关截获并执行三级安全审批，凭证零泄露：
                 </p>
 
                 <div className="bg-[var(--bg-terminal,rgba(0,0,0,0.5))] rounded-lg p-2.5 font-mono text-[11px] text-emerald-400 border border-[var(--border-subtle)]">
@@ -606,7 +607,7 @@ export const AgentGatewayDrawer: React.FC<Props> = ({ isOpen, onClose }) => {
                     ) : (
                       <Copy className="w-3 h-3" />
                     )}
-                    <span>{copiedToken ? "已复制" : "复制 Token"}</span>
+                    <span>{copiedToken ? t("common.success") : t("agent.copyToken")}</span>
                   </button>
                 </div>
 
@@ -615,7 +616,7 @@ export const AgentGatewayDrawer: React.FC<Props> = ({ isOpen, onClose }) => {
                 </div>
 
                 <p className="text-[11px] text-[var(--text-tertiary)] leading-relaxed">
-                  本地接口: \`http://127.0.0.1:{status?.port || 39281}\` · 仅限本机回环访问，用于支持 Tool Calling 或 MCP 的外部 AI Agent。
+                  本地接口: `http://127.0.0.1:{status?.port || 39281}` · 仅限本机回环访问，用于支持 Tool Calling 或 MCP 的外部 AI Agent。
                 </p>
               </div>
 
@@ -637,7 +638,7 @@ export const AgentGatewayDrawer: React.FC<Props> = ({ isOpen, onClose }) => {
                     ) : (
                       <Copy className="w-3 h-3" />
                     )}
-                    <span>{copiedSkill ? "已复制 Skill" : "一键复制 Skill"}</span>
+                    <span>{copiedSkill ? t("common.success") : t("agent.copySkill")}</span>
                   </button>
                 </div>
                 <p className="text-[11px] text-[var(--text-tertiary)]">
@@ -661,7 +662,7 @@ export const AgentGatewayDrawer: React.FC<Props> = ({ isOpen, onClose }) => {
                     ) : (
                       <Copy className="w-3 h-3" />
                     )}
-                    <span>{copiedMcp ? "已复制 MCP" : "复制 MCP 配置"}</span>
+                    <span>{copiedMcp ? t("common.success") : t("agent.copyMcp")}</span>
                   </button>
                 </div>
                 <pre className="bg-[var(--bg-terminal,rgba(0,0,0,0.5))] rounded-lg p-2.5 font-mono text-[10.5px] text-gray-300 overflow-x-auto border border-[var(--border-subtle)]">
