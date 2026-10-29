@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { createPortal } from "react-dom";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -11,16 +10,12 @@ import { TabSession } from "../types";
 import { ResolvedTheme } from "../hooks/useTheme";
 import { AppSettings } from "../hooks/useAppSettings";
 import { useTransferManager } from "../context/TransferContext";
-import { useI18n } from "../i18n";
 import {
   Search,
   ChevronUp,
   ChevronDown,
   X,
   Upload,
-  FolderUp,
-  FileText,
-  Terminal as TerminalIcon,
 } from "lucide-react";
 
 const DARK_THEME = {
@@ -86,7 +81,6 @@ export const TerminalView: React.FC<Props> = ({
   settings,
   onBroadcastData,
 }) => {
-  const { t } = useI18n();
   const transferManager = useTransferManager();
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -95,8 +89,7 @@ export const TerminalView: React.FC<Props> = ({
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const onBroadcastDataRef = useRef(onBroadcastData);
 
-  // Drag and Drop Files handling (FinalShell replica: upload to cwd or paste paths to terminal)
-  const [droppedFiles, setDroppedFiles] = useState<{ paths: string[]; targetCwd: string } | null>(null);
+  // Drag and Drop Files handling: Directly upload to terminal cwd (FinalShell style, no prompt)
   const [isDragOver, setIsDragOver] = useState(false);
   const dragCounterRef = useRef(0);
   const recentDropRef = useRef(0);
@@ -119,9 +112,16 @@ export const TerminalView: React.FC<Props> = ({
     if (now - recentDropRef.current < 600) return;
     recentDropRef.current = now;
 
-    const cwd = await resolveTargetCwd();
-    setDroppedFiles({ paths: rawPaths, targetCwd: cwd });
-  }, [resolveTargetCwd]);
+    const targetCwd = await resolveTargetCwd();
+    for (const localPath of rawPaths) {
+      transferManager.startUpload(
+        session.id,
+        session.title || (session.isLocal ? "本地终端" : "远程服务器"),
+        localPath,
+        targetCwd
+      );
+    }
+  }, [resolveTargetCwd, session.id, session.title, session.isLocal, transferManager]);
 
   // HTML5 Drag Events for visual feedback
   const handleDragEnter = (e: React.DragEvent) => {
@@ -187,49 +187,6 @@ export const TerminalView: React.FC<Props> = ({
       if (unlisten) unlisten();
     };
   }, [isActive, handleTriggerDrop]);
-
-  const handleConfirmUploadToCwd = async () => {
-    if (!droppedFiles) return;
-    const { paths, targetCwd } = droppedFiles;
-    for (const localPath of paths) {
-      transferManager.startUpload(
-        session.id,
-        session.title || (session.isLocal ? "本地终端" : "远程服务器"),
-        localPath,
-        targetCwd
-      );
-    }
-    setDroppedFiles(null);
-    terminalInstanceRef.current?.focus();
-  };
-
-  const handleConfirmPastePaths = () => {
-    if (!droppedFiles) return;
-    const formatted = droppedFiles.paths
-      .map((p) => (p.includes(" ") ? `"${p}"` : p))
-      .join(" ");
-    invoke("pty_write", { sessionId: session.id, data: formatted + " " }).catch(console.error);
-    setDroppedFiles(null);
-    terminalInstanceRef.current?.focus();
-  };
-
-  const handleCancelModal = () => {
-    setDroppedFiles(null);
-    terminalInstanceRef.current?.focus();
-  };
-
-  // Esc key closes drop modal
-  useEffect(() => {
-    if (!droppedFiles) return;
-    const handleModalKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        handleCancelModal();
-      }
-    };
-    window.addEventListener("keydown", handleModalKeyDown);
-    return () => window.removeEventListener("keydown", handleModalKeyDown);
-  }, [droppedFiles]);
 
   useEffect(() => {
     onBroadcastDataRef.current = onBroadcastData;
@@ -540,123 +497,10 @@ export const TerminalView: React.FC<Props> = ({
             <Upload className="w-6 h-6" />
           </div>
           <div className="text-[14px] font-semibold text-[#007AFF]">
-            {t("terminal.dragModalTitle")}
-          </div>
-          <div className="text-[11px] font-mono text-[var(--text-secondary)] px-3 py-1 rounded bg-[var(--bg-card)] border border-[var(--border-subtle)] shadow-xs">
-            {t("terminal.targetDir")}: {droppedFiles?.targetCwd || "..."}
+            松开鼠标立即上传至终端工作目录
           </div>
         </div>
       )}
-
-      {/* FinalShell-style Dropped Files Action Dialog */}
-      {droppedFiles &&
-        createPortal(
-          <div
-            onClick={handleCancelModal}
-            className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-[3px] p-4 animate-in fade-in duration-150 select-none"
-          >
-            <div
-              onClick={(e) => e.stopPropagation()}
-              className="w-full max-w-[460px] bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-2xl shadow-2xl overflow-hidden flex flex-col animate-in zoom-in-95 duration-150"
-            >
-              {/* Modal Header */}
-              <div className="px-5 py-4 border-b border-[var(--border-subtle)] flex items-center justify-between">
-                <div className="flex items-center space-x-2.5">
-                  <div className="w-8 h-8 rounded-xl bg-[#007AFF]/15 text-[#007AFF] flex items-center justify-center flex-shrink-0">
-                    <FolderUp className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h3 className="text-[13.5px] font-semibold text-[var(--text-primary)]">
-                      {t("terminal.dragModalTitle")}
-                    </h3>
-                    <p className="text-[11px] text-[var(--text-tertiary)]">
-                      {t("terminal.dragModalSubtitle")}
-                    </p>
-                  </div>
-                </div>
-                <button
-                  onClick={handleCancelModal}
-                  className="p-1 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--hover-item)] transition active:scale-95"
-                  title="关闭 (Esc)"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              {/* Dropped Files List & Target Directory Summary */}
-              <div className="px-5 py-3.5 bg-[var(--bg-app)]/50 border-b border-[var(--border-subtle)] space-y-2">
-                <div className="text-[11px] font-medium text-[var(--text-secondary)] flex items-center justify-between">
-                  <span>包含 {droppedFiles.paths.length} 个文件 / 文件夹:</span>
-                  <span className="text-[10px] font-mono text-[var(--text-tertiary)] truncate max-w-[220px]">
-                    {t("terminal.targetDir")}: {droppedFiles.targetCwd}
-                  </span>
-                </div>
-                <div className="max-h-28 overflow-y-auto space-y-1 pr-1 font-mono text-[11px]">
-                  {droppedFiles.paths.map((p, idx) => (
-                    <div
-                      key={idx}
-                      className="flex items-center space-x-1.5 px-2 py-1 rounded bg-[var(--bg-card)] border border-[var(--border-subtle)] text-[var(--text-primary)] truncate"
-                      title={p}
-                    >
-                      <FileText className="w-3.5 h-3.5 text-[#007AFF] flex-shrink-0" />
-                      <span className="truncate">{p}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* FinalShell Two Action Buttons */}
-              <div className="p-4 space-y-2.5">
-                {/* Option 1: Upload to Current Working Directory */}
-                <button
-                  onClick={handleConfirmUploadToCwd}
-                  className="w-full p-3 rounded-xl border border-[var(--border-subtle)] hover:border-[#007AFF] bg-[var(--bg-card)] hover:bg-[#007AFF]/10 flex items-center space-x-3 text-left transition group active:scale-[0.99]"
-                >
-                  <div className="w-9 h-9 rounded-lg bg-[#007AFF] text-white flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform shadow-xs">
-                    <Upload className="w-4 h-4" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[12.5px] font-semibold text-[var(--text-primary)] group-hover:text-[#007AFF] transition-colors">
-                      {t("terminal.uploadToCwd")}
-                    </div>
-                    <div className="text-[11px] text-[var(--text-tertiary)] truncate">
-                      {t("terminal.uploadDesc")} ({droppedFiles.targetCwd})
-                    </div>
-                  </div>
-                </button>
-
-                {/* Option 2: Paste Paths to Terminal Command Line */}
-                <button
-                  onClick={handleConfirmPastePaths}
-                  className="w-full p-3 rounded-xl border border-[var(--border-subtle)] hover:border-emerald-500 bg-[var(--bg-card)] hover:bg-emerald-500/10 flex items-center space-x-3 text-left transition group active:scale-[0.99]"
-                >
-                  <div className="w-9 h-9 rounded-lg bg-emerald-500 text-white flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform shadow-xs">
-                    <TerminalIcon className="w-4 h-4" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[12.5px] font-semibold text-[var(--text-primary)] group-hover:text-emerald-500 transition-colors">
-                      {t("terminal.pastePaths")}
-                    </div>
-                    <div className="text-[11px] text-[var(--text-tertiary)] truncate">
-                      {t("terminal.pasteDesc")}
-                    </div>
-                  </div>
-                </button>
-              </div>
-
-              {/* Modal Footer */}
-              <div className="px-5 py-2.5 bg-[var(--bg-card)] border-t border-[var(--border-subtle)] flex items-center justify-end">
-                <button
-                  onClick={handleCancelModal}
-                  className="px-3.5 py-1 text-[11.5px] rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--hover-item)] transition active:scale-95"
-                >
-                  取消 (Esc)
-                </button>
-              </div>
-            </div>
-          </div>,
-          document.body
-        )}
 
       {/* Floating Terminal Output Search Bar (Cmd+F / Ctrl+F) */}
       {isSearchOpen ? (
