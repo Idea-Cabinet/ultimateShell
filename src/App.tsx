@@ -1160,6 +1160,10 @@ function AppContent() {
         onThemeChange={setThemeMode}
         lang={lang}
         onLangChange={setLang}
+        onOpenAgentDrawer={() => {
+          setIsSettingsOpen(false);
+          setIsAgentDrawerOpen(true);
+        }}
       />
 
       {/* Global Collapsible File Transfer Operations Modal / Floating Pill */}

@@ -1,10 +1,11 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { useI18n, Lang, SUPPORTED_LANGS } from "../i18n";
 import { AppSettings } from "../hooks/useAppSettings";
 import { ThemeMode } from "../hooks/useTheme";
+import { GatewayStatusPayload } from "./AgentGatewayDrawer";
 import {
   X,
   SlidersHorizontal,
@@ -18,6 +19,11 @@ import {
   Check,
   Lock,
   FolderOpen,
+  Bot,
+  Copy,
+  Code,
+  FileText,
+  ExternalLink,
 } from "lucide-react";
 
 interface Props {
@@ -30,9 +36,10 @@ interface Props {
   lang: Lang;
   onLangChange: (lang: Lang) => void;
   onClearCache?: () => void;
+  onOpenAgentDrawer?: () => void;
 }
 
-type SettingsTab = "general" | "terminal" | "security";
+type SettingsTab = "general" | "terminal" | "security" | "skill";
 
 export const SettingsModal: React.FC<Props> = ({
   isOpen,
@@ -44,10 +51,88 @@ export const SettingsModal: React.FC<Props> = ({
   lang,
   onLangChange,
   onClearCache,
+  onOpenAgentDrawer,
 }) => {
   const { t } = useI18n();
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
   const [showClearSuccess, setShowClearSuccess] = useState(false);
+
+  // Gateway status for Skill documentation
+  const [gatewayStatus, setGatewayStatus] = useState<GatewayStatusPayload | null>(null);
+  const [copiedToken, setCopiedToken] = useState(false);
+  const [copiedSkill, setCopiedSkill] = useState(false);
+  const [copiedMcp, setCopiedMcp] = useState(false);
+  const [copiedSshCmd, setCopiedSshCmd] = useState(false);
+  const [copiedSshConfig, setCopiedSshConfig] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      invoke<GatewayStatusPayload>("agent_get_gateway_status")
+        .then(setGatewayStatus)
+        .catch(() => {});
+    }
+  }, [isOpen]);
+
+  const copyToClipboard = (text: string, setCopied: (v: boolean) => void) => {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const skillMarkdown = useMemo(() => {
+    const port = gatewayStatus?.port || 39281;
+    const sshPort = gatewayStatus?.ssh_port || 2222;
+    const token = gatewayStatus?.token || "<YOUR_TOKEN>";
+    return `# UltimateShell AI Agent Security Gateway Skill (双轨制)
+
+## 概述
+你已连接到用户的本地 UltimateShell AI 安全代理双轨网关。
+你可以安全地代表用户对服务器执行巡检、状态读取和维护操作。
+**所有服务器密码和 SSH 私钥均严格保存在用户本地 Rust 安全保险库中，外部 Agent 完全无需也无法读取密码或密钥。**
+
+## 双轨连接规范
+
+### 轨道 1：原生 SSH 协议直接连接 (适用于 Claude Code CLI, 终端脚本与命令行 Agent)
+- 本地地址: \`127.0.0.1\`
+- SSH 端口: \`${sshPort}\`
+- 命令行直接执行示例:
+  \`\`\`bash
+  ssh -p ${sshPort} <目标服务器名称或Host>@127.0.0.1 "<command>"
+  \`\`\`
+- 说明:
+  - 回环本地连接无需输入真实服务器私钥或密码。
+  - 遇到高危或写操作时，SSH 终端将实时提示 \`Waiting for user approval...\`，并在桌面弹窗批准后自动继续执行。
+
+### 轨道 2：HTTP / MCP API 工具调用 (适用于 Claude Desktop, Cursor, Web Agents)
+- 本地接口: \`http://127.0.0.1:${port}\`
+- 鉴权头: \`Authorization: Bearer ${token}\`
+- 可用工具接口:
+  - 获取主机: \`GET /api/servers\`
+  - 执行命令: \`POST /api/exec\` (参数: \`server\`, \`command\`, \`agent_name\`)
+  - 读取文件: \`POST /api/read_file\` (参数: \`server\`, \`path\`)
+`;
+  }, [gatewayStatus?.port, gatewayStatus?.ssh_port, gatewayStatus?.token]);
+
+  const mcpConfigJson = useMemo(() => {
+    const port = gatewayStatus?.port || 39281;
+    const token = gatewayStatus?.token || "<YOUR_TOKEN>";
+    return JSON.stringify(
+      {
+        mcpServers: {
+          ultimateShell: {
+            command: "npx",
+            args: [
+              "-y",
+              "mcp-remote",
+              `http://127.0.0.1:${port}/mcp?token=${token}`,
+            ],
+          },
+        },
+      },
+      null,
+      2
+    );
+  }, [gatewayStatus?.port, gatewayStatus?.token]);
 
   if (!isOpen) return null;
 
@@ -60,7 +145,7 @@ export const SettingsModal: React.FC<Props> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 backdrop-blur-md animate-in fade-in duration-100 select-none">
-      <div className="apple-card rounded-2xl w-[600px] h-[450px] shadow-2xl border border-[var(--border-subtle)] flex flex-col overflow-hidden text-[var(--text-primary)]">
+      <div className="apple-card rounded-2xl w-[680px] h-[520px] max-w-[95vw] max-h-[90vh] shadow-2xl border border-[var(--border-subtle)] flex flex-col overflow-hidden text-[var(--text-primary)]">
         {/* Modal Header */}
         <div className="px-5 py-3 border-b border-[var(--border-subtle)] flex items-center justify-between flex-shrink-0 bg-[var(--hover-item)]/30">
           <div className="flex items-center space-x-2">
@@ -114,6 +199,18 @@ export const SettingsModal: React.FC<Props> = ({
             >
               <ShieldCheck className="w-3.5 h-3.5" />
               <span>{t("settings.tabSecurity")}</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab("skill")}
+              className={`w-full flex items-center space-x-2 px-3 py-2 rounded-xl text-[12px] font-medium transition ${
+                activeTab === "skill"
+                  ? "bg-[#007AFF] text-white shadow-sm"
+                  : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--hover-item)]"
+              }`}
+            >
+              <Bot className="w-3.5 h-3.5" />
+              <span>{t("settings.tabSkill")}</span>
             </button>
           </div>
 
@@ -454,6 +551,135 @@ export const SettingsModal: React.FC<Props> = ({
                   </div>
                 </div>
               </>
+            )}
+
+            {activeTab === "skill" && (
+              <div className="space-y-4">
+                {/* Header card with status and open drawer button */}
+                <div className="p-3.5 rounded-xl bg-purple-500/10 border border-purple-500/25 flex items-start justify-between">
+                  <div className="flex items-start space-x-3">
+                    <div className="w-8 h-8 rounded-lg bg-purple-500/20 text-purple-400 flex items-center justify-center flex-shrink-0 mt-0.5">
+                      <Bot className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="flex items-center space-x-2">
+                        <span className="font-semibold text-[13px] text-purple-400">
+                          {t("settings.skillTitle")}
+                        </span>
+                        {gatewayStatus?.is_running ? (
+                          <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-emerald-500/15 text-emerald-500 border border-emerald-500/30 font-medium">
+                            HTTP :{gatewayStatus.port} | SSH :{gatewayStatus.ssh_port || 2222}
+                          </span>
+                        ) : (
+                          <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-red-500/15 text-red-500 border border-red-500/30">
+                            {t("agent.stopped")}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-[var(--text-secondary)] mt-1">
+                        {t("settings.skillDesc")}
+                      </p>
+                    </div>
+                  </div>
+                  {onOpenAgentDrawer && (
+                    <button
+                      onClick={onOpenAgentDrawer}
+                      className="px-2.5 py-1 text-[11px] rounded-lg bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 border border-purple-500/30 flex items-center space-x-1 flex-shrink-0 ml-2 transition"
+                    >
+                      <span>{t("settings.openGateway")}</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Track 1: Native SSH Direct Connect (CLI) */}
+                <div className="p-3.5 rounded-xl border border-blue-500/30 bg-blue-500/5 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-[12px] flex items-center space-x-1.5 text-blue-400">
+                      <Terminal className="w-3.5 h-3.5" />
+                      <span>轨道 1：原生 SSH 命令行直连 (Claude Code / CLI)</span>
+                    </span>
+                    <div className="flex items-center space-x-1.5">
+                      <button
+                        onClick={() =>
+                          copyToClipboard(
+                            `ssh -p ${gatewayStatus?.ssh_port || 2222} <server>@127.0.0.1 "<command>"`,
+                            setCopiedSshCmd
+                          )
+                        }
+                        className="flex items-center space-x-1 px-2 py-0.5 rounded text-[10.5px] bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 transition"
+                      >
+                        {copiedSshCmd ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                        <span>{copiedSshCmd ? t("common.success") : t("agent.copySsh")}</span>
+                      </button>
+                      <button
+                        onClick={() =>
+                          copyToClipboard(
+                            `# UltimateShell 本地 AI 原生 SSH 堡垒配置 (~/.ssh/config)\nHost ai-*\n  HostName 127.0.0.1\n  Port ${gatewayStatus?.ssh_port || 2222}\n  UserKnownHostsFile /dev/null\n  StrictHostKeyChecking no\n`,
+                            setCopiedSshConfig
+                          )
+                        }
+                        className="flex items-center space-x-1 px-2 py-0.5 rounded text-[10.5px] bg-[var(--hover-item)] hover:border-[var(--border-strong)] border border-[var(--border-subtle)] transition"
+                      >
+                        {copiedSshConfig ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                        <span>{copiedSshConfig ? t("common.success") : "复制 .ssh/config"}</span>
+                      </button>
+                    </div>
+                  </div>
+                  <div className="bg-[var(--bg-terminal,rgba(0,0,0,0.5))] rounded-lg p-2 font-mono text-[10.5px] text-emerald-400 border border-[var(--border-subtle)]">
+                    $ ssh -p {gatewayStatus?.ssh_port || 2222} 目标服务器@127.0.0.1 "systemctl status nginx"
+                  </div>
+                </div>
+
+                {/* Track 2: HTTP / MCP API Calling (Claude Desktop / Cursor) */}
+                <div className="p-3.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-card)] space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-[12px] flex items-center space-x-1.5 text-purple-400">
+                      <Code className="w-3.5 h-3.5" />
+                      <span>轨道 2：HTTP / MCP API 接口凭证与配置</span>
+                    </span>
+                    <div className="flex items-center space-x-1.5">
+                      <button
+                        onClick={() => copyToClipboard(gatewayStatus?.token || "", setCopiedToken)}
+                        className="flex items-center space-x-1 px-2 py-0.5 rounded text-[10.5px] bg-[#007AFF]/15 text-[#007AFF] hover:bg-[#007AFF]/25 transition"
+                      >
+                        {copiedToken ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                        <span>{copiedToken ? t("common.success") : t("agent.copyToken")}</span>
+                      </button>
+                      <button
+                        onClick={() => copyToClipboard(mcpConfigJson, setCopiedMcp)}
+                        className="flex items-center space-x-1 px-2 py-0.5 rounded text-[10.5px] bg-[var(--hover-item)] hover:border-[var(--border-strong)] border border-[var(--border-subtle)] transition"
+                      >
+                        {copiedMcp ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                        <span>{copiedMcp ? t("common.success") : t("agent.copyMcp")}</span>
+                      </button>
+                    </div>
+                  </div>
+                  <p className="text-[10.5px] text-[var(--text-tertiary)]">
+                    本地回环: <code className="font-mono text-purple-300">http://127.0.0.1:{gatewayStatus?.port || 39281}</code> · 鉴权: <code className="font-mono text-purple-300">Bearer {gatewayStatus?.token ? `${gatewayStatus.token.slice(0, 16)}...` : ""}</code>
+                  </p>
+                </div>
+
+                {/* SKILL.md Full Specification Document */}
+                <div className="p-3.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-card)] space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-[12px] flex items-center space-x-1.5">
+                      <FileText className="w-3.5 h-3.5 text-blue-400" />
+                      <span>外部 Agent SKILL.md 规范文档</span>
+                    </span>
+                    <button
+                      onClick={() => copyToClipboard(skillMarkdown, setCopiedSkill)}
+                      className="flex items-center space-x-1 px-2 py-0.5 rounded text-[10.5px] bg-[#007AFF] text-white hover:bg-[#0062CC] transition shadow-xs"
+                    >
+                      {copiedSkill ? <Check className="w-3 h-3 text-white" /> : <Copy className="w-3 h-3" />}
+                      <span>{copiedSkill ? t("common.success") : t("agent.copySkill")}</span>
+                    </button>
+                  </div>
+                  <pre className="bg-[var(--bg-terminal,rgba(0,0,0,0.5))] rounded-lg p-2.5 font-mono text-[10.5px] text-gray-300 max-h-44 overflow-y-auto whitespace-pre-wrap select-text border border-[var(--border-subtle)] leading-relaxed">
+                    {skillMarkdown}
+                  </pre>
+                </div>
+              </div>
             )}
           </div>
         </div>
