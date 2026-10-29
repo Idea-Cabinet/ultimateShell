@@ -129,6 +129,35 @@ export const TabBar: React.FC<Props> = ({
   return (
     <>
       <div
+        data-tauri-drag-region
+        onMouseDown={(e) => {
+          const target = e.target as HTMLElement;
+          if (
+            target.closest("button") ||
+            target.closest("input") ||
+            target.closest("[data-reorder-id]")
+          ) {
+            return;
+          }
+          if (e.button === 0) {
+            import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
+              getCurrentWindow().startDragging();
+            });
+          }
+        }}
+        onDoubleClick={(e) => {
+          const target = e.target as HTMLElement;
+          if (
+            target.closest("button") ||
+            target.closest("input") ||
+            target.closest("[data-reorder-id]")
+          ) {
+            return;
+          }
+          import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
+            getCurrentWindow().toggleMaximize();
+          });
+        }}
         className={`app-titlebar apple-vibrancy-toolbar border-b border-[var(--border-subtle)] flex items-center px-3 space-x-1.5 select-none z-10 transition-[padding] duration-160 ease-[var(--ease-drawer)] ${
           isSidebarCollapsed ? "pl-[118px]" : ""
         }`}
@@ -251,7 +280,22 @@ export const TabBar: React.FC<Props> = ({
         </div>
 
         {/* Trailing Draggable Area for Window Dragging */}
-        <div data-tauri-drag-region className="flex-1 h-full min-w-[20px]" />
+        <div
+          data-tauri-drag-region
+          onMouseDown={(e) => {
+            if (e.button === 0) {
+              import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
+                getCurrentWindow().startDragging();
+              });
+            }
+          }}
+          onDoubleClick={() => {
+            import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
+              getCurrentWindow().toggleMaximize();
+            });
+          }}
+          className="flex-1 h-full min-w-[30px] cursor-default"
+        />
       </div>
 
       {/* Right-click Context Menu Popover (macOS Styled, Portaled to document.body at top z-index) */}

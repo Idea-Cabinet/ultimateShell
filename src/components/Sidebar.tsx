@@ -268,6 +268,22 @@ export const Sidebar: React.FC<Props> = ({
       {/* macOS Unified Titlebar Drag Region & Traffic Lights clearance */}
       <div
         data-tauri-drag-region
+        onMouseDown={(e) => {
+          const target = e.target as HTMLElement;
+          if (target.closest("button") || target.closest("input")) return;
+          if (e.button === 0) {
+            import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
+              getCurrentWindow().startDragging();
+            });
+          }
+        }}
+        onDoubleClick={(e) => {
+          const target = e.target as HTMLElement;
+          if (target.closest("button") || target.closest("input")) return;
+          import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
+            getCurrentWindow().toggleMaximize();
+          });
+        }}
         className="app-titlebar app-titlebar-controls flex items-center justify-between px-3 border-b border-[var(--border-subtle)] select-none flex-shrink-0"
       >
         <div className="flex min-w-0 items-center truncate">

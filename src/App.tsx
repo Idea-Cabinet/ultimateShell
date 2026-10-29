@@ -776,7 +776,7 @@ function AppContent() {
         )}
 
         {/* Bottom Status Bar with Current Path, Ops Drawer Shortcuts & Command Assistant */}
-        <div className="h-6 min-h-[24px] flex-shrink-0 apple-vibrancy-toolbar border-t border-[var(--border-subtle)] px-2.5 flex items-center justify-between text-[11px] text-[var(--text-tertiary)] select-none overflow-hidden">
+        <div className="h-[29px] min-h-[29px] flex-shrink-0 apple-vibrancy-toolbar border-t border-[var(--border-subtle)] px-2.5 py-1 flex items-center justify-between text-[11px] text-[var(--text-tertiary)] select-none overflow-hidden">
           <div className="flex-1 flex items-center space-x-1.5 min-w-0 overflow-x-auto no-scrollbar flex-nowrap mr-2">
             <span
               title={activeTab?.connected ? "会话状态：已正常连接并就绪" : "会话状态：已断开或已退出"}

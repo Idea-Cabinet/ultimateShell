@@ -87,6 +87,13 @@ export const translations = {
     "tab.closeRight": "关闭右侧标签页",
     "tab.tooltipLocal": "本地 Shell 会话 (按住可拖拽调整顺序 / 右键打开菜单)",
     "tab.tooltipRemote": "远程主机: {dest} (按住可拖拽调整顺序 / 右键打开菜单)",
+    "terminal.dragModalTitle": "检测到拖拽文件",
+    "terminal.dragModalSubtitle": "请选择要执行的操作",
+    "terminal.uploadToCwd": "上传至当前目录",
+    "terminal.pastePaths": "粘贴路径到命令行",
+    "terminal.targetDir": "当前终端工作目录",
+    "terminal.uploadDesc": "加入后台传输队列并上传",
+    "terminal.pasteDesc": "插入绝对路径供命令调用",
 
     // StatusBar
     "status.ready": "就绪",
@@ -454,6 +461,13 @@ export const translations = {
     "tab.closeRight": "Close Tabs to Right",
     "tab.tooltipLocal": "Local Shell Session (Drag to reorder / Right-click for menu)",
     "tab.tooltipRemote": "Remote Server: {dest} (Drag to reorder / Right-click for menu)",
+    "terminal.dragModalTitle": "Files Dropped",
+    "terminal.dragModalSubtitle": "Choose an action to proceed",
+    "terminal.uploadToCwd": "Upload to Current Directory",
+    "terminal.pastePaths": "Paste Paths to Terminal",
+    "terminal.targetDir": "Current Terminal Working Directory",
+    "terminal.uploadDesc": "Add to background transfer queue",
+    "terminal.pasteDesc": "Insert absolute paths into shell",
 
     // StatusBar
     "status.ready": "Ready",
@@ -821,6 +835,13 @@ export const translations = {
     "tab.closeRight": "右側のタブを閉じる",
     "tab.tooltipLocal": "ローカルシェル (ドラッグで並び替え / 右クリックでメニュー)",
     "tab.tooltipRemote": "リモート: {dest} (ドラッグで並び替え / 右クリックでメニュー)",
+    "terminal.dragModalTitle": "ドロップされたファイルを検出",
+    "terminal.dragModalSubtitle": "実行する操作を選択してください",
+    "terminal.uploadToCwd": "現在のディレクトリにアップロード",
+    "terminal.pastePaths": "パスを端末に入力",
+    "terminal.targetDir": "端末のカレントディレクトリ",
+    "terminal.uploadDesc": "バックグラウンド転送に追加",
+    "terminal.pasteDesc": "絶対パスをシェルに入力",
 
     // StatusBar
     "status.ready": "準備完了",
@@ -1188,6 +1209,13 @@ export const translations = {
     "tab.closeRight": "오른쪽 탭 닫기",
     "tab.tooltipLocal": "로컬 셸 (드래그하여 순서 변경 / 우클릭 메뉴)",
     "tab.tooltipRemote": "원격 서버: {dest} (드래그하여 순서 변경 / 우클릭 메뉴)",
+    "terminal.dragModalTitle": "드래그된 파일 감지됨",
+    "terminal.dragModalSubtitle": "수행할 작업을 선택하세요",
+    "terminal.uploadToCwd": "현재 디렉터리에 업로드",
+    "terminal.pastePaths": "터미널에 경로 붙여넣기",
+    "terminal.targetDir": "현재 터미널 작업 디렉터리",
+    "terminal.uploadDesc": "백그라운드 전송 대기열에 추가",
+    "terminal.pasteDesc": "명령어용 절대 경로 삽입",
 
     // StatusBar
     "status.ready": "준비됨",
@@ -1555,6 +1583,13 @@ export const translations = {
     "tab.closeRight": "Rechte Tabs schließen",
     "tab.tooltipLocal": "Lokale Sitzung (Ziehen zum Sortieren / Rechtsklick für Menü)",
     "tab.tooltipRemote": "Remote-Server: {dest} (Ziehen zum Sortieren / Rechtsklick)",
+    "terminal.dragModalTitle": "Dateien abgelegt",
+    "terminal.dragModalSubtitle": "Wählen Sie eine Aktion",
+    "terminal.uploadToCwd": "In aktuelles Verzeichnis hochladen",
+    "terminal.pastePaths": "Pfade ins Terminal einfügen",
+    "terminal.targetDir": "Aktuelles Terminal-Verzeichnis",
+    "terminal.uploadDesc": "In Hintergrundübertragung einreihen",
+    "terminal.pasteDesc": "Absolute Pfade in Shell einfügen",
 
     // StatusBar
     "status.ready": "Bereit",
@@ -1922,6 +1957,13 @@ export const translations = {
     "tab.closeRight": "Закрыть вкладки справа",
     "tab.tooltipLocal": "Локальный терминал (перетащите / правый клик для меню)",
     "tab.tooltipRemote": "Удаленный хост: {dest} (перетащите / правый клик)",
+    "terminal.dragModalTitle": "Обнаружены перетащенные файлы",
+    "terminal.dragModalSubtitle": "Выберите действие для продолжения",
+    "terminal.uploadToCwd": "Загрузить в текущую папку",
+    "terminal.pastePaths": "Вставить пути в терминал",
+    "terminal.targetDir": "Текущий каталог терминала",
+    "terminal.uploadDesc": "Добавить в очередь передачи",
+    "terminal.pasteDesc": "Вставить абсолютные пути в командную строку",
 
     // StatusBar
     "status.ready": "Готов",
@@ -2289,6 +2331,13 @@ export const translations = {
     "tab.closeRight": "Fermer les onglets à droite",
     "tab.tooltipLocal": "Session locale (Glisser pour réorganiser / Clic droit pour menu)",
     "tab.tooltipRemote": "Serveur distant : {dest} (Glisser pour réorganiser)",
+    "terminal.dragModalTitle": "Fichiers déposés",
+    "terminal.dragModalSubtitle": "Choisissez une action à effectuer",
+    "terminal.uploadToCwd": "Téléverser dans le dossier actuel",
+    "terminal.pastePaths": "Coller les chemins dans le terminal",
+    "terminal.targetDir": "Répertoire de travail actuel",
+    "terminal.uploadDesc": "Ajouter à la file d'attente de transfert",
+    "terminal.pasteDesc": "Insérer les chemins absolus dans le shell",
 
     // StatusBar
     "status.ready": "Prêt",

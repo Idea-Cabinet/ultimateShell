@@ -1914,7 +1914,7 @@ export function FileExplorer({
       </div>
 
       {/* 3. Explorer Bottom Status Bar */}
-      <div className="h-9 min-h-[36px] flex-shrink-0 bg-[var(--bg-card)] border-t border-[var(--border-subtle)] px-3 pt-1.5 pb-1 flex items-center justify-between text-[11.5px] text-[var(--text-secondary)] select-none relative z-10 shadow-xs">
+      <div className="h-8 min-h-[32px] flex-shrink-0 bg-[var(--bg-card)] border-t border-[var(--border-subtle)] px-3 flex items-center justify-between text-[11.5px] text-[var(--text-secondary)] select-none relative z-10">
         <div className="flex items-center space-x-3 truncate">
           <span>
             {t("files.itemsCount", { total: totalCount, dirs: totalDirs, files: totalFiles })}
