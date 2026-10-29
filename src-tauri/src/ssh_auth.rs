@@ -62,16 +62,10 @@ impl PasswordTracker {
     }
 
     pub fn observe_output(&mut self, chunk: &str) -> Option<String> {
-        if self.authenticated && self.target_switch_user.is_none() && !self.is_tracking {
-            let lower = chunk.to_lowercase();
-            let prompt = lower.trim_end();
-            if prompt.ends_with("password:") || prompt.ends_with("密码:") || prompt.ends_with("密码：") {
-                self.output.clear();
-                self.current_input.clear();
-                self.tentative_password = None;
-                self.is_tracking = true;
-                return None;
-            }
+        if self.authenticated && self.target_switch_user.is_none() {
+            self.is_tracking = false;
+            self.output.clear();
+            self.current_input.clear();
             return None;
         }
         self.output.push_str(chunk);
