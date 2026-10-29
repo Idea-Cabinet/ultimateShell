@@ -118,7 +118,8 @@ export const TabBar: React.FC<Props> = ({
   const handleRename = () => {
     const tab = tabs.find((t) => t.id === contextMenu.tabId);
     if (!tab) return;
-    const newName = prompt(t("tab.renamePrompt"), tab.title);
+    const defaultTitle = tab.isLocal && !tab.isRenamed ? t("tab.localTerminal") : tab.title;
+    const newName = prompt(t("tab.renamePrompt"), defaultTitle);
     if (newName && newName.trim()) {
       onRenameTab(contextMenu.tabId, newName.trim());
     }
@@ -178,7 +179,9 @@ export const TabBar: React.FC<Props> = ({
                     <Server className={`w-3.5 h-3.5 flex-shrink-0 ${isActive ? "text-[#007AFF]" : "text-[var(--text-tertiary)]"}`} strokeWidth={1.75} />
                   </span>
                 )}
-                <span className="truncate flex-1 tracking-tight pointer-events-none">{tab.title}</span>
+                <span className="truncate flex-1 tracking-tight pointer-events-none">
+                  {tab.isLocal && !tab.isRenamed ? t("tab.localTerminal") : tab.title}
+                </span>
                 <button
                   draggable={false}
                   data-tauri-drag-region="false"
@@ -214,8 +217,8 @@ export const TabBar: React.FC<Props> = ({
               onClick={onToggleBroadcast}
               title={
                 isBroadcastActive
-                  ? "点击关闭多窗口输入广播"
-                  : "多窗口同步键入（广播键盘输入至所有打开的会话）"
+                  ? t("tab.broadcastTooltipOn")
+                  : t("tab.broadcastTooltipOff")
               }
               className={`h-7 flex items-center rounded-[6px] transition-all duration-300 ease-out flex-shrink-0 select-none ml-1 overflow-hidden group ${
                 isBroadcastActive
@@ -239,7 +242,7 @@ export const TabBar: React.FC<Props> = ({
               >
                 <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping flex-shrink-0" />
                 <span className="text-[11px] font-medium tracking-tight whitespace-nowrap">
-                  广播中 ({tabs.length}窗口)
+                  {t("tab.broadcastStatus", { count: tabs.length })}
                 </span>
                 <X className="w-3 h-3 opacity-60 hover:opacity-100 flex-shrink-0 transition-opacity ml-0.5" />
               </div>

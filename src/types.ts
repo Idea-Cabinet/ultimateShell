@@ -43,6 +43,7 @@ export interface TabSession {
   isLocal: boolean;
   hostProfile?: HostProfile;
   connected: boolean;
+  isRenamed?: boolean;
 }
 
 export interface FileEntry {

@@ -66,7 +66,7 @@ export const ServiceManager: React.FC<Props> = ({
       }
     } catch (err: any) {
       if (reqId === activeReq.current) {
-        setErrorMsg(typeof err === "string" ? err : err.message || "获取 Systemd 服务列表失败");
+        setErrorMsg(typeof err === "string" ? err : err.message || t("service.unavailable"));
       }
     } finally {
       if (reqId === activeReq.current) {
@@ -95,8 +95,8 @@ export const ServiceManager: React.FC<Props> = ({
       });
       await fetchServices();
     } catch (err: any) {
-      const msg = typeof err === "string" ? err : err.message || `${action} 服务失败`;
-      alert(`服务操作失败: ${msg}`);
+      const msg = typeof err === "string" ? err : err.message || t("common.failed");
+      alert(`${t("common.failed")}: ${msg}`);
     } finally {
       setActionLoading((prev) => {
         const next = { ...prev };
@@ -115,8 +115,8 @@ export const ServiceManager: React.FC<Props> = ({
       });
       setStatusModal({ serviceName, output, loading: false });
     } catch (err: any) {
-      const msg = typeof err === "string" ? err : err.message || "获取服务状态失败";
-      setStatusModal({ serviceName, output: `获取失败: ${msg}`, loading: false });
+      const msg = typeof err === "string" ? err : err.message || t("common.failed");
+      setStatusModal({ serviceName, output: `${t("common.failed")}: ${msg}`, loading: false });
     }
   };
 
@@ -190,7 +190,7 @@ export const ServiceManager: React.FC<Props> = ({
                   : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
               }`}
             >
-              全部 ({counts.all})
+              {t("common.all")} ({counts.all})
             </button>
             <button
               onClick={() => setStatusFilter("active")}
@@ -200,7 +200,7 @@ export const ServiceManager: React.FC<Props> = ({
                   : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
               }`}
             >
-              <span>运行中 ({counts.active})</span>
+              <span>{t("service.running")} ({counts.active})</span>
             </button>
             <button
               onClick={() => setStatusFilter("inactive")}
@@ -210,7 +210,7 @@ export const ServiceManager: React.FC<Props> = ({
                   : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
               }`}
             >
-              已停止 ({counts.inactive})
+              {t("service.stopped")} ({counts.inactive})
             </button>
             {counts.failed > 0 && (
               <button
@@ -221,7 +221,7 @@ export const ServiceManager: React.FC<Props> = ({
                     : "text-rose-500 hover:bg-rose-500/10"
                 }`}
               >
-                <span>异常 ({counts.failed})</span>
+                <span>{t("service.failedStatus")} ({counts.failed})</span>
               </button>
             )}
           </div>
@@ -236,13 +236,13 @@ export const ServiceManager: React.FC<Props> = ({
               onChange={(e) => setAutoRefresh(e.target.checked)}
               className="rounded accent-[#007AFF] w-3 h-3"
             />
-            <span>自动刷新 (4s)</span>
+            <span>{t("process.autoRefresh")} (4s)</span>
           </label>
 
           <button
             onClick={fetchServices}
             className="p-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition"
-            title="刷新服务列表"
+            title={t("service.refresh")}
           >
             <RotateCw className={`w-3.5 h-3.5 ${loading ? "animate-spin text-[#007AFF]" : ""}`} />
           </button>
@@ -251,7 +251,7 @@ export const ServiceManager: React.FC<Props> = ({
             <button
               onClick={onToggleMaximize}
               className="p-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition"
-              title={isMaximized ? "还原抽屉大小" : "最大化抽屉"}
+              title={isMaximized ? t("common.restore") : t("common.maximize")}
             >
               {isMaximized ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
             </button>
@@ -261,7 +261,7 @@ export const ServiceManager: React.FC<Props> = ({
             <button
               onClick={onClose}
               className="p-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition"
-              title="关闭抽屉"
+              title={t("common.close")}
             >
               <X className="w-3.5 h-3.5" />
             </button>
@@ -274,13 +274,13 @@ export const ServiceManager: React.FC<Props> = ({
         {errorMsg ? (
           <div className="p-8 text-center text-[var(--text-secondary)] space-y-2">
             <Server className="w-8 h-8 mx-auto opacity-50 mb-2 text-amber-500" />
-            <div className="text-[13px] font-medium text-[var(--text-primary)]">Systemd 服务不可用</div>
+            <div className="text-[13px] font-medium text-[var(--text-primary)]">{t("service.unavailable")}</div>
             <div className="text-[11px] text-[var(--text-tertiary)] max-w-md mx-auto">{errorMsg}</div>
             <button
               onClick={fetchServices}
               className="mt-3 px-3 py-1 bg-[#007AFF] text-white rounded text-[11px] hover:bg-[#0062CC] transition"
             >
-              重试检测
+              {t("common.retry")}
             </button>
           </div>
         ) : (
@@ -301,10 +301,10 @@ export const ServiceManager: React.FC<Props> = ({
                     {loading ? (
                       <div className="flex items-center justify-center space-x-2">
                         <RotateCw className="w-4 h-4 animate-spin text-[#007AFF]" />
-                        <span>正在查询 Systemd 服务列表...</span>
+                        <span>{t("service.querying")}</span>
                       </div>
                     ) : (
-                      "未发现匹配的系统服务"
+                      t("service.empty")
                     )}
                   </td>
                 </tr>
@@ -362,11 +362,11 @@ export const ServiceManager: React.FC<Props> = ({
                               <button
                                 onClick={() => handleServiceAction(s.name, "restart")}
                                 disabled={isBusy}
-                                title="重启服务 (restart)"
+                                title={t("service.restart")}
                                 className="p-1 rounded text-[10.5px] hover:bg-[var(--hover-item)] text-[#007AFF] hover:text-[#0062CC] transition disabled:opacity-40"
                               >
                                 {isBusy && actionLoading[s.name] === "restart" ? (
-                                  <RotateCw className="w-3 h-3 animate-spin" />
+                                   <RotateCw className="w-3 h-3 animate-spin" />
                                 ) : (
                                   <RefreshCw className="w-3 h-3" />
                                 )}
@@ -374,7 +374,7 @@ export const ServiceManager: React.FC<Props> = ({
                               <button
                                 onClick={() => handleServiceAction(s.name, "stop")}
                                 disabled={isBusy}
-                                title="停止服务 (stop)"
+                                title={t("service.stop")}
                                 className="p-1 rounded text-[10.5px] hover:bg-rose-500/10 text-rose-500 hover:text-rose-600 transition disabled:opacity-40"
                               >
                                 {isBusy && actionLoading[s.name] === "stop" ? (
@@ -388,7 +388,7 @@ export const ServiceManager: React.FC<Props> = ({
                             <button
                               onClick={() => handleServiceAction(s.name, "start")}
                               disabled={isBusy}
-                              title="启动服务 (start)"
+                              title={t("service.start")}
                               className="p-1 rounded text-[10.5px] hover:bg-emerald-500/10 text-emerald-500 hover:text-emerald-600 transition disabled:opacity-40"
                             >
                               {isBusy && actionLoading[s.name] === "start" ? (
@@ -401,7 +401,7 @@ export const ServiceManager: React.FC<Props> = ({
 
                           <button
                             onClick={() => handleViewStatus(s.name)}
-                            title="查看详情状态与日志 (status)"
+                            title={t("service.logsTitle", { name: s.name })}
                             className="p-1 rounded text-[10.5px] hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition"
                           >
                             <FileText className="w-3 h-3" />
@@ -432,7 +432,7 @@ export const ServiceManager: React.FC<Props> = ({
               <div className="flex items-center space-x-2">
                 <Server className="w-4 h-4 text-[#007AFF]" />
                 <span className="font-semibold text-[13px] font-mono">
-                  {statusModal.serviceName} 状态日志
+                  {t("service.logsTitle", { name: statusModal.serviceName })}
                 </span>
               </div>
               <button
@@ -447,10 +447,10 @@ export const ServiceManager: React.FC<Props> = ({
               {statusModal.loading ? (
                 <div className="flex items-center justify-center py-10 space-x-2 text-white/70">
                   <RotateCw className="w-4 h-4 animate-spin text-[#007AFF]" />
-                  <span>正在获取服务运行状态及 journalctl 日志...</span>
+                  <span>{t("service.fetchingLogs")}</span>
                 </div>
               ) : (
-                statusModal.output || "无输出信息"
+                statusModal.output || t("service.noOutput")
               )}
             </div>
 
@@ -461,14 +461,14 @@ export const ServiceManager: React.FC<Props> = ({
                 className="px-3 py-1.5 text-[11.5px] rounded-lg border border-[var(--border-subtle)] hover:bg-[var(--hover-item)] transition flex items-center space-x-1"
               >
                 <RotateCw className="w-3 h-3" />
-                <span>刷新状态</span>
+                <span>{t("service.refreshStatus")}</span>
               </button>
               <button
                 type="button"
                 onClick={() => setStatusModal(null)}
                 className="px-4 py-1.5 text-[11.5px] font-medium text-white rounded-lg bg-[#007AFF] hover:bg-[#0062CC] transition"
               >
-                关闭
+                {t("common.close")}
               </button>
             </div>
           </div>

@@ -381,7 +381,7 @@ function AppContent() {
   // Rename tab
   const handleRenameTab = (id: string, newTitle: string) => {
     setTabs((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, title: newTitle } : t))
+      prev.map((t) => (t.id === id ? { ...t, title: newTitle, isRenamed: true } : t))
     );
   };
 
@@ -784,7 +784,11 @@ function AppContent() {
             >
               <span className={`w-1.5 h-1.5 rounded-full ${activeTab?.connected ? "bg-[#30D158]" : "bg-zinc-400"}`}></span>
               <span className="text-[var(--text-secondary)] font-medium">
-                {activeTab ? activeTab.title : "就绪"}
+                {activeTab
+                  ? activeTab.isLocal && !activeTab.isRenamed
+                    ? t("tab.localTerminal")
+                    : activeTab.title
+                  : t("status.ready")}
               </span>
             </span>
             {activeTab?.hostProfile && (
@@ -848,7 +852,7 @@ function AppContent() {
                   ? "bg-[#30D158]/15 text-[#30D158] border-[#30D158]/40 font-medium"
                   : "bg-[var(--hover-item)] text-[var(--text-secondary)] border-[var(--border-subtle)] hover:border-[var(--border-strong)]"
               }`}
-              title="查看与管理进程（支持按 CPU / 内存排序、结束进程）"
+              title={t("process.title")}
             >
               <Activity className="w-3 h-3 text-[#30D158]" />
               <span>{t("status.processes")}</span>
@@ -872,7 +876,7 @@ function AppContent() {
                   ? "bg-amber-500/15 text-amber-500 border-amber-500/40 font-medium"
                   : "bg-[var(--hover-item)] text-[var(--text-secondary)] border-[var(--border-subtle)] hover:border-[var(--border-strong)]"
               }`}
-              title="查看各挂载点磁盘容量、可用空间及占比"
+              title={t("disk.title")}
             >
               <HardDrive className="w-3 h-3 text-amber-500" />
               <span>{t("status.disks")}</span>
@@ -896,10 +900,10 @@ function AppContent() {
                   ? "bg-sky-500/15 text-sky-500 border-sky-500/40 font-medium"
                   : "bg-[var(--hover-item)] text-[var(--text-secondary)] border-[var(--border-subtle)] hover:border-[var(--border-strong)]"
               }`}
-              title="查看与管理网络监听端口（支持协议/端口搜索、一键终止占用进程）"
+              title={t("port.title")}
             >
               <Network className="w-3 h-3 text-sky-500" />
-              <span>端口</span>
+              <span>{t("status.ports")}</span>
             </button>
 
             {/* Toggle Systemd Services Tab */}
@@ -920,10 +924,10 @@ function AppContent() {
                   ? "bg-indigo-500/15 text-indigo-500 border-indigo-500/40 font-medium"
                   : "bg-[var(--hover-item)] text-[var(--text-secondary)] border-[var(--border-subtle)] hover:border-[var(--border-strong)]"
               }`}
-              title="查看与管理 Systemd 系统服务（支持启动/停止/重启/查看状态日志）"
+              title={t("service.title")}
             >
               <Server className="w-3 h-3 text-indigo-500" />
-              <span>服务</span>
+              <span>{t("status.services")}</span>
             </button>
 
             {/* Toggle SSH Tunnels Tab */}
@@ -944,7 +948,7 @@ function AppContent() {
                   ? "bg-emerald-500/15 text-emerald-500 border-emerald-500/40 font-medium"
                   : "bg-[var(--hover-item)] text-[var(--text-secondary)] border-[var(--border-subtle)] hover:border-[var(--border-strong)]"
               }`}
-              title="SSH 端口转发与隧道管理（本地打洞 -L、内网穿透 -R、动态 SOCKS5 代理 -D）"
+              title={t("tunnel.title")}
             >
               <Workflow className="w-3 h-3 text-emerald-500" />
               <span>{t("status.tunnels")}</span>
@@ -962,7 +966,7 @@ function AppContent() {
                   ? "bg-purple-500/15 text-purple-500 border-purple-500/40 font-medium"
                   : "bg-[var(--hover-item)] text-[var(--text-secondary)] border-[var(--border-subtle)] hover:border-[var(--border-strong)]"
               }`}
-              title="独立命令输入辅助栏（智能模版、参数填写、历史记录）"
+              title={t("status.commands")}
             >
               <Terminal className="w-3 h-3 text-purple-500" />
               <span>{t("status.commands")}</span>
@@ -981,7 +985,7 @@ function AppContent() {
                   ? "bg-[var(--hover-item)] text-[var(--text-primary)] border-[var(--border-strong)]"
                   : "bg-[var(--hover-item)] text-[var(--text-secondary)] border-[var(--border-subtle)] hover:border-[var(--border-strong)]"
               }`}
-              title="全局文件传输任务管理器 (下载/上传任务、速度、进度、历史记录)"
+              title={t("transfer.title")}
             >
               <ArrowUpDown className={`w-3 h-3 ${activeCount > 0 ? "animate-spin text-[#007AFF]" : "text-[var(--text-tertiary)]"}`} />
               <span>{activeCount > 0 ? `${activeCount} ${t("transfer.inProgress")}` : t("status.transfer")}</span>

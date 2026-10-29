@@ -64,7 +64,7 @@ export const PortManager: React.FC<Props> = ({
       }
     } catch (err: any) {
       if (reqId === activeReq.current) {
-        setErrorMsg(typeof err === "string" ? err : err.message || "获取端口监听列表失败");
+        setErrorMsg(typeof err === "string" ? err : err.message || t("port.failed"));
       }
     } finally {
       if (reqId === activeReq.current) {
@@ -112,7 +112,7 @@ export const PortManager: React.FC<Props> = ({
       setKillTarget(null);
       await fetchPorts();
     } catch (err: any) {
-      const msg = typeof err === "string" ? err : err.message || "终止进程失败";
+      const msg = typeof err === "string" ? err : err.message || t("common.failed");
       setKillFeedback(msg);
     } finally {
       setIsKilling(false);
@@ -185,7 +185,7 @@ export const PortManager: React.FC<Props> = ({
                   : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
               }`}
             >
-              全部
+              {t("common.all")}
             </button>
             <button
               onClick={() => setProtoFilter("tcp")}
@@ -210,7 +210,7 @@ export const PortManager: React.FC<Props> = ({
           </div>
 
           <span className="text-[var(--text-tertiary)] text-[10.5px]">
-            共 {filteredPorts.length} 个监听端口
+            {t("port.count", { count: filteredPorts.length })}
           </span>
         </div>
 
@@ -238,7 +238,7 @@ export const PortManager: React.FC<Props> = ({
             <button
               onClick={onToggleMaximize}
               className="p-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition"
-              title={isMaximized ? "还原抽屉大小" : "最大化抽屉"}
+              title={isMaximized ? t("common.restore") : t("common.maximize")}
             >
               {isMaximized ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
             </button>
@@ -248,7 +248,7 @@ export const PortManager: React.FC<Props> = ({
             <button
               onClick={onClose}
               className="p-1 rounded hover:bg-[var(--hover-item)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition"
-              title="关闭抽屉"
+              title={t("common.close")}
             >
               <X className="w-3.5 h-3.5" />
             </button>
@@ -261,13 +261,13 @@ export const PortManager: React.FC<Props> = ({
         {errorMsg ? (
           <div className="p-8 text-center text-rose-500 space-y-2">
             <Radio className="w-8 h-8 mx-auto opacity-50 mb-2" />
-            <div className="text-[13px] font-medium">获取监听端口失败</div>
+            <div className="text-[13px] font-medium">{t("port.failed")}</div>
             <div className="text-[11px] text-[var(--text-tertiary)]">{errorMsg}</div>
             <button
               onClick={fetchPorts}
               className="mt-3 px-3 py-1 bg-[#007AFF] text-white rounded text-[11px] hover:bg-[#0062CC] transition"
             >
-              重试
+              {t("common.retry")}
             </button>
           </div>
         ) : (
@@ -287,7 +287,7 @@ export const PortManager: React.FC<Props> = ({
                   {t("port.colPort")} {sortField === "port" && (sortAsc ? "↑" : "↓")}
                 </th>
                 <th className="py-1.5 px-3 w-36">{t("port.colAddress")}</th>
-                <th className="py-1.5 px-3 w-24">状态</th>
+                <th className="py-1.5 px-3 w-24">{t("service.colStatus")}</th>
                 <th
                   onClick={() => handleSort("program")}
                   className="py-1.5 px-3 cursor-pointer hover:text-[var(--text-primary)] min-w-[120px]"
@@ -311,10 +311,10 @@ export const PortManager: React.FC<Props> = ({
                     {loading ? (
                       <div className="flex items-center justify-center space-x-2">
                         <RotateCw className="w-4 h-4 animate-spin text-[#007AFF]" />
-                        <span>正在探测监听端口...</span>
+                        <span>{t("port.detecting")}</span>
                       </div>
                     ) : (
-                      "未发现匹配的监听端口"
+                      t("port.empty")
                     )}
                   </td>
                 </tr>
@@ -344,7 +344,7 @@ export const PortManager: React.FC<Props> = ({
                         <span className="text-[#007AFF] font-bold text-[12px]">{p.port}</span>
                         <button
                           onClick={() => handleCopy(p.port)}
-                          title="复制端口号"
+                          title={`${t("common.copy")} ${t("port.colPort")}`}
                           className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-[var(--hover-item)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition"
                         >
                           {copiedPort === p.port ? (
@@ -391,7 +391,7 @@ export const PortManager: React.FC<Props> = ({
                               setKillFeedback(null);
                               setKillTarget(p);
                             }}
-                            title={`终止占用该端口的进程 (PID: ${p.pid})`}
+                            title={`${t("port.kill")} (PID: ${p.pid})`}
                             className="opacity-0 group-hover:opacity-100 px-2 py-0.5 text-[10.5px] rounded bg-rose-500/10 hover:bg-rose-500 text-rose-500 hover:text-white transition flex items-center space-x-1 ml-auto"
                           >
                             <Skull className="w-2.5 h-2.5" />
@@ -440,7 +440,7 @@ export const PortManager: React.FC<Props> = ({
             </div>
 
             <div className="mt-4 space-y-2.5">
-              <div className="text-[11px] text-[var(--text-secondary)]">选择终止信号：</div>
+              <div className="text-[11px] text-[var(--text-secondary)]">{t("port.sigSelect")}</div>
               <div className="space-y-1.5">
                 <label className="flex items-center space-x-2 text-[11.5px] p-2 rounded-lg border border-[var(--border-subtle)] hover:bg-[var(--hover-item)] cursor-pointer">
                   <input
@@ -451,8 +451,7 @@ export const PortManager: React.FC<Props> = ({
                     className="accent-rose-500"
                   />
                   <div>
-                    <span className="font-medium">SIGTERM (15) - 优雅退出</span>
-                    <p className="text-[10px] text-[var(--text-tertiary)]">允许程序释放资源后正常退出（推荐）</p>
+                    <span className="font-medium">{t("process.sigterm")}</span>
                   </div>
                 </label>
                 <label className="flex items-center space-x-2 text-[11.5px] p-2 rounded-lg border border-[var(--border-subtle)] hover:bg-[var(--hover-item)] cursor-pointer">
@@ -464,8 +463,7 @@ export const PortManager: React.FC<Props> = ({
                     className="accent-rose-500"
                   />
                   <div>
-                    <span className="font-medium text-rose-500">SIGKILL (9) - 强制杀死</span>
-                    <p className="text-[10px] text-[var(--text-tertiary)]">立即强制终止进程，无法被程序忽略</p>
+                    <span className="font-medium text-rose-500">{t("process.sigkill")}</span>
                   </div>
                 </label>
               </div>
@@ -484,7 +482,7 @@ export const PortManager: React.FC<Props> = ({
                 disabled={isKilling}
                 className="px-3.5 py-1.5 text-[12px] rounded-lg text-[var(--text-secondary)] hover:bg-[var(--hover-item)] transition"
               >
-                取消
+                {t("common.cancel")}
               </button>
               <button
                 type="button"
@@ -493,7 +491,7 @@ export const PortManager: React.FC<Props> = ({
                 className="px-4 py-1.5 text-[12px] font-medium text-white rounded-lg shadow-sm transition active:scale-95 disabled:opacity-50 flex items-center space-x-1.5 bg-rose-500 hover:bg-rose-600"
               >
                 {isKilling && <RotateCw className="w-3 h-3 animate-spin" />}
-                <span>确认终止</span>
+                <span>{t("port.kill")}</span>
               </button>
             </div>
           </div>
