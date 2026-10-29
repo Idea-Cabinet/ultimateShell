@@ -823,7 +823,9 @@ function AppContent() {
               <Folder className="w-3 h-3 text-[#007AFF] flex-shrink-0" />
               <span className="truncate max-w-[80px]">{dirStats.path}</span>
               <span className="text-[var(--text-tertiary)] flex-shrink-0">·</span>
-              <span className="flex-shrink-0">{dirStats.fileCount} 项</span>
+              <span className="flex-shrink-0">
+                {dirStats.fileCount} {t("common.items")}
+              </span>
             </button>
 
             {/* Server User Switching Dropdown Menu */}

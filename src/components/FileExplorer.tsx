@@ -1435,7 +1435,7 @@ export function FileExplorer({
       className="w-full h-full flex-1 flex flex-col bg-[var(--bg-app)] select-none overflow-hidden relative z-20 min-h-0"
     >
       {/* 1. Header Toolbar (Navigation, Breadcrumbs, Search, Toggles) */}
-      <div className="h-9 px-2.5 bg-[var(--bg-card)] border-b border-[var(--border-subtle)] flex items-center justify-between space-x-2 text-[12px]">
+      <div className="h-9 px-2.5 bg-[var(--bg-card)] border-b border-[var(--border-subtle)] flex items-center justify-between space-x-2 text-[12px] flex-shrink-0">
         {/* Left Navigation Buttons */}
         <div className="flex items-center space-x-1 flex-shrink-0">
           <button
@@ -1848,14 +1848,14 @@ export function FileExplorer({
       </div>
 
       {/* 3. Explorer Bottom Status Bar */}
-      <div className="h-7 min-h-[28px] flex-shrink-0 bg-[var(--bg-card)] border-t border-[var(--border-subtle)] px-3 flex items-center justify-between text-[11px] text-[var(--text-tertiary)] select-none">
+      <div className="h-[34px] min-h-[34px] flex-shrink-0 bg-[var(--bg-card)] border-t border-[var(--border-subtle)] px-3 py-1 flex items-center justify-between text-[11px] text-[var(--text-secondary)] select-none relative z-10">
         <div className="flex items-center space-x-3 truncate">
           <span>
             {t("files.itemsCount", { total: totalCount, dirs: totalDirs, files: totalFiles })}
           </span>
 
           {/* Current Active User Badge with subtle color distinction */}
-          <div className="flex items-center space-x-1.5 pl-1.5 border-l border-[var(--border-subtle)]">
+          <div className="flex items-center space-x-1.5 pl-2 border-l border-[var(--border-subtle)]">
             <span className="text-[var(--text-tertiary)]">{t("status.user")}</span>
             <span
               title={
@@ -1863,7 +1863,7 @@ export function FileExplorer({
                   ? "当前终端身份: root (超级管理员特权)"
                   : `当前终端身份: ${detectedUser} (普通权限用户)`
               }
-              className={`px-1.5 py-0.2 rounded text-[10px] font-mono font-medium border flex items-center space-x-1 cursor-default ${
+              className={`px-2 py-0.5 rounded text-[10.5px] font-mono font-medium border flex items-center space-x-1.5 cursor-default ${
                 detectedUser === "root"
                   ? "bg-rose-500/15 text-rose-500 border-rose-500/30"
                   : "bg-[#007AFF]/15 text-[#007AFF] border-[#007AFF]/30"
@@ -1879,7 +1879,7 @@ export function FileExplorer({
           </div>
 
           {selectedEntry && (
-            <span className="flex items-center space-x-1.5 text-[var(--text-secondary)] font-mono pl-1.5 border-l border-[var(--border-subtle)]">
+            <span className="flex items-center space-x-1.5 text-[var(--text-secondary)] font-mono pl-2 border-l border-[var(--border-subtle)]">
               <span className="text-[#007AFF] font-medium">{selectedEntry.name}</span>
               <span>·</span>
               <span>{selectedEntry.size_formatted}</span>
@@ -1893,11 +1893,11 @@ export function FileExplorer({
           {selectedEntry?.is_dir && (
             <button
               onClick={() => onSendToTerminal(`cd "${selectedEntry.path}"\n`)}
-              className="px-2 py-0.5 rounded bg-[var(--hover-item)] hover:bg-[#007AFF]/15 hover:text-[#007AFF] text-[10.5px] flex items-center space-x-1 transition-colors"
+              className="px-2.5 py-0.5 rounded bg-[var(--hover-item)] hover:bg-[#007AFF]/15 hover:text-[#007AFF] text-[11px] font-medium flex items-center space-x-1 transition-colors border border-[var(--border-subtle)]"
               title="在活跃终端自动输入 cd 并跳转至此路径"
             >
-              <Terminal className="w-3 h-3" />
-              <span>在终端 cd</span>
+              <Terminal className="w-3 h-3 text-[#007AFF]" />
+              <span>{t("files.cdInTerminal")}</span>
             </button>
           )}
         </div>
