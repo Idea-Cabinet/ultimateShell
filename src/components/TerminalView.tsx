@@ -16,7 +16,6 @@ import {
   ChevronUp,
   ChevronDown,
   X,
-  Upload,
 } from "lucide-react";
 
 const DARK_THEME = {
@@ -83,24 +82,19 @@ export const TerminalView: React.FC<Props> = ({
   onBroadcastData,
 }) => {
   const transferManager = useTransferManager();
-
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalInstanceRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const onBroadcastDataRef = useRef(onBroadcastData);
 
-  const { isDragOver, error: dropError, clearError: clearDropError } = useFileDrop(containerRef, isActive, async (paths) => {
-    let targetCwd = transferManager.directories[session.id]?.path;
-    if (!targetCwd) {
-      targetCwd = await invoke<string>("fs_get_terminal_cwd", { sessionId: session.id });
-      transferManager.followTerminalDirectory(session.id, targetCwd);
-    }
-    if (!targetCwd || (!targetCwd.startsWith("/") && targetCwd !== "~")) throw new Error("无法确认终端当前目录，已停止上传。请在文件列表中选择目标目录后上传。");
-    await Promise.all(paths.map(localPath => transferManager.startUpload(
-      session.id, session.title, localPath, targetCwd!,
-    )));
-  });
+  const { error: dropError, clearError: clearDropError } = useFileDrop(containerRef, isActive, async paths => {
+    const targetDir = transferManager.directories[session.id]?.path;
+    if (!targetDir) throw new Error("请先打开文件列表，确认上传目标目录。");
+    await Promise.all(paths.map(path => transferManager.startUpload(session.id, session.title, path, targetDir)));
+  }, session.id, true);
+
+
 
   useEffect(() => {
     onBroadcastDataRef.current = onBroadcastData;
@@ -404,17 +398,6 @@ export const TerminalView: React.FC<Props> = ({
         <button onClick={clearDropError} className="float-right ml-2" aria-label="关闭上传错误">×</button>
         {dropError}
       </div>}
-      {/* Drag & Drop File Upload Overlay */}
-      {isDragOver && (
-        <div className="absolute inset-0 z-40 bg-[#007AFF]/12 backdrop-blur-[2px] border-2 border-dashed border-[#007AFF] rounded-lg m-2 flex flex-col items-center justify-center space-y-2 pointer-events-none animate-in fade-in duration-100 select-none">
-          <div className="w-12 h-12 rounded-2xl bg-[#007AFF] text-white flex items-center justify-center shadow-lg animate-bounce">
-            <Upload className="w-6 h-6" />
-          </div>
-          <div className="text-[14px] font-semibold text-[#007AFF]">
-            松开鼠标上传至文件树当前目录
-          </div>
-        </div>
-      )}
 
       {/* Floating Terminal Output Search Bar (Cmd+F / Ctrl+F) */}
       {isSearchOpen ? (

@@ -316,6 +316,17 @@ export function FileExplorer({
 
   // Request counter to discard stale async responses
   const activeReqId = useRef<number>(0);
+  const activeSessionRef = useRef(session.id);
+  activeSessionRef.current = session.id;
+  const loadedDirectoryRef = useRef<{ sessionId: string; path: string } | null>(null);
+  const directoryLoadingRef = useRef(false);
+  const uploadDirectory = () => {
+    const loaded = loadedDirectoryRef.current;
+    if (directoryLoadingRef.current || !loaded || loaded.sessionId !== session.id || loaded.path !== currentPath) {
+      throw new Error("目标目录尚未加载完成，请等待文件列表显示后再上传。");
+    }
+    return loaded.path;
+  };
 
   // Tree Pane Horizontal Resizer
   const handleStartTreeResize = (e: React.MouseEvent) => {
@@ -379,9 +390,9 @@ export function FileExplorer({
   // Drag & drop state for file upload
   const dropAreaRef = useRef<HTMLDivElement>(null);
   const { isDragOver, error: dropError, clearError: clearDropError } = useFileDrop(dropAreaRef, isOpen, async paths => {
-    const targetDir = currentPath;
+    const targetDir = uploadDirectory();
     await Promise.all(paths.map(path => transferManager.startUpload(session.id, session.title, path, targetDir)));
-  });
+  }, session.id);
 
   // Rename states
   const [renamingEntry, setRenamingEntry] = useState<FileEntry | null>(null);
@@ -466,6 +477,7 @@ export function FileExplorer({
   const loadDirectory = async (path: string, pushHistory = true) => {
     if (!session.id || !isOpen) return;
     const reqId = ++activeReqId.current;
+    directoryLoadingRef.current = true;
 
     setLoading(true);
     setErrorMsg(null);
@@ -478,8 +490,9 @@ export function FileExplorer({
         showHidden,
       });
 
-      if (reqId !== activeReqId.current) return; // Stale response discarded
+      if (reqId !== activeReqId.current || activeSessionRef.current !== session.id) return; // Stale response discarded
 
+      loadedDirectoryRef.current = { sessionId: session.id, path: res.current_path };
       setCurrentPath(res.current_path);
       transferManager.setDirectory(session.id, res.current_path);
       setParentPath(res.parent_path);
@@ -514,11 +527,12 @@ export function FileExplorer({
         });
       }
     } catch (err: any) {
-      if (reqId !== activeReqId.current) return;
+      if (reqId !== activeReqId.current || activeSessionRef.current !== session.id) return;
       console.error("加载目录失败:", err);
       setErrorMsg(typeof err === "string" ? err : err.message || "读取目录超时或失败");
     } finally {
-      if (reqId === activeReqId.current) {
+      if (reqId === activeReqId.current && activeSessionRef.current === session.id) {
+        directoryLoadingRef.current = false;
         setLoading(false);
       }
     }
@@ -837,8 +851,8 @@ export function FileExplorer({
 
   // Upload files via file picker dialog
   const handleUploadClick = async () => {
-    const targetDir = currentPath || "~";
     try {
+      const targetDir = uploadDirectory();
       const selected = await open({
         multiple: true,
         title: `选择要上传到 ${targetDir} 的文件`,
@@ -1660,7 +1674,7 @@ export function FileExplorer({
                 松开鼠标立即上传文件至此目录
               </div>
               <div className="text-[11px] font-mono text-[var(--text-secondary)] px-3 py-1 rounded bg-[var(--bg-card)] border border-[var(--border-subtle)] shadow-xs">
-                目标路径: {currentPath}
+                目标路径: {currentPath}{loading ? "（加载中，暂不可上传）" : ""}
               </div>
             </div>
           )}

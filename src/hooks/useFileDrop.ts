@@ -5,6 +5,8 @@ import { invoke } from "@tauri-apps/api/core";
 
 type Target = {
   element: RefObject<HTMLElement | null>;
+  group?: string;
+  forwardToGroup?: boolean;
   hover: (over: boolean) => void;
   drop: (paths: string[]) => void | Promise<void>;
 };
@@ -39,7 +41,13 @@ export function registerFileDropTarget(target: Target) {
           }
         }
       }
-      for (const candidate of targets) candidate.hover(payload.type !== "drop" && candidate === selected);
+      // Terminal and file list share a hint, but only one target handles the drop.
+      if (selected?.forwardToGroup && selected.group) {
+        const group = selected.group;
+        selected = [...targets].find(candidate => candidate.group === group && !candidate.forwardToGroup) || selected;
+      }
+      for (const candidate of targets) candidate.hover(payload.type !== "drop" && !!selected &&
+        (candidate === selected || (!!selected.group && candidate.group === selected.group)));
       if (payload.type === "drop" && selected) {
         const paths = [...new Set(payload.paths)];
         try {
@@ -69,6 +77,8 @@ export function useFileDrop(
   element: RefObject<HTMLElement | null>,
   enabled: boolean,
   onDrop: (paths: string[]) => void | Promise<void>,
+  group?: string,
+  forwardToGroup = false,
 ) {
   const [isDragOver, setIsDragOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -76,7 +86,7 @@ export function useFileDrop(
   callback.current = onDrop;
   useEffect(() => {
     if (!enabled) return;
-    return registerFileDropTarget({ element, hover: setIsDragOver, drop: async paths => {
+    return registerFileDropTarget({ element, group, forwardToGroup, hover: setIsDragOver, drop: async paths => {
       setError(null);
       try { await callback.current(paths); }
       catch (error) {
@@ -84,6 +94,6 @@ export function useFileDrop(
         reportTransferError("upload-drop", error);
       }
     } });
-  }, [element, enabled]);
+  }, [element, enabled, group, forwardToGroup]);
   return { isDragOver, error, clearError: () => setError(null) };
 }

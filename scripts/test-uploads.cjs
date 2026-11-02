@@ -57,7 +57,24 @@ async function testDrops() {
   hit = 'modal'; handler(event); await tick(); assert.equal(calls.length, 2);
   removeTerminal(); removeFiles(); assert.equal(stopped, 2);
   handler(event); await tick(); assert.equal(calls.length, 2);
-  console.log('PASS: one drop owner, Retina coordinates, modal exclusion and late-registration cleanup');
+  const hovers = {};
+  const terminalOff = registerFileDropTarget({ element: { current: terminal }, group: 'session-a', forwardToGroup: true,
+    hover: value => { hovers.terminal = value; }, drop: () => calls.push('fallback') });
+  const filesOff = registerFileDropTarget({ element: { current: files }, group: 'session-a',
+    hover: value => { hovers.files = value; }, drop: () => calls.push('forwarded-to-files') });
+  const otherOff = registerFileDropTarget({ element: { current: files }, group: 'session-b',
+    hover: value => { hovers.other = value; }, drop: () => calls.push('wrong-session') });
+  registration(() => stopped++); await tick();
+  hit = 'terminal';
+  handler({ payload: { type: 'over', position: event.payload.position } });
+  assert.equal(hovers.files, true); assert.equal(hovers.other, false);
+  handler(event); await tick();
+  assert.equal(calls[calls.length - 1], 'forwarded-to-files');
+  assert.equal(hovers.files, false);
+  filesOff(); handler(event); await tick();
+  assert.equal(calls[calls.length - 1], 'fallback');
+  terminalOff(); otherOff();
+  console.log('PASS: one drop owner, terminal forwarding, session-scoped file-list hints, Retina coordinates and listener cleanup');
 }
 
 async function testQueueAndDirectories() {
