@@ -544,19 +544,22 @@ function AppContent() {
         ...host,
         group: isDefaultGroup(host.group) ? undefined : host.group?.trim(),
       };
-      await invoke("save_host", { host: normalizedHost, password });
-      await refreshHosts();
+      const savedHost = await invoke<HostProfile>("save_host", { host: normalizedHost, password });
+      setHosts(previous => previous.some(item => item.id === savedHost.id)
+        ? previous.map(item => item.id === savedHost.id ? savedHost : item)
+        : [...previous, savedHost]);
 
       // Update existing open tabs that belong to this host so they use the new credentials
       setTabs((prev) =>
         prev.map((t) =>
           t.hostProfile?.id === host.id
-            ? { ...t, hostProfile: normalizedHost }
+            ? { ...t, hostProfile: savedHost }
             : t
         )
       );
     } catch (err) {
       console.error(`保存失败: ${err}`);
+      throw err;
     }
   };
 

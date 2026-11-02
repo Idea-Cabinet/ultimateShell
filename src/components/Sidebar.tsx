@@ -86,7 +86,13 @@ export const Sidebar: React.FC<Props> = ({
   // Synchronize hosts when not hovering or when server count changes (e.g. added/deleted)
   useEffect(() => {
     const countChanged = hosts.length !== displayHosts.length;
-    if (!isHoveringRef.current || countChanged) {
+    // Hover only delays access-time sorting, never edits to remarks or connection settings.
+    const metadataChanged = hosts.some(host => {
+      const previous = displayHosts.find(item => item.id === host.id);
+      return !previous || JSON.stringify({ ...previous, access_time: undefined }) !==
+        JSON.stringify({ ...host, access_time: undefined });
+    });
+    if (!isHoveringRef.current || countChanged || metadataChanged) {
       setDisplayHosts(hosts);
       pendingHostsRef.current = null;
     } else {

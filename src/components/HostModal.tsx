@@ -8,7 +8,7 @@ import { useI18n } from "../i18n";
 interface Props {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (host: HostProfile, password?: string) => void;
+  onSave: (host: HostProfile, password?: string) => Promise<void>;
   initialHost?: HostProfile | null;
   availableHosts?: HostProfile[];
 }
@@ -30,12 +30,16 @@ export const HostModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialHos
   });
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const savingRef = useRef(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const firstInputRef = useRef<HTMLInputElement>(null);
 
   // Auto focus first input on modal open
   useEffect(() => {
     if (isOpen) {
       setShowPassword(false);
+      setSaveError(null);
       const timer = setTimeout(() => {
         firstInputRef.current?.focus();
       }, 50);
@@ -95,19 +99,29 @@ export const HostModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialHos
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.host.trim()) return;
+    if (savingRef.current || !formData.host.trim()) return;
+    savingRef.current = true;
+    setIsSaving(true);
+    setSaveError(null);
     const finalGroup = formData.group?.trim();
-    onSave(
-      {
-        ...formData,
-        name: formData.name.trim() || formData.host.trim(),
-        group: isDefaultGroup(finalGroup) ? undefined : finalGroup,
-      },
-      password.trim() || undefined
-    );
-    onClose();
+    try {
+      await onSave(
+        {
+          ...formData,
+          name: formData.name.trim() || formData.host.trim(),
+          group: isDefaultGroup(finalGroup) ? undefined : finalGroup,
+        },
+        password.trim() || undefined
+      );
+      onClose();
+    } catch (error) {
+      setSaveError(`保存失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      savingRef.current = false;
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -128,6 +142,7 @@ export const HostModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialHos
           </div>
           <button
             onClick={onClose}
+            disabled={isSaving}
             title={t("common.close")}
             className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)] p-1.5 hover:bg-[var(--hover-item)] rounded-full active:scale-[0.95]"
           >
@@ -374,20 +389,24 @@ export const HostModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialHos
             />
           </div>
 
+          {saveError && <div role="alert" className="text-xs text-rose-500 whitespace-pre-wrap">{saveError}</div>}
+
           {/* Action Footer */}
           <div className="flex items-center justify-end space-x-2 pt-4">
             <button
               type="button"
               onClick={onClose}
+              disabled={isSaving}
               className="px-4 py-1.5 text-[13px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] bg-[var(--active-item)] hover:bg-[var(--hover-item)] rounded-[8px] active:scale-[0.97]"
             >
               {t("common.cancel")}
             </button>
             <button
               type="submit"
+              disabled={isSaving}
               className="px-5 py-1.5 text-[13px] font-medium text-white bg-[#007AFF] hover:bg-[#0A84FF] rounded-[8px] shadow-[0_1px_3px_rgba(0,122,255,0.4)] active:scale-[0.97]"
             >
-              {t("common.save")}
+              {isSaving ? "保存中…" : t("common.save")}
             </button>
           </div>
         </form>
