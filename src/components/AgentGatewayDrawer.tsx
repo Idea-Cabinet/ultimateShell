@@ -2,20 +2,17 @@ import React, { useState, useEffect, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useI18n } from "../i18n";
+import { GatewayGuide } from "./GatewayGuide";
 import {
   Bot,
   Shield,
   Zap,
-  Check,
-  Copy,
   Trash2,
   RefreshCw,
   X,
   Terminal,
   ChevronDown,
   ChevronRight,
-  Lock,
-  Code,
   FileText,
   Search,
 } from "lucide-react";
@@ -58,11 +55,6 @@ export const AgentGatewayDrawer: React.FC<Props> = ({ isOpen, onClose }) => {
   const { t } = useI18n();
   const [status, setStatus] = useState<GatewayStatusPayload | null>(null);
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
-  const [copiedToken, setCopiedToken] = useState(false);
-  const [copiedSkill, setCopiedSkill] = useState(false);
-  const [copiedMcp, setCopiedMcp] = useState(false);
-  const [copiedSshCmd, setCopiedSshCmd] = useState(false);
-  const [copiedSshConfig, setCopiedSshConfig] = useState(false);
   const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"logs" | "guide">("logs");
   const [filterRisk, setFilterRisk] = useState<string>("all");
@@ -141,67 +133,6 @@ export const AgentGatewayDrawer: React.FC<Props> = ({ isOpen, onClose }) => {
       console.error("Failed to clear logs:", e);
     }
   };
-
-  const copyToClipboard = (text: string, setCopied: (v: boolean) => void) => {
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const skillMarkdown = useMemo(() => {
-    const port = status?.port || 39281;
-    const sshPort = status?.ssh_port || 2222;
-    const token = status?.token || "<YOUR_TOKEN>";
-    return `# UltimateShell AI Agent Security Gateway Skill (双轨制)
-
-## 概述
-你已连接到用户的本地 UltimateShell AI 安全代理双轨网关。
-你可以安全地代表用户对服务器执行巡检、状态读取和维护操作。
-**所有服务器密码和 SSH 私钥均严格保存在用户本地 Rust 安全保险库中，外部 Agent 完全无需也无法读取密码或密钥。**
-
-## 双轨连接规范
-
-### 轨道 1：原生 SSH 协议直接连接 (适用于 Claude Code CLI, 终端脚本与命令行 Agent)
-- 本地地址: \`127.0.0.1\`
-- SSH 端口: \`${sshPort}\`
-- 命令行直接执行示例:
-  \`\`\`bash
-  ssh -p ${sshPort} <目标服务器名称或Host>@127.0.0.1 "<command>"
-  \`\`\`
-- 说明:
-  - 回环本地连接无需输入真实服务器私钥或密码。
-  - 遇到高危或写操作时，SSH 终端将实时提示 \`Waiting for user approval...\`，并在桌面弹窗批准后自动继续执行。
-
-### 轨道 2：HTTP / MCP API 工具调用 (适用于 Claude Desktop, Cursor, Web Agents)
-- 本地接口: \`http://127.0.0.1:${port}\`
-- 鉴权头: \`Authorization: Bearer ${token}\`
-- 可用工具接口:
-  - 获取主机: \`GET /api/servers\`
-  - 执行命令: \`POST /api/exec\` (参数: \`server\`, \`command\`, \`agent_name\`)
-  - 读取文件: \`POST /api/read_file\` (参数: \`server\`, \`path\`)
-`;
-  }, [status?.port, status?.ssh_port, status?.token]);
-
-  const mcpConfigJson = useMemo(() => {
-    const port = status?.port || 39281;
-    const token = status?.token || "<YOUR_TOKEN>";
-    return JSON.stringify(
-      {
-        mcpServers: {
-          ultimateShell: {
-            command: "npx",
-            args: [
-              "-y",
-              "mcp-remote",
-              `http://127.0.0.1:${port}/mcp?token=${token}`,
-            ],
-          },
-        },
-      },
-      null,
-      2
-    );
-  }, [status?.port, status?.token]);
 
   const filteredLogs = useMemo(() => {
     return auditLogs.filter((log) => {
@@ -535,141 +466,7 @@ export const AgentGatewayDrawer: React.FC<Props> = ({ isOpen, onClose }) => {
             </div>
           ) : (
             /* Guide Tab */
-            <div className="space-y-4 text-[12px]">
-              {/* Native SSH Gateway Card (Track 1) */}
-              <div className="p-3.5 rounded-xl border border-blue-500/30 bg-blue-500/5 space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold text-[12.5px] flex items-center space-x-1.5 text-blue-400">
-                    <Terminal className="w-4 h-4 text-blue-400" />
-                    <span>轨道 1：原生 SSH 命令行直连 (推荐 Claude Code / CLI)</span>
-                  </span>
-                  <div className="flex items-center space-x-2">
-                    <button
-                      onClick={() =>
-                        copyToClipboard(
-                          `ssh -p ${status?.ssh_port || 2222} <server>@127.0.0.1 "systemctl status nginx"`,
-                          setCopiedSshCmd
-                        )
-                      }
-                      className="flex items-center space-x-1 px-2 py-0.5 rounded text-[11px] bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 transition-all"
-                    >
-                      {copiedSshCmd ? (
-                        <Check className="w-3 h-3 text-emerald-500" />
-                      ) : (
-                        <Copy className="w-3 h-3" />
-                      )}
-                      <span>{copiedSshCmd ? t("common.success") : t("agent.copySsh")}</span>
-                    </button>
-                    <button
-                      onClick={() =>
-                        copyToClipboard(
-                          `# UltimateShell 本地 AI 原生 SSH 堡垒配置 (~/.ssh/config)\nHost ai-*\n  HostName 127.0.0.1\n  Port ${status?.ssh_port || 2222}\n  UserKnownHostsFile /dev/null\n  StrictHostKeyChecking no\n`,
-                          setCopiedSshConfig
-                        )
-                      }
-                      className="flex items-center space-x-1 px-2 py-0.5 rounded text-[11px] bg-[var(--hover-item)] text-[var(--text-primary)] hover:border-[var(--border-strong)] border border-[var(--border-subtle)]"
-                    >
-                      {copiedSshConfig ? (
-                        <Check className="w-3 h-3 text-emerald-500" />
-                      ) : (
-                        <Copy className="w-3 h-3" />
-                      )}
-                      <span>{copiedSshConfig ? t("common.success") : "复制 .ssh/config"}</span>
-                    </button>
-                  </div>
-                </div>
-
-                <p className="text-[11px] text-[var(--text-secondary)] leading-relaxed">
-                  无需任何 HTTP 客户端。AI Agent 只需在终端中敲原生 `ssh`，由本地网关截获并执行三级安全审批，凭证零泄露：
-                </p>
-
-                <div className="bg-[var(--bg-terminal,rgba(0,0,0,0.5))] rounded-lg p-2.5 font-mono text-[11px] text-emerald-400 border border-[var(--border-subtle)]">
-                  <div className="text-gray-500 mb-1"># 终端直连示例 (端口: {status?.ssh_port || 2222})</div>
-                  <div>$ ssh -p {status?.ssh_port || 2222} 目标服务器@127.0.0.1 "systemctl status nginx"</div>
-                </div>
-              </div>
-
-              {/* Token & Endpoint Card (Track 2) */}
-              <div className="p-3.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-card)] space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold text-[12.5px] flex items-center space-x-1.5">
-                    <Lock className="w-3.5 h-3.5 text-purple-400" />
-                    <span>轨道 2：HTTP / MCP API 本地认证凭证</span>
-                  </span>
-                  <button
-                    onClick={() =>
-                      copyToClipboard(status?.token || "", setCopiedToken)
-                    }
-                    className="flex items-center space-x-1 px-2 py-0.5 rounded text-[11px] bg-[#007AFF]/15 text-[#007AFF] hover:bg-[#007AFF]/25 transition-all"
-                  >
-                    {copiedToken ? (
-                      <Check className="w-3 h-3 text-emerald-500" />
-                    ) : (
-                      <Copy className="w-3 h-3" />
-                    )}
-                    <span>{copiedToken ? t("common.success") : t("agent.copyToken")}</span>
-                  </button>
-                </div>
-
-                <div className="font-mono text-[11px] bg-[var(--hover-item)] p-2 rounded-lg border border-[var(--border-subtle)] break-all select-all text-purple-300">
-                  {status?.token}
-                </div>
-
-                <p className="text-[11px] text-[var(--text-tertiary)] leading-relaxed">
-                  本地接口: `http://127.0.0.1:{status?.port || 39281}` · 仅限本机回环访问，用于支持 Tool Calling 或 MCP 的外部 AI Agent。
-                </p>
-              </div>
-
-              {/* Copy Skill.md */}
-              <div className="p-3.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-card)] space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold flex items-center space-x-1.5">
-                    <FileText className="w-3.5 h-3.5 text-blue-400" />
-                    <span>外部 Agent SKILL.md 规范文档</span>
-                  </span>
-                  <button
-                    onClick={() =>
-                      copyToClipboard(skillMarkdown, setCopiedSkill)
-                    }
-                    className="flex items-center space-x-1 px-2 py-0.5 rounded text-[11px] bg-[var(--hover-item)] text-[var(--text-primary)] hover:border-[var(--border-strong)] border border-[var(--border-subtle)]"
-                  >
-                    {copiedSkill ? (
-                      <Check className="w-3 h-3 text-emerald-500" />
-                    ) : (
-                      <Copy className="w-3 h-3" />
-                    )}
-                    <span>{copiedSkill ? t("common.success") : t("agent.copySkill")}</span>
-                  </button>
-                </div>
-                <p className="text-[11px] text-[var(--text-tertiary)]">
-                  复制后直接粘贴提供给 Claude Code, Antigravity Agent 或任何智能体即可快速让其掌握排查技巧。
-                </p>
-              </div>
-
-              {/* Copy MCP Server config */}
-              <div className="p-3.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-card)] space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold flex items-center space-x-1.5">
-                    <Code className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>Claude Desktop / Cursor MCP 配置</span>
-                  </span>
-                  <button
-                    onClick={() => copyToClipboard(mcpConfigJson, setCopiedMcp)}
-                    className="flex items-center space-x-1 px-2 py-0.5 rounded text-[11px] bg-[var(--hover-item)] text-[var(--text-primary)] hover:border-[var(--border-strong)] border border-[var(--border-subtle)]"
-                  >
-                    {copiedMcp ? (
-                      <Check className="w-3 h-3 text-emerald-500" />
-                    ) : (
-                      <Copy className="w-3 h-3" />
-                    )}
-                    <span>{copiedMcp ? t("common.success") : t("agent.copyMcp")}</span>
-                  </button>
-                </div>
-                <pre className="bg-[var(--bg-terminal,rgba(0,0,0,0.5))] rounded-lg p-2.5 font-mono text-[10.5px] text-gray-300 overflow-x-auto border border-[var(--border-subtle)]">
-                  {mcpConfigJson}
-                </pre>
-              </div>
-            </div>
+            <GatewayGuide status={status} />
           )}
         </div>
       </div>

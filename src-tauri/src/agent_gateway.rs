@@ -17,7 +17,113 @@ use russh::{Channel, ChannelId};
 
 use crate::hosts::load_hosts;
 use crate::pty::{PtyManager, SpawnOptions};
-use crate::sftp::SftpPool;
+use crate::agent_connections::AgentConnections;
+
+// The gateway identity must survive app restarts. Never silently replace a damaged key.
+fn load_gateway_host_key(path: &std::path::Path) -> Result<russh::keys::PrivateKey, String> {
+    use std::io::Write;
+    let parent = path.parent().ok_or("网关密钥路径无效")?;
+    std::fs::create_dir_all(parent).map_err(|e| format!("创建网关密钥目录失败：{e}"))?;
+    #[cfg(unix)] {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700)).map_err(|e| e.to_string())?;
+    }
+    if !path.exists() {
+        let key = russh::keys::PrivateKey::random(&mut rand::rng(), russh::keys::Algorithm::Ed25519)
+            .map_err(|e| format!("生成网关主机密钥失败：{e}"))?;
+        let temporary = parent.join(format!(".host-key-{}", uuid::Uuid::new_v4()));
+        let result = (|| -> Result<(), String> {
+            let mut options = std::fs::OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)] {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            let mut file = options.open(&temporary).map_err(|e| e.to_string())?;
+            let pem = key.to_openssh(russh::keys::ssh_key::LineEnding::LF).map_err(|e| e.to_string())?;
+            file.write_all(pem.as_bytes()).map_err(|e| e.to_string())?;
+            file.sync_all().map_err(|e| e.to_string())?;
+            match std::fs::hard_link(&temporary, path) {
+                Ok(()) => Ok(()),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+                Err(e) => Err(format!("保存网关主机密钥失败：{e}")),
+            }
+        })();
+        let _ = std::fs::remove_file(temporary);
+        result?;
+    }
+    #[cfg(unix)] {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).map_err(|e| e.to_string())?;
+    }
+    let key = russh::keys::PrivateKey::read_openssh_file(path)
+        .map_err(|e| format!("读取网关主机密钥失败（不会自动替换）：{e}"))?;
+    let public = key.public_key().to_openssh().map_err(|e| e.to_string())?;
+    std::fs::write(path.with_extension("pub"), format!("{public}\n")).map_err(|e| e.to_string())?;
+    Ok(key)
+}
+
+fn gateway_state_dir() -> Result<std::path::PathBuf, String> {
+    std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(".ultimateshell/agent-gateway"))
+        .ok_or_else(|| "无法确定网关配置目录".into())
+}
+
+fn load_gateway_token(path: &std::path::Path) -> Result<String, String> {
+    use std::io::Write;
+    let parent = path.parent().ok_or("网关 Token 路径无效")?;
+    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    #[cfg(unix)] {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700)).map_err(|e| e.to_string())?;
+    }
+    if !path.exists() {
+        let temporary = parent.join(format!(".token-{}", uuid::Uuid::new_v4()));
+        let result = (|| -> Result<(), String> {
+            let mut options = std::fs::OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)] {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            let mut file = options.open(&temporary).map_err(|e| e.to_string())?;
+            let token = format!("us_gate_{}", uuid::Uuid::new_v4().simple());
+            file.write_all(token.as_bytes()).map_err(|e| e.to_string())?;
+            file.sync_all().map_err(|e| e.to_string())?;
+            match std::fs::hard_link(&temporary, path) {
+                Ok(()) => Ok(()),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+                Err(e) => Err(e.to_string()),
+            }
+        })();
+        let _ = std::fs::remove_file(temporary);
+        result?;
+    }
+    #[cfg(unix)] {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).map_err(|e| e.to_string())?;
+    }
+    let token = std::fs::read_to_string(path).map_err(|_| "无法读取网关 Token".to_string())?;
+    let token = token.trim();
+    let valid = token.strip_prefix("us_gate_").is_some_and(|suffix| suffix.len() == 32 && suffix.bytes().all(|c| c.is_ascii_hexdigit()));
+    if !valid { return Err("网关 Token 文件损坏，已停止启动网关；不会静默替换".into()); }
+    Ok(token.to_owned())
+}
+
+fn request_target(payload: &serde_json::Value) -> Result<String, String> {
+    let read = |field: &str| -> Result<Option<&str>, String> {
+        match payload.get(field) {
+            None => Ok(None),
+            Some(value) => value.as_str().map(str::trim).filter(|value| !value.is_empty())
+                .map(Some).ok_or_else(|| format!("'{field}' must be a non-empty string")),
+        }
+    };
+    let target = read("target")?;
+    let server = read("server")?;
+    if matches!((target, server), (Some(a), Some(b)) if a != b) {
+        return Err("Conflicting 'target' and 'server' fields".into());
+    }
+    target.or(server).map(str::to_owned).ok_or_else(|| "Missing 'target' (or 'server'); use 'local' explicitly for local execution".into())
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -236,19 +342,18 @@ pub struct AgentGateway {
     pub pending_approvals: Arc<Mutex<HashMap<String, mpsc::Sender<bool>>>>,
     pub audit_logs: Arc<Mutex<Vec<AuditLogEntry>>>,
     pub pty_mgr: PtyManager,
-    pub sftp_pool: SftpPool,
+    pub connections: AgentConnections,
     pub app_handle: AppHandle,
 }
 
 impl AgentGateway {
-    pub fn new(pty_mgr: PtyManager, sftp_pool: SftpPool, app_handle: AppHandle) -> Self {
-        // Generate a random bearer token for this app session
-        let token = format!("us_gate_{}", uuid::Uuid::new_v4().to_string().replace('-', ""));
+    pub fn new(pty_mgr: PtyManager, app_handle: AppHandle) -> Result<Self, String> {
+        let token = load_gateway_token(&gateway_state_dir()?.join("token"))?;
         let port = 39281;
         let ssh_port = Arc::new(AtomicU16::new(2222));
         let ssh_running = Arc::new(AtomicBool::new(false));
 
-        Self {
+        Ok(Self {
             port,
             ssh_port,
             ssh_running,
@@ -258,9 +363,9 @@ impl AgentGateway {
             pending_approvals: Arc::new(Mutex::new(HashMap::new())),
             audit_logs: Arc::new(Mutex::new(Vec::new())),
             pty_mgr,
-            sftp_pool,
+            connections: AgentConnections::new(),
             app_handle,
-        }
+        })
     }
 
     pub fn start_server(&self) {
@@ -333,6 +438,15 @@ impl AgentGateway {
                     },
                 };
 
+                let key_path = match gateway_state_dir() {
+                    Ok(dir) => dir.join("host_ed25519"),
+                    Err(error) => { eprintln!("[AgentGateway] {error}"); return; }
+                };
+                let host_key = match load_gateway_host_key(&key_path) {
+                    Ok(key) => key,
+                    Err(error) => { eprintln!("[AgentGateway] {error}"); return; }
+                };
+                eprintln!("[AgentGateway] SSH 主机公钥指纹：{}", host_key.public_key().fingerprint(russh::keys::HashAlg::Sha256));
                 gw_ssh.ssh_port.store(bound_port, Ordering::SeqCst);
                 gw_ssh.ssh_running.store(true, Ordering::SeqCst);
                 println!("[AgentGateway] 本地 AI 原生 SSH 堡垒已启动在 127.0.0.1:{}", bound_port);
@@ -341,10 +455,7 @@ impl AgentGateway {
                     inactivity_timeout: Some(std::time::Duration::from_secs(3600)),
                     auth_rejection_time: std::time::Duration::from_secs(0),
                     auth_rejection_time_initial: Some(std::time::Duration::from_secs(0)),
-                    keys: vec![
-                        russh::keys::PrivateKey::random(&mut rand::rng(), russh::keys::Algorithm::Ed25519)
-                            .unwrap(),
-                    ],
+                    keys: vec![host_key],
                     ..Default::default()
                 };
                 let config = Arc::new(config);
@@ -363,6 +474,7 @@ impl AgentGateway {
     pub fn stop_server(&self) {
         self.is_running.store(false, Ordering::SeqCst);
         self.ssh_running.store(false, Ordering::SeqCst);
+        self.connections.clear();
     }
 
     fn check_auth(&self, req: &tiny_http::Request) -> bool {
@@ -524,12 +636,13 @@ impl AgentGateway {
                 }
             };
 
-            let target = payload
-                .get("target")
-                .and_then(|v| v.as_str())
-                .unwrap_or("local")
-                .trim()
-                .to_string();
+            let target = match request_target(&payload) {
+                Ok(target) => target,
+                Err(error) => {
+                    self.respond_json(req, StatusCode(400), &serde_json::json!({"ok": false, "error": error}));
+                    return;
+                }
+            };
             let command = match payload.get("command").and_then(|v| v.as_str()) {
                 Some(cmd) if !cmd.trim().is_empty() => cmd.trim().to_string(),
                 _ => {
@@ -543,6 +656,7 @@ impl AgentGateway {
             };
             let agent_name = payload
                 .get("agent")
+                .or_else(|| payload.get("agent_name"))
                 .and_then(|v| v.as_str())
                 .unwrap_or("AI Agent")
                 .to_string();
@@ -705,12 +819,13 @@ impl AgentGateway {
                 }
             };
 
-            let target = payload
-                .get("target")
-                .and_then(|v| v.as_str())
-                .unwrap_or("local")
-                .trim()
-                .to_string();
+            let target = match request_target(&payload) {
+                Ok(target) => target,
+                Err(error) => {
+                    self.respond_json(req, StatusCode(400), &serde_json::json!({"ok": false, "error": error}));
+                    return;
+                }
+            };
             let file_path = match payload.get("path").and_then(|v| v.as_str()) {
                 Some(p) if !p.trim().is_empty() => p.trim().to_string(),
                 _ => {
@@ -921,28 +1036,41 @@ impl AgentGateway {
             return Ok((exit_code, stdout, stderr));
         }
 
-        // Remote SSH Execution via SftpPool
-        let sess_arc = self.sftp_pool.get_or_connect(&opts)?;
-        let sess = sess_arc.lock().map_err(|e| e.to_string())?;
-
-        let mut channel = sess
-            .channel_session()
-            .map_err(|e| format!("无法创建 SSH 通道: {}", e))?;
-
-        channel
-            .exec(command)
-            .map_err(|e| format!("执行命令失败: {}", e))?;
-
-        let mut stdout = String::new();
-        channel.read_to_string(&mut stdout).ok();
-
-        let mut stderr = String::new();
-        channel.stderr().read_to_string(&mut stderr).ok();
-
-        channel.wait_close().ok();
-        let exit_code = channel.exit_status().unwrap_or(0);
-
-        Ok((exit_code, stdout, stderr))
+        // Opening a channel precedes exec, so a failed open can safely reconnect once.
+        // Never replay exec/read failures: the remote command may already have run.
+        let lease = self.connections.acquire(&opts)?;
+        let mut connection = lease.lock()?;
+        for attempt in 0..2 {
+            if !connection.as_ref().is_some_and(ssh2::Session::authenticated) {
+                *connection = Some(crate::sftp::connect_session(&opts)?);
+            }
+            let sess = connection.as_ref().ok_or("AI SSH 连接未建立")?;
+            let mut channel = match sess.channel_session() {
+                Ok(channel) => channel,
+                Err(error) => {
+                    *connection = None;
+                    if attempt == 0 { continue; }
+                    return Err(format!("重新连接后仍无法创建 SSH 通道（命令未发送）：{error}"));
+                }
+            };
+            let result = (|| -> Result<(i32, String, String), String> {
+                channel.exec(command).map_err(|e| format!("发送 SSH 命令失败，执行状态未知，不会自动重试：{e}"))?;
+                let mut stdout = String::new();
+                channel.read_to_string(&mut stdout).map_err(|e| format!("读取 SSH 标准输出失败，命令可能已执行，不会自动重试：{e}"))?;
+                let mut stderr = String::new();
+                channel.stderr().read_to_string(&mut stderr).map_err(|e| format!("读取 SSH 错误输出失败，命令可能已执行，不会自动重试：{e}"))?;
+                channel.wait_close().map_err(|e| format!("等待 SSH 命令结束失败，执行状态未知，不会自动重试：{e}"))?;
+                let exit_code = channel.exit_status().map_err(|e| format!("读取 SSH 退出码失败：{e}"))?;
+                channel.close().map_err(|e| format!("关闭 SSH 命令通道失败，命令已结束，不会自动重试：{e}"))?;
+                Ok((exit_code, stdout, stderr))
+            })();
+            if result.is_err() {
+                drop(channel);
+                *connection = None;
+            }
+            return result;
+        }
+        Err("无法创建 SSH 通道，命令未发送".into())
     }
 }
 
@@ -1213,6 +1341,55 @@ impl RusshHandler for AgentSshHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gateway_token_is_persistent_private_and_never_silently_rotated() {
+        let dir = std::env::temp_dir().join(format!("us-gateway-token-{}", uuid::Uuid::new_v4()));
+        let path = dir.join("token");
+        let first = load_gateway_token(&path).unwrap();
+        assert!(first.starts_with("us_gate_"));
+        assert_eq!(load_gateway_token(&path).unwrap(), first);
+        #[cfg(unix)] {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        }
+        std::fs::write(&path, "invalid").unwrap();
+        assert!(load_gateway_token(&path).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "invalid");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn gateway_target_never_defaults_to_local() {
+        use serde_json::json;
+        assert_eq!(request_target(&json!({"server":"3.6"})).unwrap(), "3.6");
+        assert_eq!(request_target(&json!({"target":" 3.6 "})).unwrap(), "3.6");
+        assert_eq!(request_target(&json!({"target":"local"})).unwrap(), "local");
+        assert_eq!(request_target(&json!({"target":"3.6", "server":"3.6"})).unwrap(), "3.6");
+        for value in [json!({}), json!({"server":""}), json!({"target":null}), json!({"target":3}), json!({"target":"local","server":"3.6"})] {
+            assert!(request_target(&value).is_err());
+        }
+    }
+
+    #[test]
+    fn gateway_host_key_survives_restart_and_rejects_corruption() {
+        let dir = std::env::temp_dir().join(format!("us-gateway-key-{}", uuid::Uuid::new_v4()));
+        let path = dir.join("host_ed25519");
+        let first = load_gateway_host_key(&path).unwrap();
+        let second = load_gateway_host_key(&path).unwrap();
+        assert_eq!(first.public_key(), second.public_key());
+        let published = russh::keys::PublicKey::read_openssh_file(path.with_extension("pub")).unwrap();
+        assert_eq!(first.public_key(), &published);
+        #[cfg(unix)] {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+            assert_eq!(std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777, 0o700);
+        }
+        std::fs::write(&path, "damaged-key").unwrap();
+        assert!(load_gateway_host_key(&path).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "damaged-key");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn test_risk_classification() {

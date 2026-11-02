@@ -14,6 +14,7 @@ mod transport;
 mod vault;
 mod tunnel;
 mod agent_gateway;
+mod agent_connections;
 
 use hosts::{load_hosts, save_hosts, HostProfile};
 use ops::{DiskPartition, ProcessEntry};
@@ -1013,7 +1014,6 @@ pub fn run() {
     let tunnel_mgr = TunnelManager::new();
 
     let pty_mgr_gw = pty_mgr.clone();
-    let sftp_pool_gw = sftp_pool.clone();
 
     tauri::Builder::default()
         .manage(pty_mgr)
@@ -1024,7 +1024,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            let gateway = AgentGateway::new(pty_mgr_gw, sftp_pool_gw, app.handle().clone());
+            let gateway = AgentGateway::new(pty_mgr_gw, app.handle().clone())
+                .map_err(std::io::Error::other)?;
             gateway.start_server();
             app.manage(gateway);
 

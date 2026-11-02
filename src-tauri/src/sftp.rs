@@ -73,6 +73,17 @@ pub fn authenticate(sess: &ssh2::Session, opts: &SpawnOptions) -> Result<(), Str
     }
 }
 
+// Shared connection setup, without sharing connection ownership between features.
+pub fn connect_session(opts: &SpawnOptions) -> Result<ssh2::Session, String> {
+    let tcp = crate::transport::connect(opts)?;
+    let mut session = ssh2::Session::new().map_err(|e| e.to_string())?;
+    session.set_timeout(15000);
+    session.set_tcp_stream(tcp);
+    session.handshake().map_err(|e| format!("SSH 握手失败：{e}"))?;
+    authenticate(&session, opts)?;
+    Ok(session)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileEntry {
     pub name: String,
@@ -152,31 +163,13 @@ impl SftpPool {
             }
         }
 
-        let tcp = match crate::transport::connect(opts) {
-            Ok(stream) => stream,
+        let sess = match connect_session(opts) {
+            Ok(session) => session,
             Err(error) => {
                 if let Ok(mut cd) = self.cooldowns.lock() { cd.insert(opts.session_id.clone(), Instant::now()); }
                 return Err(error);
             }
         };
-
-        let mut sess = match ssh2::Session::new() {
-            Ok(s) => s,
-            Err(e) => return Err(e.to_string()),
-        };
-        sess.set_timeout(15000); // Bound stalls, allowing normal proxy and long-distance latency.
-        sess.set_tcp_stream(tcp);
-        if let Err(e) = sess.handshake() {
-            if let Ok(mut cd) = self.cooldowns.lock() {
-                cd.insert(opts.session_id.clone(), Instant::now());
-            }
-            return Err(format!("SSH 握手失败: {}", e));
-        }
-
-        if let Err(error) = authenticate(&sess, opts) {
-            if let Ok(mut cd) = self.cooldowns.lock() { cd.insert(opts.session_id.clone(), Instant::now()); }
-            return Err(error);
-        }
 
         let arc_sess = Arc::new(Mutex::new(sess));
         if let Ok(mut map) = self.sessions.lock() {
