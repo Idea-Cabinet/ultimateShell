@@ -207,22 +207,54 @@ export const TerminalView: React.FC<Props> = ({
       console.warn("[TerminalView] WebGL GPU 加速未能加载，回退至 DOM 渲染:", e);
     }
 
-    // Optimize xterm helper textarea for English terminal interaction
+    const switchToAscii = () => {
+      invoke("switch_to_ascii_input").catch(() => {});
+    };
+
+    // Optimize xterm helper textarea for pure text terminal interaction
+    // Disable WebKit smart punctuation, spellcheck, and language-based smart spacing
     if (term.textarea) {
-      term.textarea.setAttribute("autocapitalize", "off");
+      term.textarea.setAttribute("autocapitalize", "none");
       term.textarea.setAttribute("autocomplete", "off");
       term.textarea.setAttribute("autocorrect", "off");
       term.textarea.setAttribute("spellcheck", "false");
-      term.textarea.setAttribute("lang", "en");
+      term.textarea.removeAttribute("lang");
+      term.textarea.setAttribute("data-gramm", "false");
+      term.textarea.setAttribute("data-enable-grammarly", "false");
+      term.textarea.setAttribute("wrap", "off");
+      try {
+        (term.textarea.style as any).webkitUserModify = "read-write-plaintext-only";
+      } catch (_) {}
     }
 
     if (isActive) {
       term.focus();
+      switchToAscii();
     }
 
     terminalInstanceRef.current = term;
     fitAddonRef.current = fitAddon;
     searchAddonRef.current = searchAddon;
+
+    // Track physical Space key presses vs IME composition endings
+    let lastRealSpaceKeyDownTime = 0;
+    let lastCompositionEndTime = 0;
+
+    term.attachCustomKeyEventHandler((ev) => {
+      if (ev.type === "keydown") {
+        if (ev.key === " " || ev.code === "Space") {
+          lastRealSpaceKeyDownTime = Date.now();
+        }
+      }
+      return true;
+    });
+
+    if (term.textarea) {
+      term.textarea.addEventListener("compositionend", () => {
+        lastCompositionEndTime = Date.now();
+      });
+      term.textarea.addEventListener("focus", switchToAscii);
+    }
 
     // High-performance display buffer aligned with display refresh rate
     let pendingChunks: string[] = [];
@@ -244,9 +276,28 @@ export const TerminalView: React.FC<Props> = ({
     };
 
     const onDataDisposable = term.onData((data) => {
-      invoke("pty_write", { sessionId: session.id, data }).catch(console.error);
+      let cleanedData = data;
+
+      // Guard against ghost space leaked by Chinese IME on CapsLock/Shift/switching to English
+      const now = Date.now();
+      const recentlyComposed = now - lastCompositionEndTime < 120;
+      const spacePhysicallyPressed = now - lastRealSpaceKeyDownTime < 150;
+
+      if (recentlyComposed && !spacePhysicallyPressed) {
+        if (cleanedData === " ") {
+          // Pure ghost space leaked by IME cancellation/switching, drop it
+          return;
+        }
+        // If pure ASCII characters ending with space (e.g. "git " or "ls "), strip trailing leaked space
+        if (/^[\x20-\x7E]+$/.test(cleanedData) && cleanedData.endsWith(" ")) {
+          cleanedData = cleanedData.replace(/ +$/, "");
+          if (!cleanedData) return;
+        }
+      }
+
+      invoke("pty_write", { sessionId: session.id, data: cleanedData }).catch(console.error);
       if (onBroadcastDataRef.current) {
-        onBroadcastDataRef.current(data);
+        onBroadcastDataRef.current(cleanedData);
       }
       // If user typed something (e.g. Ctrl+C or Enter), flush pending output immediately
       if (pendingChunks.length > 0) {
@@ -380,6 +431,7 @@ export const TerminalView: React.FC<Props> = ({
 
   useEffect(() => {
     if (isActive && fitAddonRef.current && terminalInstanceRef.current) {
+      invoke("switch_to_ascii_input").catch(() => {});
       const raf = requestAnimationFrame(() => {
         try {
           fitAddonRef.current?.fit();
@@ -530,9 +582,11 @@ export const TerminalView: React.FC<Props> = ({
         ref={containerRef}
         tabIndex={0}
         onClick={() => {
+          invoke("switch_to_ascii_input").catch(() => {});
           terminalInstanceRef.current?.focus();
         }}
         onFocus={() => {
+          invoke("switch_to_ascii_input").catch(() => {});
           terminalInstanceRef.current?.focus();
         }}
         className="w-full h-full bg-[var(--bg-terminal)] border-none outline-none cursor-text"

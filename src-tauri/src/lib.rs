@@ -541,8 +541,84 @@ async fn fs_get_dir_size(
     .map_err(|e| format!("异步执行错误: {}", e))?
 }
 
+#[cfg(target_os = "macos")]
+mod macos_ime {
+    use std::ffi::c_void;
+
+    type TISInputSourceRef = *mut c_void;
+    type CFArrayRef = *const c_void;
+    type CFStringRef = *const c_void;
+    type CFDictionaryRef = *const c_void;
+    type OSStatus = i32;
+
+    #[link(name = "Carbon", kind = "framework")]
+    #[link(name = "CoreFoundation", kind = "framework")]
+    unsafe extern "C" {
+        fn TISCreateInputSourceList(properties: CFDictionaryRef, includeAll: bool) -> CFArrayRef;
+        fn TISGetInputSourceProperty(inputSource: TISInputSourceRef, propertyKey: CFStringRef) -> *const c_void;
+        fn TISSelectInputSource(inputSource: TISInputSourceRef) -> OSStatus;
+        static kTISPropertyInputSourceID: CFStringRef;
+
+        fn CFArrayGetCount(theArray: CFArrayRef) -> isize;
+        fn CFArrayGetValueAtIndex(theArray: CFArrayRef, idx: isize) -> *const c_void;
+        fn CFRelease(cf: *const c_void);
+        fn CFStringCreateWithCString(alloc: *const c_void, cStr: *const std::ffi::c_char, encoding: u32) -> CFStringRef;
+        fn CFStringCompare(theString1: CFStringRef, theString2: CFStringRef, compareOptions: usize) -> i32;
+    }
+
+    pub fn switch_to_ascii() -> Result<(), String> {
+        unsafe {
+            let list = TISCreateInputSourceList(std::ptr::null(), false);
+            if list.is_null() {
+                return Err("无法获取系统输入法列表".into());
+            }
+
+            let target_id = CFStringCreateWithCString(
+                std::ptr::null(),
+                c"com.apple.keylayout.ABC".as_ptr(),
+                0x08000100, // kCFStringEncodingUTF8
+            );
+
+            let count = CFArrayGetCount(list);
+            let mut found = false;
+
+            for i in 0..count {
+                let source = CFArrayGetValueAtIndex(list, i) as TISInputSourceRef;
+                if source.is_null() {
+                    continue;
+                }
+                let prop = TISGetInputSourceProperty(source, kTISPropertyInputSourceID) as CFStringRef;
+                if !prop.is_null() && !target_id.is_null() {
+                    if CFStringCompare(prop, target_id, 0) == 0 {
+                        let status = TISSelectInputSource(source);
+                        if status == 0 {
+                            found = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if !target_id.is_null() {
+                CFRelease(target_id as *const c_void);
+            }
+            CFRelease(list);
+
+            if found {
+                Ok(())
+            } else {
+                Err("未找到可切换的 ABC 输入法".into())
+            }
+        }
+    }
+}
+
 #[tauri::command]
 fn switch_to_ascii_input() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = macos_ime::switch_to_ascii();
+    }
     Ok(())
 }
 
