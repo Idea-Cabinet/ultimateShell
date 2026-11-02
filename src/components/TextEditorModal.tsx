@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { FileEntry, PreviewResult } from "../types";
 import { useI18n } from "../i18n";
+import { formatDocument, isFormatShortcut } from "../utils/formatDocument";
 
 export type SupportedLanguage =
   | "html"
@@ -36,7 +37,7 @@ export function detectLanguage(filename: string): SupportedLanguage {
   const lower = filename.toLowerCase();
   if (lower.endsWith(".html") || lower.endsWith(".htm")) return "html";
   if (lower.endsWith(".json") || lower.endsWith(".jsonc")) return "json";
-  if (lower.endsWith(".nginx") || lower.endsWith(".conf") || lower.includes("nginx")) return "nginx";
+  if (lower.endsWith(".nginx") || lower.endsWith(".conf")) return "nginx";
   if (lower.endsWith(".sh") || lower.endsWith(".bash") || lower.endsWith(".zsh")) return "shell";
   if (lower.endsWith(".yaml") || lower.endsWith(".yml")) return "yaml";
   if (lower.endsWith(".xml") || lower.endsWith(".svg")) return "xml";
@@ -52,6 +53,7 @@ export function detectLanguage(filename: string): SupportedLanguage {
   ) {
     return "javascript";
   }
+  if (lower.includes("nginx") || /\/sites-(?:available|enabled)\//.test(lower)) return "nginx";
   return "plaintext";
 }
 
@@ -641,6 +643,16 @@ export const TextEditorModal: React.FC<TextEditorModalProps> = ({
   const [showSnippetsMenu, setShowSnippetsMenu] = useState<boolean>(false);
   const [showUnsavedPrompt, setShowUnsavedPrompt] = useState<boolean>(false);
   const [formatSuccess, setFormatSuccess] = useState<boolean>(false);
+  const [formatError, setFormatError] = useState<string | null>(null);
+  const [isFormatting, setIsFormatting] = useState(false);
+  const formatBusyRef = useRef(false);
+  const formatGenerationRef = useRef(0);
+  useEffect(() => {
+    formatGenerationRef.current++;
+    setFormatError(null);
+    setFormatSuccess(false);
+    return () => { formatGenerationRef.current++; };
+  }, [entry.path, previewResult, isOpen]);
 
   // Undo / Redo History Stacks
   const undoStackRef = useRef<HistorySnapshot[]>([]);
@@ -661,7 +673,7 @@ export const TextEditorModal: React.FC<TextEditorModalProps> = ({
   const gutterRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  const lang = useMemo(() => detectLanguage(entry.name), [entry.name]);
+  const lang = useMemo(() => detectLanguage(entry.path || entry.name), [entry.path, entry.name]);
   const isDirty = useMemo(() => {
     return previewResult ? content !== previewResult.content : false;
   }, [content, previewResult]);
@@ -856,26 +868,30 @@ export const TextEditorModal: React.FC<TextEditorModalProps> = ({
   };
 
   // Format / Prettify Content
-  const handleFormatContent = () => {
-    if (lang === "json") {
-      try {
-        const parsed = JSON.parse(content);
-        const formatted = JSON.stringify(parsed, null, 2);
-        pushProgrammaticChange(formatted, 0, 0);
-        setFormatSuccess(true);
-        setTimeout(() => setFormatSuccess(false), 2000);
-      } catch (err: any) {
-        alert(`格式化失败: ${err?.message || "JSON 格式不合法"}`);
+  const handleFormatContent = async () => {
+    if (formatBusyRef.current || loading || error || isSaving || !previewResult || previewResult.is_truncated) return;
+    const original = currentContentRef.current;
+    const generation = formatGenerationRef.current;
+    const cursor = textareaRef.current?.selectionStart || 0;
+    formatBusyRef.current = true;
+    setIsFormatting(true);
+    setFormatError(null);
+    setFormatSuccess(false);
+    try {
+      const formatted = await formatDocument(original, lang, entry.name);
+      if (generation !== formatGenerationRef.current) return;
+      if (currentContentRef.current !== original) {
+        setFormatError("内容已变化，请重新格式化。");
+        return;
       }
-    } else {
-      // Basic whitespace / empty lines clean-up
-      const cleaned = content
-        .split("\n")
-        .map((l) => l.trimEnd())
-        .join("\n");
-      pushProgrammaticChange(cleaned, 0, 0);
+      if (formatted !== original) pushProgrammaticChange(formatted, Math.min(cursor, formatted.length), Math.min(cursor, formatted.length));
       setFormatSuccess(true);
-      setTimeout(() => setFormatSuccess(false), 2000);
+      setTimeout(() => { if (generation === formatGenerationRef.current) setFormatSuccess(false); }, 2000);
+    } catch (err) {
+      if (generation === formatGenerationRef.current) setFormatError(`格式化失败：${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      formatBusyRef.current = false;
+      setIsFormatting(false);
     }
   };
 
@@ -1071,6 +1087,13 @@ export const TextEditorModal: React.FC<TextEditorModalProps> = ({
       style={{ zIndex: 10000 }}
       className="fixed inset-0 bg-black/60 backdrop-blur-[2px] flex items-center justify-center p-4 animate-in fade-in duration-100 select-none"
       onClick={requestClose}
+      onKeyDownCapture={(event) => {
+        if (isFormatShortcut(event.nativeEvent)) {
+          event.preventDefault();
+          event.stopPropagation();
+          void handleFormatContent();
+        }
+      }}
     >
       <div
         className="w-[980px] max-w-full h-[88vh] max-h-[920px] bg-[var(--bg-app)] border border-[var(--border-subtle)] rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-120"
@@ -1179,7 +1202,8 @@ export const TextEditorModal: React.FC<TextEditorModalProps> = ({
             <button
               type="button"
               onClick={handleFormatContent}
-              title="代码排版与格式化"
+              title="格式化（Mac：⌥⇧F / Windows、Linux：Alt+Shift+F）"
+              disabled={isFormatting || loading || !!error || isSaving || !previewResult || previewResult.is_truncated}
               className={`px-2.5 py-1.5 rounded-lg border border-[var(--border-subtle)] text-[11.5px] font-medium flex items-center space-x-1.5 transition cursor-pointer ${
                 formatSuccess
                   ? "bg-emerald-500/15 text-emerald-500 border-emerald-500/30"
@@ -1194,7 +1218,7 @@ export const TextEditorModal: React.FC<TextEditorModalProps> = ({
               ) : (
                 <>
                   <Wand2 className="w-3.5 h-3.5 text-[#007AFF]" />
-                  <span>格式化</span>
+                  <span>{isFormatting ? "格式化中…" : "格式化"}</span>
                 </>
               )}
             </button>
@@ -1355,6 +1379,8 @@ export const TextEditorModal: React.FC<TextEditorModalProps> = ({
             </div>
           </div>
         )}
+
+        {formatError && <div role="alert" className="px-4 py-2 text-xs text-rose-500 bg-rose-500/10 border-b border-rose-500/20 whitespace-pre-wrap max-h-32 overflow-auto">{formatError}</div>}
 
         {/* Truncated File Notice */}
         {previewResult && previewResult.is_truncated && (
