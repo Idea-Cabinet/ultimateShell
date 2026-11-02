@@ -9,6 +9,7 @@ import { listen } from "@tauri-apps/api/event";
 import { TabSession } from "../types";
 import { ResolvedTheme } from "../hooks/useTheme";
 import { AppSettings } from "../hooks/useAppSettings";
+import { normalizeTerminalImeData } from "../utils/inputMethod";
 import { useFileDrop } from "../hooks/useFileDrop";
 import { useTransferManager } from "../context/TransferContext";
 import {
@@ -236,25 +237,7 @@ export const TerminalView: React.FC<Props> = ({
     fitAddonRef.current = fitAddon;
     searchAddonRef.current = searchAddon;
 
-    // Track physical Space key presses vs IME composition endings
-    let lastRealSpaceKeyDownTime = 0;
-    let lastCompositionEndTime = 0;
-
-    term.attachCustomKeyEventHandler((ev) => {
-      if (ev.type === "keydown") {
-        if (ev.key === " " || ev.code === "Space") {
-          lastRealSpaceKeyDownTime = Date.now();
-        }
-      }
-      return true;
-    });
-
-    if (term.textarea) {
-      term.textarea.addEventListener("compositionend", () => {
-        lastCompositionEndTime = Date.now();
-      });
-      term.textarea.addEventListener("focus", switchToAscii);
-    }
+    term.textarea?.addEventListener("focus", switchToAscii);
 
     // High-performance display buffer aligned with display refresh rate
     let pendingChunks: string[] = [];
@@ -276,24 +259,8 @@ export const TerminalView: React.FC<Props> = ({
     };
 
     const onDataDisposable = term.onData((data) => {
-      let cleanedData = data;
-
-      // Guard against ghost space leaked by Chinese IME on CapsLock/Shift/switching to English
-      const now = Date.now();
-      const recentlyComposed = now - lastCompositionEndTime < 120;
-      const spacePhysicallyPressed = now - lastRealSpaceKeyDownTime < 150;
-
-      if (recentlyComposed && !spacePhysicallyPressed) {
-        if (cleanedData === " ") {
-          // Pure ghost space leaked by IME cancellation/switching, drop it
-          return;
-        }
-        // If pure ASCII characters ending with space (e.g. "git " or "ls "), strip trailing leaked space
-        if (/^[\x20-\x7E]+$/.test(cleanedData) && cleanedData.endsWith(" ")) {
-          cleanedData = cleanedData.replace(/ +$/, "");
-          if (!cleanedData) return;
-        }
-      }
+      const cleanedData = normalizeTerminalImeData(term.textarea, data);
+      if (!cleanedData) return;
 
       invoke("pty_write", { sessionId: session.id, data: cleanedData }).catch(console.error);
       if (onBroadcastDataRef.current) {
@@ -396,6 +363,7 @@ export const TerminalView: React.FC<Props> = ({
       pendingChunks = [];
       resizeObserver.disconnect();
       window.removeEventListener("resize", handleResize);
+      term.textarea?.removeEventListener("focus", switchToAscii);
       onDataDisposable.dispose();
       if (unlistenData) unlistenData();
       if (unlistenExit) unlistenExit();
