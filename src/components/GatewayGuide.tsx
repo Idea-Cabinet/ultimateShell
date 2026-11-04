@@ -12,9 +12,9 @@ export function GatewayGuide({ status }: { status: GatewayStatusPayload | null }
   const port = status?.port || 39281;
   const sshPort = status?.ssh_port || 2222;
   const skill = gatewaySkillMarkdown(port, sshPort);
-  const ssh = `ssh -p ${sshPort} -l '192.168.3.6' 127.0.0.1 'hostname'`;
+  const ssh = `ssh -i ~/.ultimateshell/agent-gateway/client_ed25519 -o IdentitiesOnly=yes -p ${sshPort} -l '192.168.3.6' 127.0.0.1 'hostname'`;
   const curl = `curl --noproxy '*' --fail-with-body \\\n  -H "Authorization: Bearer $ULTIMATESHELL_GATEWAY_TOKEN" \\\n  http://127.0.0.1:${port}/api/servers`;
-  const sshConfig = `Host ultimateshell-gateway\n  HostName 127.0.0.1\n  Port ${sshPort}\n  StrictHostKeyChecking ask\n`;
+  const sshConfig = `Host ultimateshell-gateway\n  HostName 127.0.0.1\n  Port ${sshPort}\n  IdentityFile ~/.ultimateshell/agent-gateway/client_ed25519\n  IdentitiesOnly yes\n  StrictHostKeyChecking ask\n`;
   const copy = async (id: string, text: string) => {
     setCopyError(null);
     try {
@@ -82,10 +82,10 @@ export function GatewayGuide({ status }: { status: GatewayStatusPayload | null }
       {code(curl)}
       <div className="overflow-x-auto rounded-lg border border-[var(--border-subtle)]">
         <table className="w-full text-left text-[11px]"><thead className="bg-[var(--bg-app)] text-[var(--text-tertiary)]"><tr>{["操作", "接口", "字段"].map(title => <th key={title} className="px-3 py-2 font-medium">{title}</th>)}</tr></thead>
-          <tbody className="text-[var(--text-secondary)]">{[["查询服务器", "GET /api/servers", "—"], ["执行命令", "POST /api/exec", "server, command, agent_name"], ["读取文件", "POST /api/read_file", "server, path"]].map(row => <tr key={row[0]} className="border-t border-[var(--border-subtle)]">{row.map((cell, index) => <td key={cell} className={`px-3 py-2 ${index ? "font-mono whitespace-nowrap" : "whitespace-nowrap"}`}>{cell}</td>)}</tr>)}</tbody>
+          <tbody className="text-[var(--text-secondary)]">{[["查询服务器", "GET /api/servers", "—"], ["执行命令", "POST /api/exec", "server, command, agent_name"], ["读取文件", "POST /api/read_file", "server, path"], ["上传文件", "POST /api/uploads", "request_id, server, path, size, sha256"], ["长任务", "POST /api/jobs", "request_id, server, command"]].map(row => <tr key={row[0]} className="border-t border-[var(--border-subtle)]">{row.map((cell, index) => <td key={cell} className={`px-3 py-2 ${index ? "font-mono whitespace-nowrap" : "whitespace-nowrap"}`}>{cell}</td>)}</tr>)}</tbody>
         </table>
       </div>
-      <p className="text-[10.5px] text-[var(--text-tertiary)]">当前提供 SSH 与 HTTP API，MCP 客户端需要协议适配。工具沙箱拦截本机网络时，需按工具流程申请访问权限。</p>
+      <p className="text-[10.5px] text-[var(--text-tertiary)]">文件上传与长任务的完整流程见上方 Skill 文档。SSH 不提供 SFTP 或 stdin 上传。MCP 客户端需要协议适配。工具沙箱拦截本机网络时，需按工具流程申请访问权限。</p>
     </section>
   </div>;
 }

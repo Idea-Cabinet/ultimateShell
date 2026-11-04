@@ -3,44 +3,49 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::Read;
 use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
-use std::sync::{mpsc, Arc, Mutex};
-use std::thread;
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 use tiny_http::{Header, Method, Response, Server, StatusCode};
 
 use russh::server::{
-    Auth as RusshAuth, ChannelOpenHandle, Handler as RusshHandler, Msg,
-    Server as RusshServer, Session as RusshSession, VerifiedPublicKey,
+    Auth as RusshAuth, ChannelOpenHandle, Handler as RusshHandler, Msg, Server as RusshServer,
+    Session as RusshSession, VerifiedPublicKey,
 };
 use russh::{Channel, ChannelId};
 
+use crate::agent_connections::AgentConnections;
 use crate::hosts::load_hosts;
 use crate::pty::{PtyManager, SpawnOptions};
-use crate::agent_connections::AgentConnections;
 
 // The gateway identity must survive app restarts. Never silently replace a damaged key.
 fn load_gateway_host_key(path: &std::path::Path) -> Result<russh::keys::PrivateKey, String> {
     use std::io::Write;
     let parent = path.parent().ok_or("网关密钥路径无效")?;
     std::fs::create_dir_all(parent).map_err(|e| format!("创建网关密钥目录失败：{e}"))?;
-    #[cfg(unix)] {
+    #[cfg(unix)]
+    {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700)).map_err(|e| e.to_string())?;
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))
+            .map_err(|e| e.to_string())?;
     }
     if !path.exists() {
-        let key = russh::keys::PrivateKey::random(&mut rand::rng(), russh::keys::Algorithm::Ed25519)
-            .map_err(|e| format!("生成网关主机密钥失败：{e}"))?;
+        let key =
+            russh::keys::PrivateKey::random(&mut rand::rng(), russh::keys::Algorithm::Ed25519)
+                .map_err(|e| format!("生成网关主机密钥失败：{e}"))?;
         let temporary = parent.join(format!(".host-key-{}", uuid::Uuid::new_v4()));
         let result = (|| -> Result<(), String> {
             let mut options = std::fs::OpenOptions::new();
             options.write(true).create_new(true);
-            #[cfg(unix)] {
+            #[cfg(unix)]
+            {
                 use std::os::unix::fs::OpenOptionsExt;
                 options.mode(0o600);
             }
             let mut file = options.open(&temporary).map_err(|e| e.to_string())?;
-            let pem = key.to_openssh(russh::keys::ssh_key::LineEnding::LF).map_err(|e| e.to_string())?;
+            let pem = key
+                .to_openssh(russh::keys::ssh_key::LineEnding::LF)
+                .map_err(|e| e.to_string())?;
             file.write_all(pem.as_bytes()).map_err(|e| e.to_string())?;
             file.sync_all().map_err(|e| e.to_string())?;
             match std::fs::hard_link(&temporary, path) {
@@ -52,9 +57,11 @@ fn load_gateway_host_key(path: &std::path::Path) -> Result<russh::keys::PrivateK
         let _ = std::fs::remove_file(temporary);
         result?;
     }
-    #[cfg(unix)] {
+    #[cfg(unix)]
+    {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).map_err(|e| e.to_string())?;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| e.to_string())?;
     }
     let key = russh::keys::PrivateKey::read_openssh_file(path)
         .map_err(|e| format!("读取网关主机密钥失败（不会自动替换）：{e}"))?;
@@ -63,8 +70,17 @@ fn load_gateway_host_key(path: &std::path::Path) -> Result<russh::keys::PrivateK
     Ok(key)
 }
 
-fn gateway_state_dir() -> Result<std::path::PathBuf, String> {
-    std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(".ultimateshell/agent-gateway"))
+#[cfg(test)]
+thread_local! {static TEST_STATE_DIR:std::cell::RefCell<Option<std::path::PathBuf>>=const{std::cell::RefCell::new(None)};}
+#[cfg(test)]
+thread_local! {static TEST_REMOTE:std::cell::RefCell<Option<SpawnOptions>>=const{std::cell::RefCell::new(None)};}
+pub(crate) fn gateway_state_dir() -> Result<std::path::PathBuf, String> {
+    #[cfg(test)]
+    if let Some(path) = TEST_STATE_DIR.with(|p| p.borrow().clone()) {
+        return Ok(path);
+    }
+    std::env::var_os("HOME")
+        .map(|home| std::path::PathBuf::from(home).join(".ultimateshell/agent-gateway"))
         .ok_or_else(|| "无法确定网关配置目录".into())
 }
 
@@ -72,22 +88,26 @@ fn load_gateway_token(path: &std::path::Path) -> Result<String, String> {
     use std::io::Write;
     let parent = path.parent().ok_or("网关 Token 路径无效")?;
     std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    #[cfg(unix)] {
+    #[cfg(unix)]
+    {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700)).map_err(|e| e.to_string())?;
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))
+            .map_err(|e| e.to_string())?;
     }
     if !path.exists() {
         let temporary = parent.join(format!(".token-{}", uuid::Uuid::new_v4()));
         let result = (|| -> Result<(), String> {
             let mut options = std::fs::OpenOptions::new();
             options.write(true).create_new(true);
-            #[cfg(unix)] {
+            #[cfg(unix)]
+            {
                 use std::os::unix::fs::OpenOptionsExt;
                 options.mode(0o600);
             }
             let mut file = options.open(&temporary).map_err(|e| e.to_string())?;
             let token = format!("us_gate_{}", uuid::Uuid::new_v4().simple());
-            file.write_all(token.as_bytes()).map_err(|e| e.to_string())?;
+            file.write_all(token.as_bytes())
+                .map_err(|e| e.to_string())?;
             file.sync_all().map_err(|e| e.to_string())?;
             match std::fs::hard_link(&temporary, path) {
                 Ok(()) => Ok(()),
@@ -98,14 +118,20 @@ fn load_gateway_token(path: &std::path::Path) -> Result<String, String> {
         let _ = std::fs::remove_file(temporary);
         result?;
     }
-    #[cfg(unix)] {
+    #[cfg(unix)]
+    {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).map_err(|e| e.to_string())?;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| e.to_string())?;
     }
     let token = std::fs::read_to_string(path).map_err(|_| "无法读取网关 Token".to_string())?;
     let token = token.trim();
-    let valid = token.strip_prefix("us_gate_").is_some_and(|suffix| suffix.len() == 32 && suffix.bytes().all(|c| c.is_ascii_hexdigit()));
-    if !valid { return Err("网关 Token 文件损坏，已停止启动网关；不会静默替换".into()); }
+    let valid = token
+        .strip_prefix("us_gate_")
+        .is_some_and(|suffix| suffix.len() == 32 && suffix.bytes().all(|c| c.is_ascii_hexdigit()));
+    if !valid {
+        return Err("网关 Token 文件损坏，已停止启动网关；不会静默替换".into());
+    }
     Ok(token.to_owned())
 }
 
@@ -113,8 +139,12 @@ fn request_target(payload: &serde_json::Value) -> Result<String, String> {
     let read = |field: &str| -> Result<Option<&str>, String> {
         match payload.get(field) {
             None => Ok(None),
-            Some(value) => value.as_str().map(str::trim).filter(|value| !value.is_empty())
-                .map(Some).ok_or_else(|| format!("'{field}' must be a non-empty string")),
+            Some(value) => value
+                .as_str()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(Some)
+                .ok_or_else(|| format!("'{field}' must be a non-empty string")),
         }
     };
     let target = read("target")?;
@@ -122,7 +152,9 @@ fn request_target(payload: &serde_json::Value) -> Result<String, String> {
     if matches!((target, server), (Some(a), Some(b)) if a != b) {
         return Err("Conflicting 'target' and 'server' fields".into());
     }
-    target.or(server).map(str::to_owned).ok_or_else(|| "Missing 'target' (or 'server'); use 'local' explicitly for local execution".into())
+    target.or(server).map(str::to_owned).ok_or_else(|| {
+        "Missing 'target' (or 'server'); use 'local' explicitly for local execution".into()
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -151,6 +183,10 @@ pub struct AuditLogEntry {
     pub risk_level: CommandRiskLevel,
     pub policy_applied: ApprovalPolicy,
     pub approved_by_user: bool,
+    #[serde(default)]
+    pub approval_source: String,
+    #[serde(default)]
+    pub execution_phase: String,
     pub status: String, // "executed" | "denied" | "timeout" | "failed"
     pub exit_code: Option<i32>,
     pub output_snippet: Option<String>,
@@ -165,6 +201,7 @@ pub struct ApprovalRequestPayload {
     pub risk_level: CommandRiskLevel,
     pub policy: ApprovalPolicy,
     pub timestamp: String,
+    pub expires_at_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -178,6 +215,7 @@ pub struct GatewayStatusPayload {
     pub active_servers_count: usize,
     pub audit_count: usize,
     pub pending_approvals_count: usize,
+    pub audit_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -192,103 +230,101 @@ pub struct ServerInfoPayload {
 }
 
 pub fn classify_command(cmd: &str) -> CommandRiskLevel {
+    use CommandRiskLevel::{Critical, Mutation, Safe};
     let trimmed = cmd.trim();
     if trimmed.is_empty() {
-        return CommandRiskLevel::Safe;
+        return Safe;
     }
-
-    let lower = trimmed.to_lowercase();
-
-    // L2: Critical high-risk commands (Destruction / crash / wipe)
-    let critical_patterns = [
-        "rm -rf",
-        "rm -fr",
-        "rm -r -f",
-        "rm -f -r",
-        "mkfs",
-        "fdisk",
-        "parted",
-        "dd if=",
-        "dd of=",
-        ":(){ :|:& };:",
-        "reboot",
-        "shutdown",
-        "init 0",
-        "init 6",
-        "halt",
-        "poweroff",
-        "iptables -f",
-        "ufw disable",
-        "firewall-cmd --panic-on",
-        "chmod -r 777",
-        "chmod 777 /",
-        "> /dev/sda",
-        "> /dev/nvme",
-        "drop database",
-        "drop table",
-        "truncate table",
-    ];
-    for p in critical_patterns {
-        if lower.contains(p) {
-            return CommandRiskLevel::Critical;
+    // Only classify simple commands. A shell/interpreter program is not evidence of read-only behavior.
+    if trimmed.chars().any(|c| "\n;|&`$()<>".contains(c)) {
+        return Critical;
+    }
+    let words: Vec<_> = trimmed.split_whitespace().collect();
+    let executable = words[0];
+    if executable.contains('/')
+        && !executable.starts_with("/bin/")
+        && !executable.starts_with("/usr/bin/")
+    {
+        return Critical;
+    }
+    let program = executable.rsplit('/').next().unwrap_or("");
+    if executable.contains('/')
+        && executable != format!("/bin/{program}")
+        && executable != format!("/usr/bin/{program}")
+    {
+        return Critical;
+    }
+    let args = &words[1..];
+    match program {
+        "hostname" => {
+            if args
+                .iter()
+                .all(|a| ["-s", "-f", "-i", "-I", "-d"].contains(a))
+            {
+                Safe
+            } else {
+                Critical
+            }
         }
-    }
-
-    // L1: Standard mutations (Modifications, writes, service restarts)
-    let mutation_keywords = [
-        "rm ",
-        "rmdir ",
-        "touch ",
-        "mkdir ",
-        "cp ",
-        "mv ",
-        "sed -i",
-        "awk -i",
-        "chmod ",
-        "chown ",
-        "chgrp ",
-        "systemctl restart",
-        "systemctl stop",
-        "systemctl reload",
-        "systemctl enable",
-        "systemctl disable",
-        "systemctl mask",
-        "service ",
-        "/etc/init.d/",
-        "kill ",
-        "pkill ",
-        "killall ",
-        "docker restart",
-        "docker stop",
-        "docker rm",
-        "docker rmi",
-        "docker kill",
-        "docker-compose down",
-        "docker compose down",
-        "apt install",
-        "apt-get install",
-        "apt remove",
-        "apt purge",
-        "yum install",
-        "yum remove",
-        "dnf install",
-        "dnf remove",
-        "npm install -g",
-        "pip install",
-    ];
-    for m in mutation_keywords {
-        if lower.contains(m) {
-            return CommandRiskLevel::Mutation;
+        "date" => {
+            if args
+                .iter()
+                .all(|a| a.starts_with('+') || ["-u", "-R", "--utc", "--iso-8601"].contains(a))
+            {
+                Safe
+            } else {
+                Critical
+            }
         }
+        "ss" => {
+            if args
+                .iter()
+                .any(|a| *a == "--kill" || (a.starts_with('-') && a.contains('K')))
+            {
+                Critical
+            } else {
+                Safe
+            }
+        }
+        "uptime" | "uname" | "whoami" | "id" | "pwd" | "ls" | "cat" | "head" | "tail" | "wc"
+        | "stat" | "df" | "free" | "nproc" | "ps" | "sha256sum" | "true" | "false" => Safe,
+        "mkdir" | "touch" | "cp" | "mv" | "rmdir" | "chown" | "chgrp" => Mutation,
+        "rm" => {
+            let flags = args
+                .iter()
+                .filter(|a| a.starts_with('-'))
+                .copied()
+                .collect::<Vec<_>>()
+                .join("");
+            if flags.contains('r') || flags.contains('R') || flags.contains("--recursive") {
+                Critical
+            } else {
+                Mutation
+            }
+        }
+        "chmod" => {
+            if args.iter().any(|a| *a == "777" || *a == "a+rwx") {
+                Critical
+            } else {
+                Mutation
+            }
+        }
+        "systemctl" => match args.first().copied() {
+            Some(
+                "status" | "show" | "is-active" | "is-enabled" | "list-units" | "list-unit-files",
+            ) => Safe,
+            Some(
+                "start" | "stop" | "restart" | "reload" | "enable" | "disable" | "mask" | "unmask",
+            ) => Mutation,
+            _ => Critical,
+        },
+        "docker" => match args.first().copied() {
+            Some("ps" | "info" | "inspect" | "version" | "stats") => Safe,
+            Some("restart" | "stop" | "rm" | "rmi" | "kill") => Mutation,
+            _ => Critical,
+        },
+        _ => Critical,
     }
-
-    // Redirection writes e.g. "echo 'a' > file"
-    if trimmed.contains('>') {
-        return CommandRiskLevel::Mutation;
-    }
-
-    // L0: Read-only / Query safe by default
-    CommandRiskLevel::Safe
 }
 
 pub fn needs_user_approval(risk: CommandRiskLevel, policy: ApprovalPolicy) -> bool {
@@ -306,175 +342,267 @@ pub fn needs_user_approval(risk: CommandRiskLevel, policy: ApprovalPolicy) -> bo
 }
 
 pub fn redact_sensitive_output(raw: &str) -> String {
-    let mut out = raw.to_string();
-    if out.contains("PRIVATE KEY-----") {
-        return "[REDACTED PRIVATE KEY CONTENT]".to_string();
+    use std::sync::OnceLock;
+    static PATTERNS: OnceLock<Vec<regex::Regex>> = OnceLock::new();
+    if raw.contains("PRIVATE KEY-----") {
+        return "[REDACTED PRIVATE KEY CONTENT]".into();
     }
-    // Redact password=xxx patterns
-    let password_patterns = ["password=", "passwd=", "secret=", "token=", "key="];
-    for p in password_patterns {
-        let mut start_idx = 0;
-        while let Some(idx) = out[start_idx..].to_lowercase().find(p) {
-            let actual_idx = start_idx + idx + p.len();
-            let end_idx = out[actual_idx..]
-                .find(|c: char| c == ' ' || c == '\n' || c == '&' || c == ';' || c == '"' || c == '\'')
-                .map(|e| actual_idx + e)
-                .unwrap_or(out.len());
-            if actual_idx < end_idx {
-                out.replace_range(actual_idx..end_idx, "***");
-                start_idx = actual_idx + 3;
-            } else {
-                break;
-            }
-        }
+    let patterns=PATTERNS.get_or_init(||[
+        r#"(?i)((?:[\w.-]*[_-])?(?:password|passwd|secret|token|api[_-]?key|key)[\"']?\s*(?:[=:]\s*|\s+)")(?:\\.|[^"\\])*(")"#,
+        r#"(?i)((?:[\w.-]*[_-])?(?:password|passwd|secret|token|api[_-]?key|key)[\"']?\s*(?:[=:]\s*|\s+)')(?:\\.|[^'\\])*(')"#,
+        r#"(?i)((?:https?|mongodb(?:\+srv)?|redis|postgres(?:ql)?)://)[^:/\s]+:[^@/\s]+@"#,
+        r#"(?i)(bearer\s+)[^\s\"']+"#,
+        r#"(?i)((?:[\w.-]*[_-])?(?:password|passwd|secret|token|api[_-]?key|key)[\"']?\s*(?:[=:]\s*|\s+)[\"']?)[^\s\"'&,;}]+"#,
+        r#"(us_gate_)[A-Za-z0-9_-]+"#,
+    ].iter().map(|s|regex::Regex::new(s).expect("static redaction regex")).collect());
+    let mut out = raw.to_owned();
+    for regex in patterns {
+        out = regex
+            .replace_all(&out, |caps: &regex::Captures<'_>| {
+                format!("{}***{}", &caps[1], caps.get(2).map_or("", |m| m.as_str()))
+            })
+            .into_owned();
     }
+
     out
 }
 
+fn required_string<'a>(value: &'a serde_json::Value, key: &str) -> Result<&'a str, String> {
+    value
+        .get(key)
+        .and_then(|v| v.as_str())
+        .filter(|v| !v.trim().is_empty())
+        .ok_or_else(|| format!("Missing or invalid {key}"))
+}
+struct RequestSlot(Arc<std::sync::atomic::AtomicUsize>);
+impl Drop for RequestSlot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+struct Grant {
+    source: String,
+    policy: ApprovalPolicy,
+}
+pub struct ListenerState {
+    cancel: Arc<AtomicBool>,
+    workers: Vec<std::thread::JoinHandle<()>>,
+}
+fn constant_time_equal(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter().zip(b).fold(0u8, |diff, (a, b)| diff | (a ^ b)) == 0
+}
 #[derive(Clone)]
 pub struct AgentGateway {
     pub port: u16,
+    pub state_directory: std::path::PathBuf,
     pub ssh_port: Arc<AtomicU16>,
     pub ssh_running: Arc<AtomicBool>,
     pub token: String,
     pub policy: Arc<Mutex<ApprovalPolicy>>,
     pub is_running: Arc<AtomicBool>,
     pub pending_approvals: Arc<Mutex<HashMap<String, mpsc::Sender<bool>>>>,
+    pub approval_requests: Arc<Mutex<HashMap<String, ApprovalRequestPayload>>>,
     pub audit_logs: Arc<Mutex<Vec<AuditLogEntry>>>,
     pub pty_mgr: PtyManager,
     pub connections: AgentConnections,
-    pub app_handle: AppHandle,
+    pub control_connections: AgentConnections,
+    pub transfer_connections: AgentConnections,
+    pub app_handle: Option<AppHandle>,
+    pub active_requests: Arc<std::sync::atomic::AtomicUsize>,
+    pub work_requests: Arc<std::sync::atomic::AtomicUsize>,
+    pub audit_error: Arc<Mutex<Option<String>>>,
+    pub audit_pending: Arc<Mutex<std::collections::VecDeque<AuditLogEntry>>>,
+    pub audit_lost: Arc<std::sync::atomic::AtomicUsize>,
+    pub listeners: Arc<Mutex<Option<ListenerState>>>,
+    pub client_public: Vec<u8>,
+    pub ssh_ports: (u16, u16),
 }
 
 impl AgentGateway {
     pub fn new(pty_mgr: PtyManager, app_handle: AppHandle) -> Result<Self, String> {
         let token = load_gateway_token(&gateway_state_dir()?.join("token"))?;
+        let client_key = load_gateway_host_key(&gateway_state_dir()?.join("client_ed25519"))?;
+        let client_public = client_key
+            .public_key()
+            .to_bytes()
+            .map_err(|e| e.to_string())?;
         let port = 39281;
         let ssh_port = Arc::new(AtomicU16::new(2222));
         let ssh_running = Arc::new(AtomicBool::new(false));
 
         Ok(Self {
             port,
+            state_directory: gateway_state_dir()?,
             ssh_port,
             ssh_running,
             token,
             policy: Arc::new(Mutex::new(ApprovalPolicy::Smart)), // Default: "帮我批准"
             is_running: Arc::new(AtomicBool::new(false)),
             pending_approvals: Arc::new(Mutex::new(HashMap::new())),
-            audit_logs: Arc::new(Mutex::new(Vec::new())),
+            approval_requests: Default::default(),
+            audit_logs: Arc::new(Mutex::new(crate::gateway_audit::load(
+                &gateway_state_dir()?.join("audit.jsonl"),
+            ))),
             pty_mgr,
             connections: AgentConnections::new(),
-            app_handle,
+            control_connections: AgentConnections::new(),
+            transfer_connections: AgentConnections::new(),
+            app_handle: Some(app_handle),
+            active_requests: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            work_requests: Default::default(),
+            audit_error: Default::default(),
+            audit_pending: Default::default(),
+            audit_lost: Default::default(),
+            listeners: Default::default(),
+            client_public,
+            ssh_ports: (2222, 39222),
         })
     }
 
-    pub fn start_server(&self) {
-        if self.is_running.load(Ordering::SeqCst) {
-            return;
-        }
-
-        let gateway = self.clone();
-        gateway.is_running.store(true, Ordering::SeqCst);
-
-        // 1. Start HTTP Gateway thread (for REST & MCP)
-        let gw_http = gateway.clone();
-        thread::spawn(move || {
-            let addr = format!("127.0.0.1:{}", gw_http.port);
-            let server = match Server::http(&addr) {
-                Ok(s) => s,
-                Err(e) => {
-                    eprintln!("[AgentGateway] 无法绑定本地 HTTP 网关端口 {}: {}", addr, e);
-                    gw_http.is_running.store(false, Ordering::SeqCst);
-                    return;
+    fn scoped_state<T>(&self, operation: impl FnOnce() -> T) -> T {
+        #[cfg(test)]
+        {
+            struct Restore(Option<std::path::PathBuf>);
+            impl Drop for Restore {
+                fn drop(&mut self) {
+                    TEST_STATE_DIR.with(|p| *p.borrow_mut() = self.0.take());
                 }
-            };
-
-            println!("[AgentGateway] 本地 AI HTTP/MCP 网关已启动在 http://{}", addr);
-
-            while gw_http.is_running.load(Ordering::SeqCst) {
-                match server.recv() {
-                    Ok(request) => {
-                        let gw_clone = gw_http.clone();
-                        thread::spawn(move || {
-                            gw_clone.handle_http_request(request);
+            }
+            let previous = TEST_STATE_DIR.with(|p| p.replace(Some(self.state_directory.clone())));
+            let _restore = Restore(previous);
+            operation()
+        }
+        #[cfg(not(test))]
+        {
+            operation()
+        }
+    }
+    pub fn start_server(&self) -> Result<(), String> {
+        let mut lifecycle = self.listeners.lock().map_err(|e| e.to_string())?;
+        if lifecycle.as_ref().is_some_and(|state| {
+            !state.cancel.load(Ordering::SeqCst) && self.is_running.load(Ordering::SeqCst)
+        }) {
+            return Ok(());
+        }
+        if let Some(previous) = lifecycle.take() {
+            previous.cancel.store(true, Ordering::SeqCst);
+            for worker in previous.workers {
+                let _ = worker.join();
+            }
+        }
+        self.is_running.store(false, Ordering::SeqCst);
+        self.ssh_running.store(false, Ordering::SeqCst);
+        // Bind both listeners before reporting running; partial startup releases all sockets.
+        let http = Server::http(format!("127.0.0.1:{}", self.port))
+            .map_err(|e| format!("HTTP网关启动失败：{e}"))?;
+        let ssh = std::net::TcpListener::bind(("127.0.0.1", self.ssh_ports.0))
+            .or_else(|_| std::net::TcpListener::bind(("127.0.0.1", self.ssh_ports.1)))
+            .map_err(|e| format!("SSH网关启动失败：{e}"))?;
+        ssh.set_nonblocking(true).map_err(|e| e.to_string())?;
+        let port = ssh.local_addr().map_err(|e| e.to_string())?.port();
+        let host_key = load_gateway_host_key(&self.state_directory.join("host_ed25519"))?;
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| e.to_string())?;
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.is_running.store(true, Ordering::SeqCst);
+        self.ssh_running.store(true, Ordering::SeqCst);
+        self.ssh_port.store(port, Ordering::SeqCst);
+        let gw = self.clone();
+        let stop = cancel.clone();
+        let http_worker = std::thread::spawn(move || {
+            while !stop.load(Ordering::SeqCst) {
+                match http.recv_timeout(Duration::from_millis(100)) {
+                    Ok(Some(request)) => {
+                        if stop.load(Ordering::SeqCst) {
+                            gw.respond_json(
+                                request,
+                                StatusCode(503),
+                                &serde_json::json!({"ok":false,"error":"Gateway stopped"}),
+                            );
+                            continue;
+                        }
+                        let work = if *request.method() != Method::Get {
+                            if gw.work_requests.fetch_add(1, Ordering::SeqCst) >= 8 {
+                                gw.work_requests.fetch_sub(1, Ordering::SeqCst);
+                                gw.respond_json(request,StatusCode(429),&serde_json::json!({"ok":false,"error":"Work capacity reached; query original IDs"}));
+                                continue;
+                            }
+                            Some(RequestSlot(gw.work_requests.clone()))
+                        } else {
+                            None
+                        };
+                        if gw.active_requests.fetch_add(1, Ordering::SeqCst) >= 16 {
+                            gw.active_requests.fetch_sub(1, Ordering::SeqCst);
+                            gw.respond_json(
+                                request,
+                                StatusCode(429),
+                                &serde_json::json!({"ok":false,"error":"Too many active requests"}),
+                            );
+                            continue;
+                        }
+                        let request_gateway = gw.clone();
+                        std::thread::spawn(move || {
+                            let _slot = RequestSlot(request_gateway.active_requests.clone());
+                            let _work = work;
+                            request_gateway
+                                .scoped_state(|| request_gateway.handle_http_request(request));
                         });
                     }
+                    Ok(None) => {}
                     Err(e) => {
-                        if gw_http.is_running.load(Ordering::SeqCst) {
-                            eprintln!("[AgentGateway] HTTP 接收请求异常: {}", e);
-                        }
+                        eprintln!("[gateway] HTTP接收失败：{e}");
+                        stop.store(true, Ordering::SeqCst);
+                        gw.is_running.store(false, Ordering::SeqCst);
+                        gw.ssh_running.store(false, Ordering::SeqCst);
                         break;
                     }
                 }
             }
         });
-
-        // 2. Start Native SSH Gateway thread (for native `ssh -p 2222 ...`)
-        let gw_ssh = gateway.clone();
-        thread::spawn(move || {
-            let rt = match tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()
-            {
-                Ok(r) => r,
-                Err(e) => {
-                    eprintln!("[AgentGateway] 无法创建 Tokio 异步运行时: {}", e);
-                    return;
-                }
-            };
-
-            rt.block_on(async move {
-                let preferred_port = 2222;
-                let fallback_port = 39222;
-
-                let (bound_port, listener) = match tokio::net::TcpListener::bind(("127.0.0.1", preferred_port)).await {
-                    Ok(l) => (preferred_port, l),
-                    Err(_) => match tokio::net::TcpListener::bind(("127.0.0.1", fallback_port)).await {
-                        Ok(l) => (fallback_port, l),
-                        Err(e) => {
-                            eprintln!("[AgentGateway] 无法绑定本地 SSH 网关端口 2222 或 39222: {}", e);
-                            return;
-                        }
-                    },
-                };
-
-                let key_path = match gateway_state_dir() {
-                    Ok(dir) => dir.join("host_ed25519"),
-                    Err(error) => { eprintln!("[AgentGateway] {error}"); return; }
-                };
-                let host_key = match load_gateway_host_key(&key_path) {
-                    Ok(key) => key,
-                    Err(error) => { eprintln!("[AgentGateway] {error}"); return; }
-                };
-                eprintln!("[AgentGateway] SSH 主机公钥指纹：{}", host_key.public_key().fingerprint(russh::keys::HashAlg::Sha256));
-                gw_ssh.ssh_port.store(bound_port, Ordering::SeqCst);
-                gw_ssh.ssh_running.store(true, Ordering::SeqCst);
-                println!("[AgentGateway] 本地 AI 原生 SSH 堡垒已启动在 127.0.0.1:{}", bound_port);
-
-                let config = russh::server::Config {
-                    inactivity_timeout: Some(std::time::Duration::from_secs(3600)),
-                    auth_rejection_time: std::time::Duration::from_secs(0),
-                    auth_rejection_time_initial: Some(std::time::Duration::from_secs(0)),
-                    keys: vec![host_key],
-                    ..Default::default()
-                };
-                let config = Arc::new(config);
-
-                let mut server = AgentSshServer {
-                    gateway: gw_ssh.clone(),
-                };
-
-                let running_server = server.run_on_socket(config, &listener);
-                let _ = running_server.await;
-                gw_ssh.ssh_running.store(false, Ordering::SeqCst);
+        let gw = self.clone();
+        let stop = cancel.clone();
+        let ssh_worker = std::thread::spawn(move || {
+            rt.block_on(async{
+                let listener=tokio::net::TcpListener::from_std(ssh).expect("nonblocking owned listener");
+                let config=Arc::new(russh::server::Config{inactivity_timeout:Some(Duration::from_secs(3600)),auth_rejection_time:Duration::from_millis(200),keys:vec![host_key],..Default::default()});
+                let mut server=AgentSshServer{gateway:gw.clone()};
+                let running=server.run_on_socket(config,&listener);let handle=running.handle();
+                tokio::select!{result=running=>{if let Err(e)=result{eprintln!("[gateway] SSH监听失败：{e}");}},_=async{while !stop.load(Ordering::SeqCst){tokio::time::sleep(Duration::from_millis(50)).await;}}=>{handle.shutdown("Gateway stopped".into());}}
             });
+            stop.store(true, Ordering::SeqCst);
+            gw.is_running.store(false, Ordering::SeqCst);
+            gw.ssh_running.store(false, Ordering::SeqCst);
+            // Approved blocking operations may finish, but a UI stop must not wait for their runtime timeout.
+            rt.shutdown_background();
         });
+        *lifecycle = Some(ListenerState {
+            cancel,
+            workers: vec![http_worker, ssh_worker],
+        });
+        Ok(())
     }
-
     pub fn stop_server(&self) {
+        let mut lifecycle = self.listeners.lock().unwrap();
         self.is_running.store(false, Ordering::SeqCst);
         self.ssh_running.store(false, Ordering::SeqCst);
+        if let Some(state) = lifecycle.take() {
+            state.cancel.store(true, Ordering::SeqCst);
+            for worker in state.workers {
+                let _ = worker.join();
+            }
+        }
+        for (_, sender) in self.pending_approvals.lock().unwrap().drain() {
+            let _ = sender.send(false);
+        }
         self.connections.clear();
+        self.control_connections.clear();
+        self.transfer_connections.clear();
     }
 
     fn check_auth(&self, req: &tiny_http::Request) -> bool {
@@ -485,19 +613,10 @@ impl AgentGateway {
                 let val: &str = h.value.as_str().as_ref();
                 let trimmed = val.trim();
                 if let Some(token_part) = trimmed.strip_prefix("Bearer ") {
-                    if token_part.trim() == self.token {
+                    if constant_time_equal(token_part.trim().as_bytes(), self.token.as_bytes()) {
                         return true;
                     }
                 }
-            }
-        }
-        // Fallback: check query parameter ?token=...
-        let url = req.url();
-        if let Some(pos) = url.find("token=") {
-            let token_query = &url[pos + 6..];
-            let token_val = token_query.split('&').next().unwrap_or("");
-            if token_val == self.token {
-                return true;
             }
         }
         false
@@ -505,376 +624,446 @@ impl AgentGateway {
 
     fn handle_http_request(&self, mut req: tiny_http::Request) {
         let method = req.method().clone();
-        let raw_url = req.url().to_string();
-        let path = raw_url.split('?').next().unwrap_or("/").to_string();
-
-        // 1. Handle CORS Preflight OPTIONS
+        let url = req.url().to_string();
+        let path = url.split('?').next().unwrap_or("/");
         if method == Method::Options {
-            let response = Response::empty(StatusCode(204))
-                .with_header(Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap())
-                .with_header(
-                    Header::from_bytes(
-                        &b"Access-Control-Allow-Methods"[..],
-                        &b"GET, POST, OPTIONS"[..],
-                    )
-                    .unwrap(),
-                )
-                .with_header(
-                    Header::from_bytes(
-                        &b"Access-Control-Allow-Headers"[..],
-                        &b"Content-Type, Authorization"[..],
-                    )
-                    .unwrap(),
-                );
-            let _ = req.respond(response);
-            return;
-        }
-
-        // 2. Health & Status check (can be accessed without token to check if Gateway is running)
-        if path == "/api/status" && method == Method::Get {
-            let policy = *self.policy.lock().unwrap();
-            let is_auth = self.check_auth(&req);
-            let audit_count = self.audit_logs.lock().unwrap().len();
-            let pending_count = self.pending_approvals.lock().unwrap().len();
-
-            let json = serde_json::json!({
-                "ok": true,
-                "version": "1.0.0",
-                "is_running": true,
-                "port": self.port,
-                "policy": policy,
-                "authenticated": is_auth,
-                "audit_count": audit_count,
-                "pending_approvals": pending_count,
-            });
-            self.respond_json(req, StatusCode(200), &json);
-            return;
-        }
-
-        // 3. For all other endpoints, enforce Bearer Token authentication
-        if !self.check_auth(&req) {
-            let err_json = serde_json::json!({
-                "ok": false,
-                "error": "Unauthorized: Invalid or missing Agent Bearer Token. Please provide 'Authorization: Bearer <token>'",
-            });
-            self.respond_json(req, StatusCode(401), &err_json);
-            return;
-        }
-
-        // 4. GET /api/servers (List available active tabs & saved servers without credentials)
-        if path == "/api/servers" && method == Method::Get {
-            let list = self.get_available_servers();
-            let json = serde_json::json!({
-                "ok": true,
-                "servers": list,
-            });
-            self.respond_json(req, StatusCode(200), &json);
-            return;
-        }
-
-        // 5. POST /api/policy (Update policy: "strict", "smart", "auto")
-        if path == "/api/policy" && method == Method::Post {
-            let mut body = String::new();
-            if req.as_reader().read_to_string(&mut body).is_ok() {
-                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&body) {
-                    if let Some(p) = val.get("policy").and_then(|v| v.as_str()) {
-                        let new_policy = match p {
-                            "strict" => ApprovalPolicy::Strict,
-                            "auto" => ApprovalPolicy::Auto,
-                            _ => ApprovalPolicy::Smart,
-                        };
-                        *self.policy.lock().unwrap() = new_policy;
-                        let json = serde_json::json!({
-                            "ok": true,
-                            "policy": new_policy,
-                        });
-                        self.respond_json(req, StatusCode(200), &json);
-                        return;
-                    }
-                }
-            }
+            // No browser cross-origin access: agents connect directly to loopback.
             self.respond_json(
                 req,
-                StatusCode(400),
-                &serde_json::json!({ "ok": false, "error": "Invalid request body" }),
+                StatusCode(403),
+                &serde_json::json!({"ok":false,"error":"Cross-origin browser access is disabled"}),
             );
             return;
         }
-
-        // 6. GET /api/audit_logs (Get recent audit history)
-        if path == "/api/audit_logs" && method == Method::Get {
-            let logs = self.audit_logs.lock().unwrap().clone();
-            let json = serde_json::json!({
-                "ok": true,
-                "logs": logs,
-            });
-            self.respond_json(req, StatusCode(200), &json);
+        if path == "/api/status" && method == Method::Get {
+            let authenticated = self.check_auth(&req);
+            self.respond_json(req, StatusCode(200), &serde_json::json!({"ok":true,"version":"1.2.0","protocol_version":2,"is_running":self.is_running.load(Ordering::SeqCst),"authenticated":authenticated,"port":self.port,"capabilities":["exec","jobs","uploads","audit"],"policy":*self.policy.lock().unwrap(),"audit_count":self.audit_logs.lock().unwrap().len(),"pending_approvals":self.pending_approvals.lock().unwrap().len(),"audit_error":self.audit_error.lock().unwrap().clone(),"max_command_bytes":crate::gateway_io::MAX_COMMAND,"max_chunk_bytes":crate::gateway_transfer::CHUNK,"job_log_mode":"bounded_streams","job_log_limit_bytes":8388608,"job_requires":"python3"}));
             return;
         }
-
-        // 7. POST /api/exec (Execute remote or local command with policy check & approval)
-        if path == "/api/exec" && method == Method::Post {
-            let mut body = String::new();
-            if let Err(e) = req.as_reader().read_to_string(&mut body) {
-                self.respond_json(
-                    req,
-                    StatusCode(400),
-                    &serde_json::json!({ "ok": false, "error": format!("Read body error: {}", e) }),
-                );
-                return;
-            }
-
-            let payload: serde_json::Value = match serde_json::from_str(&body) {
+        if !self.check_auth(&req) {
+            self.audit_event(
+                "authentication",
+                "local-gateway",
+                "HTTP authentication rejected",
+                CommandRiskLevel::Safe,
+                "denied",
+                "denied",
+                None,
+                "认证失败；未执行",
+                0,
+            );
+            self.respond_json(req,StatusCode(401),&serde_json::json!({"ok":false,"error":"Missing or invalid Bearer header; URL tokens are not accepted"}));
+            return;
+        }
+        if req.headers().iter().any(|h| h.field.equiv("Origin")) {
+            self.respond_json(
+                req,
+                StatusCode(403),
+                &serde_json::json!({"ok":false,"error":"Browser-origin requests are disabled"}),
+            );
+            return;
+        }
+        if path == "/api/policy" {
+            self.audit_event(
+                "policy",
+                "local-gateway",
+                "HTTP policy change rejected",
+                CommandRiskLevel::Mutation,
+                "denied",
+                "denied",
+                None,
+                "策略只能在桌面管理界面修改",
+                0,
+            );
+            self.respond_json(req,StatusCode(403),&serde_json::json!({"ok":false,"error":"Change approval policy in the UltimateShell desktop UI"}));
+            return;
+        }
+        let mut body = String::new();
+        if req
+            .body_length()
+            .is_some_and(|n| n as u64 > crate::gateway_io::MAX_BODY)
+        {
+            self.respond_json(
+                req,
+                StatusCode(413),
+                &serde_json::json!({"ok":false,"error":"Request body exceeds 1 MiB"}),
+            );
+            return;
+        }
+        if let Err(error) = req
+            .as_reader()
+            .take(crate::gateway_io::MAX_BODY + 1)
+            .read_to_string(&mut body)
+        {
+            self.respond_json(
+                req,
+                StatusCode(400),
+                &serde_json::json!({"ok":false,"error":error.to_string()}),
+            );
+            return;
+        }
+        if body.len() as u64 > crate::gateway_io::MAX_BODY {
+            self.respond_json(
+                req,
+                StatusCode(413),
+                &serde_json::json!({"ok":false,"error":"Request body exceeds 1 MiB"}),
+            );
+            return;
+        }
+        let value = if body.is_empty() {
+            serde_json::json!({})
+        } else {
+            match serde_json::from_str(&body) {
                 Ok(v) => v,
-                Err(e) => {
+                Err(_) => {
                     self.respond_json(
                         req,
                         StatusCode(400),
-                        &serde_json::json!({ "ok": false, "error": format!("Invalid JSON: {}", e) }),
+                        &serde_json::json!({"ok":false,"error":"Invalid JSON"}),
                     );
                     return;
                 }
-            };
-
-            let target = match request_target(&payload) {
-                Ok(target) => target,
-                Err(error) => {
-                    self.respond_json(req, StatusCode(400), &serde_json::json!({"ok": false, "error": error}));
-                    return;
-                }
-            };
-            let command = match payload.get("command").and_then(|v| v.as_str()) {
-                Some(cmd) if !cmd.trim().is_empty() => cmd.trim().to_string(),
-                _ => {
-                    self.respond_json(
-                        req,
-                        StatusCode(400),
-                        &serde_json::json!({ "ok": false, "error": "Missing 'command' field" }),
-                    );
-                    return;
-                }
-            };
-            let agent_name = payload
-                .get("agent")
-                .or_else(|| payload.get("agent_name"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("AI Agent")
-                .to_string();
-
-            // Perform Command Classification & Approval Check
-            let risk = classify_command(&command);
-            let current_policy = *self.policy.lock().unwrap();
-            let needs_approval = needs_user_approval(risk, current_policy);
-
-            let mut approved_by_user = !needs_approval;
-
-            if needs_approval {
-                let approval_id = uuid::Uuid::new_v4().to_string();
-                let (tx, rx) = mpsc::channel::<bool>();
-
-                {
-                    let mut pending = self.pending_approvals.lock().unwrap();
-                    pending.insert(approval_id.clone(), tx);
-                }
-
-                // Notify frontend via Tauri Event
-                let req_payload = ApprovalRequestPayload {
-                    id: approval_id.clone(),
-                    server_target: target.clone(),
-                    command: command.clone(),
-                    risk_level: risk,
-                    policy: current_policy,
-                    timestamp: Local::now().format("%H:%M:%S").to_string(),
-                };
-                let _ = self.app_handle.emit("agent_approval_needed", req_payload);
-
-                // Wait for user click in GUI (with 60-second timeout)
-                approved_by_user = match rx.recv_timeout(Duration::from_secs(60)) {
-                    Ok(val) => val,
-                    Err(_) => {
-                        // Timeout: clean up and reject
-                        let mut pending = self.pending_approvals.lock().unwrap();
-                        pending.remove(&approval_id);
-                        false
-                    }
-                };
             }
-
-            if !approved_by_user {
-                // Operation denied by user
-                self.record_audit_log(AuditLogEntry {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    timestamp: Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
-                    agent_name,
-                    server_target: target.clone(),
-                    command: command.clone(),
-                    risk_level: risk,
-                    policy_applied: current_policy,
-                    approved_by_user: false,
-                    status: "denied".to_string(),
-                    exit_code: None,
-                    output_snippet: Some("操作已被用户拒绝或审批超时".to_string()),
-                    duration_ms: 0,
-                });
-
-                let err_json = serde_json::json!({
-                    "ok": false,
-                    "error": "Operation rejected by user (approval denied or timed out)",
-                    "risk_level": risk,
-                    "target": target,
-                    "command": command,
-                });
-                self.respond_json(req, StatusCode(403), &err_json);
-                return;
-            }
-
-            // User approved (or auto approved): Execute command!
-            let start_time = Instant::now();
-            let exec_result = self.execute_on_target(&target, &command);
-            let duration_ms = start_time.elapsed().as_millis() as u64;
-
-            match exec_result {
-                Ok((exit_code, stdout, stderr)) => {
-                    let clean_stdout = redact_sensitive_output(&stdout);
-                    let clean_stderr = redact_sensitive_output(&stderr);
-                    let snippet = if !clean_stdout.is_empty() {
-                        clean_stdout.chars().take(200).collect::<String>()
-                    } else {
-                        clean_stderr.chars().take(200).collect::<String>()
+        };
+        match self.dispatch_http(&method, path, &url, &value) {
+            Ok(value) => self.respond_json(req, StatusCode(200), &value),
+            Err(error) => {
+                let parts: Vec<_> = path.trim_matches('/').split('/').collect();
+                let id = parts
+                    .get(2)
+                    .copied()
+                    .or_else(|| value.get("request_id").and_then(|v| v.as_str()));
+                let uncertain = error.contains("未知")
+                    || match (parts.get(1), id) {
+                        (Some(&"uploads"), Some(id)) => crate::gateway_transfer::lookup(id)
+                            .ok()
+                            .flatten()
+                            .is_some_and(|u| u.status == "committing"),
+                        (Some(&"jobs"), Some(id)) => crate::gateway_jobs::lookup(id)
+                            .ok()
+                            .flatten()
+                            .is_some_and(|j| {
+                                ["starting", "running", "unknown"].contains(&j.status.as_str())
+                            }),
+                        _ => false,
                     };
-
-                    self.record_audit_log(AuditLogEntry {
-                        id: uuid::Uuid::new_v4().to_string(),
-                        timestamp: Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
-                        agent_name,
-                        server_target: target.clone(),
-                        command,
-                        risk_level: risk,
-                        policy_applied: current_policy,
-                        approved_by_user: true,
-                        status: "executed".to_string(),
-                        exit_code: Some(exit_code),
-                        output_snippet: Some(snippet),
-                        duration_ms,
-                    });
-
-                    let json = serde_json::json!({
-                        "ok": true,
-                        "exit_code": exit_code,
-                        "stdout": clean_stdout,
-                        "stderr": clean_stderr,
-                        "duration_ms": duration_ms,
-                        "risk_level": risk,
-                    });
-                    self.respond_json(req, StatusCode(200), &json);
-                }
-                Err(err_msg) => {
-                    self.record_audit_log(AuditLogEntry {
-                        id: uuid::Uuid::new_v4().to_string(),
-                        timestamp: Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
-                        agent_name,
-                        server_target: target.clone(),
-                        command,
-                        risk_level: risk,
-                        policy_applied: current_policy,
-                        approved_by_user: true,
-                        status: "failed".to_string(),
-                        exit_code: None,
-                        output_snippet: Some(err_msg.clone()),
-                        duration_ms,
-                    });
-
-                    let json = serde_json::json!({
-                        "ok": false,
-                        "error": err_msg,
-                        "duration_ms": duration_ms,
-                    });
-                    self.respond_json(req, StatusCode(500), &json);
-                }
+                let code = if error.starts_with("busy:") {
+                    409
+                } else if error.starts_with("denied:") {
+                    403
+                } else if error.starts_with("timeout:") {
+                    408
+                } else if uncertain {
+                    500
+                } else if error.contains("Unknown endpoint") {
+                    404
+                } else {
+                    400
+                };
+                self.respond_json(req,StatusCode(code),&serde_json::json!({"ok":false,"status":if uncertain{"unknown"}else{"error"},"error":redact_sensitive_output(&error)}))
             }
-            return;
         }
+    }
 
-        // 8. POST /api/read_file (Read remote or local file content)
-        if path == "/api/read_file" && method == Method::Post {
-            let mut body = String::new();
-            if let Err(e) = req.as_reader().read_to_string(&mut body) {
-                self.respond_json(
-                    req,
-                    StatusCode(400),
-                    &serde_json::json!({ "ok": false, "error": format!("Read body error: {}", e) }),
+    fn dispatch_http(
+        &self,
+        method: &Method,
+        path: &str,
+        url: &str,
+        value: &serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        use serde_json::json;
+        if !self.is_running.load(Ordering::SeqCst) {
+            return Err("Gateway stopped: request not executed".into());
+        }
+        if path == "/api/servers" && *method == Method::Get {
+            return Ok(json!({"ok":true,"servers":self.get_available_servers()}));
+        }
+        if path == "/api/audit_logs" && *method == Method::Get {
+            return Ok(
+                json!({"ok":true,"logs":self.audit_logs.lock().map_err(|e|e.to_string())?.clone()}),
+            );
+        }
+        let agent = value
+            .get("agent")
+            .or_else(|| value.get("agent_name"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("AI Agent");
+        if (path == "/api/exec" || path == "/api/read_file") && *method == Method::Post {
+            let target = request_target(value)?;
+            let command = if path == "/api/read_file" {
+                let p = required_string(value, "path")?;
+                format!("cat -- {}", crate::gateway_jobs::quote(p))
+            } else {
+                required_string(value, "command")?.to_string()
+            };
+            let (code, out, err) = self.execute_audited(&target, &command, agent)?;
+            if path == "/api/read_file" {
+                return Ok(
+                    json!({"ok":code==0,"exit_code":code,"content":redact_sensitive_output(&out),"stderr":redact_sensitive_output(&err)}),
                 );
-                return;
             }
-
-            let payload: serde_json::Value = match serde_json::from_str(&body) {
-                Ok(v) => v,
-                Err(e) => {
-                    self.respond_json(
-                        req,
-                        StatusCode(400),
-                        &serde_json::json!({ "ok": false, "error": format!("Invalid JSON: {}", e) }),
-                    );
-                    return;
-                }
-            };
-
-            let target = match request_target(&payload) {
-                Ok(target) => target,
-                Err(error) => {
-                    self.respond_json(req, StatusCode(400), &serde_json::json!({"ok": false, "error": error}));
-                    return;
-                }
-            };
-            let file_path = match payload.get("path").and_then(|v| v.as_str()) {
-                Some(p) if !p.trim().is_empty() => p.trim().to_string(),
-                _ => {
-                    self.respond_json(
-                        req,
-                        StatusCode(400),
-                        &serde_json::json!({ "ok": false, "error": "Missing 'path' field" }),
-                    );
-                    return;
-                }
-            };
-
-            // Read file content via target cat
-            let safe_cat_cmd = format!("cat '{}' 2>&1", file_path.replace('\'', "'\\''"));
-            match self.execute_on_target(&target, &safe_cat_cmd) {
-                Ok((exit_code, stdout, stderr)) => {
-                    if exit_code == 0 {
-                        let clean = redact_sensitive_output(&stdout);
-                        let json = serde_json::json!({
-                            "ok": true,
-                            "path": file_path,
-                            "content": clean,
-                        });
-                        self.respond_json(req, StatusCode(200), &json);
-                    } else {
-                        let json = serde_json::json!({
-                            "ok": false,
-                            "error": format!("Failed to read file: {}{}", stdout, stderr),
-                        });
-                        self.respond_json(req, StatusCode(404), &json);
-                    }
-                }
-                Err(e) => {
-                    self.respond_json(
-                        req,
-                        StatusCode(500),
-                        &serde_json::json!({ "ok": false, "error": e }),
-                    );
-                }
-            }
-            return;
+            return Ok(
+                json!({"ok":code==0,"exit_code":code,"stdout":redact_sensitive_output(&out),"stderr":redact_sensitive_output(&err)}),
+            );
         }
+        if path.starts_with("/api/uploads") || path.starts_with("/api/jobs") {
+            // Serialize state transitions, including launch/finalize. A timed-out client can safely query the same ID.
+            let parts: Vec<_> = path.trim_matches('/').split('/').collect();
+            let namespace = match parts.get(1) {
+                Some(&"uploads") => "uploads",
+                Some(&"jobs") => "jobs",
+                _ => return Err("Unknown endpoint".into()),
+            };
+            let id = if parts.len() == 2 {
+                required_string(value, "request_id")?
+            } else {
+                parts[2]
+            };
+            crate::gateway_transfer::valid_id(id)?;
+            let _guard = if namespace == "uploads" && *method == Method::Get {
+                None
+            } else {
+                Some(crate::gateway_state::lock(namespace, id)?)
+            };
+            if path == "/api/uploads" && *method == Method::Post {
+                let target = self.canonical_target(&request_target(value)?)?;
+                let identity = self.target_identity(&target)?;
+                let id = required_string(value, "request_id")?;
+                let dest = required_string(value, "path")?;
+                let size = value
+                    .get("size")
+                    .and_then(|v| v.as_u64())
+                    .ok_or("Missing size")?;
+                let hash = required_string(value, "sha256")?;
+                let overwrite = value
+                    .get("overwrite")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                crate::gateway_transfer::valid_id(id)?;
+                crate::gateway_transfer::validate_manifest(dest, size, hash)?;
+                if let Some(u) = crate::gateway_transfer::lookup(id)? {
+                    if u.path != dest
+                        || u.size != size
+                        || u.sha256 != hash.to_lowercase()
+                        || u.overwrite != overwrite
+                    {
+                        return Err("request_id冲突".into());
+                    }
+                    self.check_target_identity(&target, &u.identity)?;
+                    return Ok(json!({"ok":true,"upload":u}));
+                }
+                let summary = format!(
+                    "upload {} bytes to {} SHA256={} overwrite={}",
+                    size, dest, hash, overwrite
+                );
+                let source =
+                    self.authorize(&target, &summary, CommandRiskLevel::Mutation, agent)?;
+                self.check_target_identity(&target, &identity)?;
+                let start = Instant::now();
+                let result =
+                    crate::gateway_transfer::create(self, id, &target, dest, size, hash, overwrite);
+                self.audit_event_with_policy(
+                    agent,
+                    &target,
+                    &summary,
+                    CommandRiskLevel::Mutation,
+                    &source.source,
+                    if result.is_ok() { "success" } else { "error" },
+                    None,
+                    result
+                        .as_ref()
+                        .err()
+                        .map(String::as_str)
+                        .unwrap_or("上传会话已创建"),
+                    start.elapsed().as_millis() as u64,
+                    source.policy,
+                );
+                return result.map(|u| json!({"ok":true,"upload":u}));
+            }
+            if parts.get(1) == Some(&"uploads") && parts.len() >= 3 {
+                let mut upload = crate::gateway_transfer::load(parts[2])?;
+                self.check_target_identity(&upload.server, &upload.identity)?;
+                if parts.len() == 3 && *method == Method::Get {
+                    return Ok(json!({"ok":true,"upload":upload}));
+                }
+                if parts.len() == 3 && *method == Method::Delete {
+                    if upload.status != "completed" && upload.status != "aborted" {
+                        return Err("请先abort上传".into());
+                    }
+                    upload.cleaned = true;
+                    crate::gateway_transfer::save(&upload)?;
+                    return Ok(json!({"ok":true}));
+                }
+                if parts.len() == 4 && *method == Method::Post {
+                    let operation = parts[3];
+                    let mut summary =
+                        format!("upload {} {} path={}", upload.id, operation, upload.path);
+                    if operation == "chunk" {
+                        use sha2::Digest;
+                        let encoded = value.get("data").and_then(|v| v.as_str()).unwrap_or("");
+                        summary.push_str(&format!(
+                            " offset={} encoded_bytes={} encoded_sha256={:x}",
+                            value
+                                .get("offset")
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or(u64::MAX),
+                            encoded.len(),
+                            sha2::Sha256::digest(encoded.as_bytes())
+                        ));
+                    }
 
-        // 404 for unknown endpoints
-        self.respond_json(
-            req,
-            StatusCode(404),
-            &serde_json::json!({ "ok": false, "error": "Endpoint not found" }),
-        );
+                    let start = Instant::now();
+                    let result = match operation {
+                        "chunk" => {
+                            let offset = value
+                                .get("offset")
+                                .and_then(|v| v.as_u64())
+                                .ok_or("Missing offset")?;
+                            crate::gateway_transfer::chunk(
+                                &mut upload,
+                                offset,
+                                required_string(value, "data")?,
+                            )
+                        }
+                        "commit" => crate::gateway_transfer::commit(self, &mut upload),
+                        "abort" => crate::gateway_transfer::abort(self, &mut upload),
+                        _ => return Err("Unknown upload operation".into()),
+                    };
+                    self.audit_event(
+                        agent,
+                        &upload.server,
+                        &summary,
+                        CommandRiskLevel::Mutation,
+                        "session",
+                        if result.is_ok() {
+                            "success"
+                        } else if upload.status == "committing" {
+                            "unknown"
+                        } else {
+                            "error"
+                        },
+                        None,
+                        result.as_ref().err().map(String::as_str).unwrap_or("完成"),
+                        start.elapsed().as_millis() as u64,
+                    );
+                    result?;
+                    return Ok(json!({"ok":true,"upload":upload}));
+                }
+            }
+            if path == "/api/jobs" && *method == Method::Post {
+                let target = self.canonical_target(&request_target(value)?)?;
+                let identity = self.target_identity(&target)?;
+                let id = required_string(value, "request_id")?;
+                let command = required_string(value, "command")?;
+                crate::gateway_transfer::valid_id(id)?;
+                crate::gateway_io::validate_command(command)?;
+                if let Some(job) = crate::gateway_jobs::lookup(id)? {
+                    use sha2::Digest;
+                    let hash = format!("{:x}", sha2::Sha256::digest(command.as_bytes()));
+                    if job.command_sha256 != hash {
+                        return Err("request_id冲突".into());
+                    }
+                    self.check_target_identity(&target, &job.identity)?;
+                    return Ok(json!({"ok":true,"job":job}));
+                }
+                let risk = classify_command(command);
+                let source = self.authorize(&target, command, risk, agent)?;
+                self.check_target_identity(&target, &identity)?;
+                let start = Instant::now();
+                let result = crate::gateway_jobs::create(self, id, &target, command);
+                self.audit_event_with_policy(
+                    agent,
+                    &target,
+                    command,
+                    risk,
+                    &source.source,
+                    if result.is_ok() {
+                        "running"
+                    } else if crate::gateway_jobs::lookup(id)
+                        .ok()
+                        .flatten()
+                        .is_some_and(|job| {
+                            ["starting", "running", "unknown"].contains(&job.status.as_str())
+                        })
+                    {
+                        "unknown"
+                    } else {
+                        "error"
+                    },
+                    None,
+                    result
+                        .as_ref()
+                        .err()
+                        .map(String::as_str)
+                        .unwrap_or("后台任务已启动；使用任务ID查询退出码"),
+                    start.elapsed().as_millis() as u64,
+                    source.policy,
+                );
+                return result.map(|job| json!({"ok":true,"job":job}));
+            }
+            if parts.get(1) == Some(&"jobs") && parts.len() == 3 {
+                let mut job = crate::gateway_jobs::load(parts[2])?;
+                if *method == Method::Get {
+                    let parameter = |key: &str| -> u64 {
+                        url.split('?')
+                            .nth(1)
+                            .unwrap_or("")
+                            .split('&')
+                            .find_map(|s| {
+                                s.strip_prefix(&format!("{key}="))
+                                    .and_then(|n| n.parse().ok())
+                            })
+                            .unwrap_or(0)
+                    };
+                    let prior = job.status.clone();
+                    let result = crate::gateway_jobs::poll(
+                        self,
+                        &mut job,
+                        parameter("offset"),
+                        parameter("stderr_offset"),
+                    );
+                    if job.status != prior || result.is_err() {
+                        self.audit_event(
+                            agent,
+                            &job.server,
+                            &format!("job {} poll", job.id),
+                            CommandRiskLevel::Safe,
+                            "session",
+                            if result.is_err() {
+                                "unknown"
+                            } else {
+                                &job.status
+                            },
+                            job.exit_code,
+                            result
+                                .as_ref()
+                                .err()
+                                .map(String::as_str)
+                                .unwrap_or("任务状态已更新"),
+                            0,
+                        )
+                    }
+                    return result;
+                }
+                if *method == Method::Delete {
+                    crate::gateway_jobs::cleanup(self, &mut job)?;
+                    self.audit_event(
+                        agent,
+                        &job.server,
+                        &format!("job {} cleanup", job.id),
+                        CommandRiskLevel::Mutation,
+                        "session",
+                        "success",
+                        None,
+                        "已清理任务文件",
+                        0,
+                    );
+                    return Ok(json!({"ok":true}));
+                }
+            }
+        }
+        Err("Unknown endpoint or method".into())
     }
 
     fn respond_json(&self, req: tiny_http::Request, status: StatusCode, json: &serde_json::Value) {
@@ -882,21 +1071,418 @@ impl AgentGateway {
         let response = Response::from_string(text)
             .with_status_code(status)
             .with_header(
-                Header::from_bytes(&b"Content-Type"[..], &b"application/json; charset=utf-8"[..])
-                    .unwrap(),
-            )
-            .with_header(Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap());
+                Header::from_bytes(
+                    &b"Content-Type"[..],
+                    &b"application/json; charset=utf-8"[..],
+                )
+                .unwrap(),
+            );
         let _ = req.respond(response);
     }
 
     fn record_audit_log(&self, entry: AuditLogEntry) {
+        let entry = crate::gateway_audit::sanitize(entry);
         let mut logs = self.audit_logs.lock().unwrap();
-        logs.insert(0, entry);
-        if logs.len() > 300 {
-            logs.truncate(300);
+        logs.insert(0, entry.clone());
+        logs.truncate(300);
+        let mut pending = self.audit_pending.lock().unwrap();
+        pending.push_back(entry);
+        if pending.len() > 300 {
+            pending.pop_front();
+            self.audit_lost.fetch_add(1, Ordering::SeqCst);
         }
-        // Emit update to frontend
-        let _ = self.app_handle.emit("agent_audit_updated", ());
+        let mut failure = None;
+        while let Some(entry) = pending.front() {
+            match crate::gateway_audit::append(&self.state_directory.join("audit.jsonl"), entry) {
+                Ok(()) => {
+                    pending.pop_front();
+                }
+                Err(e) => {
+                    failure = Some(e);
+                    break;
+                }
+            }
+        }
+        let lost = self.audit_lost.load(Ordering::SeqCst);
+        *self.audit_error.lock().unwrap() = if lost > 0 {
+            Some(format!(
+                "审计缓存曾溢出{lost}条；{}",
+                failure.unwrap_or_default()
+            ))
+        } else {
+            failure.map(|error| format!("{error}；{}条等待落盘", pending.len()))
+        };
+        drop(pending);
+        drop(logs);
+        if let Some(app) = &self.app_handle {
+            let _ = app.emit("agent_audit_updated", ());
+        }
+    }
+
+    pub fn audit_event(
+        &self,
+        agent: &str,
+        target: &str,
+        command: &str,
+        risk: CommandRiskLevel,
+        source: &str,
+        status: &str,
+        exit: Option<i32>,
+        output: &str,
+        duration: u64,
+    ) {
+        let policy = *self.policy.lock().unwrap();
+        self.audit_event_with_policy(
+            agent, target, command, risk, source, status, exit, output, duration, policy,
+        );
+    }
+    fn audit_event_with_policy(
+        &self,
+        agent: &str,
+        target: &str,
+        command: &str,
+        risk: CommandRiskLevel,
+        source: &str,
+        status: &str,
+        exit: Option<i32>,
+        output: &str,
+        duration: u64,
+        policy: ApprovalPolicy,
+    ) {
+        self.record_audit_log(AuditLogEntry {
+            id: uuid::Uuid::new_v4().to_string(),
+            timestamp: Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+            agent_name: agent.into(),
+            server_target: target.into(),
+            command: command.into(),
+            risk_level: risk,
+            policy_applied: policy,
+            approved_by_user: source == "user",
+            approval_source: source.into(),
+            execution_phase: if status == "running" {
+                "background_running"
+            } else if status == "unknown" {
+                "execution_unknown"
+            } else if status == "denied" || status == "timeout" || source == "none" {
+                "not_sent"
+            } else {
+                "completed"
+            }
+            .into(),
+            status: status.into(),
+            exit_code: exit,
+            output_snippet: Some(output.into()),
+            duration_ms: duration,
+        });
+    }
+    pub fn set_policy_from_desktop(&self, policy: ApprovalPolicy) {
+        let old = {
+            let mut lock = self.policy.lock().unwrap();
+            let old = *lock;
+            *lock = policy;
+            old
+        };
+        self.audit_event(
+            "Desktop",
+            "local-gateway",
+            &format!("policy {:?} -> {:?}", old, policy),
+            CommandRiskLevel::Mutation,
+            "user",
+            "success",
+            Some(0),
+            "桌面修改审批策略",
+            0,
+        );
+    }
+    pub fn clear_audit(&self) -> Result<(), String> {
+        {
+            let mut logs = self.audit_logs.lock().map_err(|e| e.to_string())?;
+            crate::gateway_audit::clear(&self.state_directory.join("audit.jsonl"))?;
+            logs.clear();
+            self.audit_pending.lock().unwrap().clear();
+            self.audit_lost.store(0, Ordering::SeqCst);
+        }
+        self.audit_event(
+            "Desktop",
+            "local-gateway",
+            "clear audit",
+            CommandRiskLevel::Mutation,
+            "user",
+            "success",
+            Some(0),
+            "用户清空审计历史",
+            0,
+        );
+        Ok(())
+    }
+    fn authorize(
+        &self,
+        target: &str,
+        command: &str,
+        risk: CommandRiskLevel,
+        agent: &str,
+    ) -> Result<Grant, String> {
+        if !self.is_running.load(Ordering::SeqCst) {
+            return Err("Gateway stopped: request not executed".into());
+        }
+        let policy = *self.policy.lock().unwrap();
+        if !needs_user_approval(risk, policy) {
+            return Ok(Grant {
+                source: "auto".into(),
+                policy,
+            });
+        }
+        let id = uuid::Uuid::new_v4().to_string();
+        let (tx, rx) = mpsc::channel();
+        {
+            let mut pending = self.pending_approvals.lock().unwrap();
+            if pending.len() >= 16 {
+                return Err("待审批请求已达上限".into());
+            }
+            pending.insert(id.clone(), tx);
+        }
+        let payload = ApprovalRequestPayload {
+            id: id.clone(),
+            server_target: target.into(),
+            command: command.into(),
+            risk_level: risk,
+            policy,
+            timestamp: Local::now().format("%H:%M:%S").to_string(),
+            expires_at_ms: (chrono::Utc::now().timestamp_millis() + 60000) as u64,
+        };
+        self.approval_requests
+            .lock()
+            .unwrap()
+            .insert(id.clone(), payload.clone());
+        if let Some(app) = &self.app_handle {
+            if let Err(error) = app.emit("agent_approval_needed", payload) {
+                self.pending_approvals.lock().unwrap().remove(&id);
+                self.approval_requests.lock().unwrap().remove(&id);
+                self.audit_event(
+                    agent,
+                    target,
+                    command,
+                    risk,
+                    "none",
+                    "error",
+                    None,
+                    "审批通知发送失败，未执行",
+                    0,
+                );
+                return Err(format!("审批通知失败，未执行：{error}"));
+            }
+        }
+        let outcome = rx.recv_timeout(Duration::from_secs(60));
+        self.pending_approvals.lock().unwrap().remove(&id);
+        self.approval_requests.lock().unwrap().remove(&id);
+        if let Some(app) = &self.app_handle {
+            let _ = app.emit("agent_approval_finished", &id);
+        }
+        match outcome {
+            Ok(true) => Ok(Grant {
+                source: "user".into(),
+                policy,
+            }),
+            other => {
+                let status = if other.is_err() { "timeout" } else { "denied" };
+                self.audit_event(
+                    agent,
+                    target,
+                    command,
+                    risk,
+                    status,
+                    status,
+                    None,
+                    "未执行：审批拒绝或超时",
+                    0,
+                );
+                Err(format!(
+                    "{status}: request not executed; do not retry or switch transport to bypass approval"
+                ))
+            }
+        }
+    }
+    fn execute_audited(
+        &self,
+        target: &str,
+        command: &str,
+        agent: &str,
+    ) -> Result<(i32, String, String), String> {
+        if let Err(e) = crate::gateway_io::validate_command(command) {
+            self.audit_event(
+                agent,
+                target,
+                command,
+                classify_command(command),
+                "none",
+                "error",
+                None,
+                &e,
+                0,
+            );
+            return Err(e);
+        }
+        let opts = self.resolve_target_opts(target)?;
+        let risk = classify_command(command);
+        let source = self.authorize(target, command, risk, agent)?;
+        let start = Instant::now();
+        let result = self.execute_with_options(&opts, command);
+        match &result {
+            Ok((code, out, err)) => self.audit_event_with_policy(
+                agent,
+                target,
+                command,
+                risk,
+                &source.source,
+                if *code == 0 { "success" } else { "error" },
+                Some(*code),
+                &format!(
+                    "stdout: {}\nstderr: {}",
+                    redact_sensitive_output(out)
+                        .chars()
+                        .take(1800)
+                        .collect::<String>(),
+                    redact_sensitive_output(err)
+                        .chars()
+                        .take(1800)
+                        .collect::<String>()
+                ),
+                start.elapsed().as_millis() as u64,
+                source.policy,
+            ),
+            Err(e) => self.audit_event_with_policy(
+                agent,
+                target,
+                command,
+                risk,
+                &source.source,
+                if e.contains("未知") {
+                    "unknown"
+                } else {
+                    "error"
+                },
+                None,
+                e,
+                start.elapsed().as_millis() as u64,
+                source.policy,
+            ),
+        }
+        result
+    }
+    fn options_identity(o: &SpawnOptions) -> Result<String, String> {
+        use sha2::{Digest, Sha256};
+        Ok(format!(
+            "v2:{:x}",
+            Sha256::digest(
+                serde_json::to_vec(&(
+                    o.is_local,
+                    &o.host,
+                    o.port,
+                    &o.username,
+                    &o.host_id,
+                    &o.identity_file,
+                    &o.proxy_type,
+                    &o.jump_host_id,
+                    &o.proxy_url
+                ))
+                .map_err(|e| e.to_string())?
+            )
+        ))
+    }
+    fn identity_matches(opts: &SpawnOptions, expected: &str) -> Result<bool, String> {
+        if expected.starts_with("v2:") {
+            return Ok(Self::options_identity(opts)? == expected);
+        }
+        use sha2::Digest;
+        let legacy = format!(
+            "{:x}",
+            sha2::Sha256::digest(
+                serde_json::to_vec(&(
+                    opts.is_local,
+                    &opts.host,
+                    opts.port,
+                    &opts.username,
+                    &opts.host_id
+                ))
+                .map_err(|e| e.to_string())?
+            )
+        );
+        Ok(legacy == expected)
+    }
+    pub(crate) fn target_identity(&self, target: &str) -> Result<String, String> {
+        Self::options_identity(&self.resolve_target_opts(target)?)
+    }
+    pub(crate) fn check_target_identity(&self, target: &str, identity: &str) -> Result<(), String> {
+        if !Self::identity_matches(&self.resolve_target_opts(target)?, identity)? {
+            return Err("目标服务器配置已改变，请重新授权创建会话".into());
+        }
+        Ok(())
+    }
+    pub(crate) fn with_sftp_bound<T>(
+        &self,
+        target: &str,
+        identity: &str,
+        operation: impl FnOnce(&ssh2::Sftp) -> Result<T, String>,
+    ) -> Result<T, String> {
+        self.with_sftp_checked(target, Some(identity), &self.control_connections, operation)
+    }
+    pub(crate) fn with_transfer_sftp_bound<T>(
+        &self,
+        target: &str,
+        identity: &str,
+        operation: impl FnOnce(&ssh2::Sftp) -> Result<T, String>,
+    ) -> Result<T, String> {
+        self.with_sftp_checked(
+            target,
+            Some(identity),
+            &self.transfer_connections,
+            operation,
+        )
+    }
+    fn with_sftp_checked<T>(
+        &self,
+        target: &str,
+        expected: Option<&str>,
+        pool: &AgentConnections,
+        operation: impl FnOnce(&ssh2::Sftp) -> Result<T, String>,
+    ) -> Result<T, String> {
+        let opts = self.resolve_target_opts(target)?;
+        if expected.is_some_and(|id| !Self::identity_matches(&opts, id).unwrap_or(false)) {
+            return Err("目标连接配置改变；操作未发送".into());
+        }
+        let lease = pool.acquire(&opts)?;
+        let mut connection = lease.lock()?;
+        let mut operation = Some(operation);
+        for attempt in 0..2 {
+            if !connection
+                .as_ref()
+                .is_some_and(ssh2::Session::authenticated)
+            {
+                *connection = Some(crate::sftp::connect_session(&opts)?);
+            }
+            let result = connection
+                .as_ref()
+                .unwrap()
+                .sftp()
+                .map_err(|e| e.to_string());
+            match result {
+                Ok(sftp) => {
+                    let result = operation.take().unwrap()(&sftp);
+                    drop(sftp);
+                    if result.is_err() {
+                        *connection = None;
+                    }
+                    return result;
+                }
+                Err(e) => {
+                    *connection = None;
+                    if attempt == 1 {
+                        return Err(format!("SFTP通道创建失败；文件操作未发送：{e}"));
+                    }
+                }
+            }
+        }
+        unreachable!()
     }
 
     pub fn get_available_servers(&self) -> Vec<ServerInfoPayload> {
@@ -955,15 +1541,24 @@ impl AgentGateway {
         result
     }
 
-    fn resolve_target_opts(&self, target: &str) -> Result<SpawnOptions, String> {
+    pub(crate) fn resolve_target_opts(&self, target: &str) -> Result<SpawnOptions, String> {
+        #[cfg(test)]
+        if target == "fixture" {
+            if let Some(opts) = TEST_REMOTE.with(|p| p.borrow().clone()) {
+                return Ok(opts);
+            }
+        }
         let clean = target.trim().to_lowercase();
+        if clean.is_empty() {
+            return Err("目标服务器不能为空".into());
+        }
         if clean == "local" || clean == "localhost" || clean == "本机" {
             return Ok(SpawnOptions {
-                session_id: "local_gateway".to_string(),
+                session_id: "local_gateway".into(),
                 is_local: true,
                 host_id: None,
-                host_name: Some("本地终端".to_string()),
-                host: Some("127.0.0.1".to_string()),
+                host_name: Some("本地终端".into()),
+                host: Some("127.0.0.1".into()),
                 port: None,
                 username: None,
                 identity_file: None,
@@ -974,74 +1569,130 @@ impl AgentGateway {
                 rows: None,
             });
         }
-
-        // Search in active PTY sessions first
-        {
-            let sessions = self.pty_mgr.sessions.lock().unwrap();
-            for (sid, s) in sessions.iter() {
-                let name = s.opts.host_name.as_deref().unwrap_or("").to_lowercase();
-                let host = s.opts.host.as_deref().unwrap_or("").to_lowercase();
-                if sid.to_lowercase() == clean || name == clean || host == clean || name.contains(&clean) {
-                    return Ok(s.opts.clone());
+        let saved: Vec<_> = load_hosts()
+            .into_iter()
+            .map(|host| SpawnOptions {
+                session_id: format!("auto_gw_{}", host.id),
+                is_local: false,
+                host_id: Some(host.id),
+                host_name: Some(host.name),
+                host: Some(host.host),
+                port: Some(host.port),
+                username: Some(host.username),
+                identity_file: host.identity_file,
+                proxy_type: host.proxy_type,
+                jump_host_id: host.jump_host_id,
+                proxy_url: host.proxy_url,
+                cols: None,
+                rows: None,
+            })
+            .collect();
+        let active: Vec<_> = self
+            .pty_mgr
+            .sessions
+            .lock()
+            .map_err(|e| e.to_string())?
+            .values()
+            .map(|s| s.opts.clone())
+            .collect();
+        Self::select_target(&clean, &saved, &active)
+    }
+    fn select_target(
+        clean: &str,
+        saved: &[SpawnOptions],
+        active: &[SpawnOptions],
+    ) -> Result<SpawnOptions, String> {
+        // An ID always outranks a label/IP. Duplicate labels never pick an arbitrary HashMap entry.
+        if let Some(opts) = saved.iter().find(|o| {
+            o.host_id
+                .as_ref()
+                .is_some_and(|id| id.to_lowercase() == clean)
+        }) {
+            return Ok(opts.clone());
+        }
+        if let Some(opts) = active.iter().find(|o| o.session_id.to_lowercase() == clean) {
+            return Ok(opts.clone());
+        }
+        let mut matches = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for opts in saved.iter().chain(active) {
+            if opts
+                .host_name
+                .as_ref()
+                .is_some_and(|s| s.to_lowercase() == clean)
+                || opts
+                    .host
+                    .as_ref()
+                    .is_some_and(|s| s.to_lowercase() == clean)
+            {
+                let identity = Self::options_identity(opts)?;
+                if seen.insert(identity) {
+                    matches.push(opts.clone())
                 }
             }
         }
-
-        // Search in saved hosts
-        for host in load_hosts() {
-            let name = host.name.to_lowercase();
-            let h_ip = host.host.to_lowercase();
-            if host.id.to_lowercase() == clean || name == clean || h_ip == clean || name.contains(&clean) {
-                return Ok(SpawnOptions {
-                    session_id: format!("auto_gw_{}", host.id),
-                    is_local: false,
-                    host_id: Some(host.id.clone()),
-                    host_name: Some(host.name),
-                    host: Some(host.host),
-                    port: Some(host.port),
-                    username: Some(host.username),
-                    identity_file: host.identity_file,
-                    proxy_type: host.proxy_type,
-                    jump_host_id: host.jump_host_id,
-                    proxy_url: host.proxy_url,
-                    cols: None,
-                    rows: None,
-                });
-            }
+        match matches.len() {
+            0 => Err(format!("未找到目标「{clean}」，请查询/api/servers")),
+            1 => Ok(matches.remove(0)),
+            _ => Err(format!(
+                "目标「{clean}」匹配多个账号/连接，请使用服务器ID或会话ID"
+            )),
         }
-
-        Err(format!(
-            "未找到匹配的目标服务器「{}」。请使用 /api/servers 查询可用列表",
-            target
-        ))
     }
-
+    fn canonical_target(&self, target: &str) -> Result<String, String> {
+        let opts = self.resolve_target_opts(target)?;
+        if opts.is_local {
+            return Ok("local".into());
+        }
+        Ok(opts.host_id.unwrap_or(opts.session_id))
+    }
     pub fn execute_on_target(
         &self,
         target: &str,
         command: &str,
     ) -> Result<(i32, String, String), String> {
         let opts = self.resolve_target_opts(target)?;
-
+        self.execute_with_options(&opts, command)
+    }
+    pub(crate) fn execute_bound(
+        &self,
+        target: &str,
+        identity: &str,
+        command: &str,
+    ) -> Result<(i32, String, String), String> {
+        let opts = self.resolve_target_opts(target)?;
+        if !Self::identity_matches(&opts, identity)? {
+            return Err("目标配置改变，命令未发送".into());
+        }
+        self.execute_using_pool(&opts, command, &self.control_connections)
+    }
+    fn execute_with_options(
+        &self,
+        opts: &SpawnOptions,
+        command: &str,
+    ) -> Result<(i32, String, String), String> {
+        self.execute_using_pool(opts, command, &self.connections)
+    }
+    fn execute_using_pool(
+        &self,
+        opts: &SpawnOptions,
+        command: &str,
+        pool: &AgentConnections,
+    ) -> Result<(i32, String, String), String> {
+        crate::gateway_io::validate_command(command)?;
         if opts.is_local {
-            let output = std::process::Command::new("sh")
-                .arg("-c")
-                .arg(command)
-                .output()
-                .map_err(|e| format!("本地命令执行错误: {}", e))?;
-
-            let exit_code = output.status.code().unwrap_or(-1);
-            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-            return Ok((exit_code, stdout, stderr));
+            return crate::gateway_io::local(command);
         }
 
         // Opening a channel precedes exec, so a failed open can safely reconnect once.
         // Never replay exec/read failures: the remote command may already have run.
-        let lease = self.connections.acquire(&opts)?;
+        let lease = pool.acquire(&opts)?;
         let mut connection = lease.lock()?;
         for attempt in 0..2 {
-            if !connection.as_ref().is_some_and(ssh2::Session::authenticated) {
+            if !connection
+                .as_ref()
+                .is_some_and(ssh2::Session::authenticated)
+            {
                 *connection = Some(crate::sftp::connect_session(&opts)?);
             }
             let sess = connection.as_ref().ok_or("AI SSH 连接未建立")?;
@@ -1049,20 +1700,22 @@ impl AgentGateway {
                 Ok(channel) => channel,
                 Err(error) => {
                     *connection = None;
-                    if attempt == 0 { continue; }
-                    return Err(format!("重新连接后仍无法创建 SSH 通道（命令未发送）：{error}"));
+                    if attempt == 0 {
+                        continue;
+                    }
+                    return Err(format!(
+                        "重新连接后仍无法创建 SSH 通道（命令未发送）：{error}"
+                    ));
                 }
             };
             let result = (|| -> Result<(i32, String, String), String> {
-                channel.exec(command).map_err(|e| format!("发送 SSH 命令失败，执行状态未知，不会自动重试：{e}"))?;
-                let mut stdout = String::new();
-                channel.read_to_string(&mut stdout).map_err(|e| format!("读取 SSH 标准输出失败，命令可能已执行，不会自动重试：{e}"))?;
-                let mut stderr = String::new();
-                channel.stderr().read_to_string(&mut stderr).map_err(|e| format!("读取 SSH 错误输出失败，命令可能已执行，不会自动重试：{e}"))?;
-                channel.wait_close().map_err(|e| format!("等待 SSH 命令结束失败，执行状态未知，不会自动重试：{e}"))?;
-                let exit_code = channel.exit_status().map_err(|e| format!("读取 SSH 退出码失败：{e}"))?;
-                channel.close().map_err(|e| format!("关闭 SSH 命令通道失败，命令已结束，不会自动重试：{e}"))?;
-                Ok((exit_code, stdout, stderr))
+                channel
+                    .exec(command)
+                    .map_err(|e| format!("发送 SSH 命令失败，执行状态未知，不会自动重试：{e}"))?;
+                channel
+                    .send_eof()
+                    .map_err(|e| format!("关闭命令输入失败，执行状态未知：{e}"))?;
+                crate::gateway_io::collect(&mut channel, sess)
             })();
             if result.is_err() {
                 drop(channel);
@@ -1108,21 +1761,59 @@ impl RusshHandler for AgentSshHandler {
         Ok(())
     }
 
-    async fn auth_none(&mut self, user: &str) -> Result<RusshAuth, Self::Error> {
-        self.target_user = user.to_string();
-        Ok(RusshAuth::Accept)
+    async fn auth_none(&mut self, _user: &str) -> Result<RusshAuth, Self::Error> {
+        Ok(RusshAuth::reject())
     }
-
-    async fn auth_password(&mut self, user: &str, _password: &str) -> Result<RusshAuth, Self::Error> {
-        self.target_user = user.to_string();
-        Ok(RusshAuth::Accept)
+    async fn auth_password(
+        &mut self,
+        user: &str,
+        password: &str,
+    ) -> Result<RusshAuth, Self::Error> {
+        if constant_time_equal(password.as_bytes(), self.gateway.token.as_bytes()) {
+            self.target_user = user.into();
+            Ok(RusshAuth::Accept)
+        } else {
+            self.gateway.audit_event(
+                "Native SSH Client",
+                "local-gateway",
+                "SSH authentication rejected",
+                CommandRiskLevel::Safe,
+                "none",
+                "denied",
+                None,
+                "SSH凭证无效",
+                0,
+            );
+            Ok(RusshAuth::reject())
+        }
     }
-
-    async fn auth_publickey(&mut self, user: &str, _key: VerifiedPublicKey<'_>) -> Result<RusshAuth, Self::Error> {
-        self.target_user = user.to_string();
-        Ok(RusshAuth::Accept)
+    async fn auth_publickey(
+        &mut self,
+        user: &str,
+        key: VerifiedPublicKey<'_>,
+    ) -> Result<RusshAuth, Self::Error> {
+        if key
+            .public_key
+            .to_bytes()
+            .is_ok_and(|bytes| constant_time_equal(&bytes, &self.gateway.client_public))
+        {
+            self.target_user = user.into();
+            Ok(RusshAuth::Accept)
+        } else {
+            self.gateway.audit_event(
+                "Native SSH Client",
+                "local-gateway",
+                "SSH public key rejected",
+                CommandRiskLevel::Safe,
+                "none",
+                "denied",
+                None,
+                "调用方公钥未授权",
+                0,
+            );
+            Ok(RusshAuth::reject())
+        }
     }
-
     async fn pty_request(
         &mut self,
         channel: ChannelId,
@@ -1134,305 +1825,135 @@ impl RusshHandler for AgentSshHandler {
         _modes: &[(russh::Pty, u32)],
         session: &mut RusshSession,
     ) -> Result<(), Self::Error> {
-        let _ = session.channel_success(channel);
+        session.channel_failure(channel)?;
         Ok(())
     }
-
     async fn shell_request(
         &mut self,
         channel: ChannelId,
         session: &mut RusshSession,
     ) -> Result<(), Self::Error> {
-        let _ = session.channel_success(channel);
-        let banner = format!(
-            "\r\n\x1b[1;36m=====================================================\x1b[0m\r\n\
-            \x1b[1;32m   UltimateShell 本地 AI 原生 SSH 堡垒机网关   \x1b[0m\r\n\
-            \x1b[1;36m=====================================================\x1b[0m\r\n\
-            当前指定目标主机: \x1b[1m{}\x1b[0m\r\n\
-            安全模式: 本地凭证绝对隔离 · 三级策略拦截\r\n\r\n\
-            \x1b[33m提示:\x1b[0m 建议 AI Agent 使用非交互式单行执行命令:\r\n\
-            $ \x1b[32mssh -p {} {}@127.0.0.1 \"<command>\"\x1b[0m\r\n\r\n$ ",
-            if self.target_user.is_empty() { "default" } else { &self.target_user },
-            self.gateway.ssh_port.load(Ordering::SeqCst),
-            if self.target_user.is_empty() { "server_name" } else { &self.target_user }
+        self.gateway.audit_event(
+            "Native SSH Client",
+            &self.target_user,
+            "interactive shell",
+            CommandRiskLevel::Mutation,
+            "none",
+            "error",
+            None,
+            "此入口仅支持ssh <command>；上传使用HTTP /api/uploads，长任务使用/api/jobs",
+            0,
         );
-        let _ = session.data(channel, banner.into_bytes());
+        session.channel_failure(channel)?;
+        session.close(channel)?;
         Ok(())
     }
-
+    async fn data(
+        &mut self,
+        channel: ChannelId,
+        _data: &[u8],
+        session: &mut RusshSession,
+    ) -> Result<(), Self::Error> {
+        // This endpoint does not forward stdin. State the unsupported capability, never silently drop a file.
+        session.extended_data(
+            channel,
+            1,
+            b"stdin forwarding is unavailable; use HTTP /api/uploads or /api/jobs.\n".to_vec(),
+        )?;
+        Ok(())
+    }
+    async fn subsystem_request(
+        &mut self,
+        channel: ChannelId,
+        name: &str,
+        session: &mut RusshSession,
+    ) -> Result<(), Self::Error> {
+        self.gateway.audit_event(
+            "Native SSH Client",
+            &self.target_user,
+            &format!("subsystem {name}"),
+            CommandRiskLevel::Mutation,
+            "none",
+            "error",
+            None,
+            "不支持SFTP子系统；请使用HTTP /api/uploads，不要将发布包塞入命令",
+            0,
+        );
+        session.channel_failure(channel)?;
+        session.extended_data(
+            channel,
+            1,
+            b"SFTP subsystem unavailable; use HTTP /api/uploads.\n".to_vec(),
+        )?;
+        session.close(channel)?;
+        Ok(())
+    }
     async fn exec_request(
         &mut self,
         channel: ChannelId,
         data: &[u8],
         session: &mut RusshSession,
     ) -> Result<(), Self::Error> {
-        let cmd = String::from_utf8_lossy(data).trim().to_string();
-        if cmd.is_empty() {
-            let _ = session.channel_failure(channel);
+        if self.gateway.work_requests.fetch_add(1, Ordering::SeqCst) >= 8 {
+            self.gateway.work_requests.fetch_sub(1, Ordering::SeqCst);
+            session.channel_failure(channel)?;
             return Ok(());
         }
-        let _ = session.channel_success(channel);
-
-        // Determine target server name
-        let target = if self.target_user.is_empty() || self.target_user == "root" {
-            // Check if command has a server prefix like "server: cmd" or "server> cmd"
-            if let Some(pos) = cmd.find(": ") {
-                let s = cmd[..pos].trim();
-                let actual_cmd = cmd[pos + 2..].trim();
-                if !s.contains(' ') && !actual_cmd.is_empty() {
-                    s.to_string()
-                } else {
-                    self.target_user.clone()
-                }
-            } else {
-                self.target_user.clone()
+        let work_slot = RequestSlot(self.gateway.work_requests.clone());
+        if self.gateway.active_requests.fetch_add(1, Ordering::SeqCst) >= 16 {
+            self.gateway.active_requests.fetch_sub(1, Ordering::SeqCst);
+            session.channel_failure(channel)?;
+            return Ok(());
+        }
+        let slot = RequestSlot(self.gateway.active_requests.clone());
+        let cmd = match std::str::from_utf8(data) {
+            Ok(s) => s.trim().to_string(),
+            Err(_) => {
+                session.channel_failure(channel)?;
+                return Ok(());
             }
-        } else {
-            self.target_user.clone()
         };
-
-        let agent_name = "Native SSH Client".to_string();
-        let risk = classify_command(&cmd);
-        let current_policy = *self.gateway.policy.lock().unwrap();
-
-        // Approval Check
-        let needs_approval = needs_user_approval(risk, current_policy);
-        let approved_by_user;
-
-        if !needs_approval {
-            approved_by_user = true;
-        } else {
-            // Send waiting prompt to SSH stderr
-            let notice = format!(
-                "\r\n\x1b[33m[UltimateShell Gateway]\x1b[0m ⚠️ 命令涉及敏感/写操作，已挂起等待客户端审批...\r\n\
-                 \x1b[33m[UltimateShell Gateway]\x1b[0m 目标服务器: {}\r\n\
-                 \x1b[33m[UltimateShell Gateway]\x1b[0m 执行命令: {}\r\n\
-                 \x1b[33m[UltimateShell Gateway]\x1b[0m 风险等级: {:?} (策略: {:?})\r\n\
-                 \x1b[33m[UltimateShell Gateway]\x1b[0m 请在 UltimateShell 桌面弹窗中点击 [批准] (60s超时)...\r\n\r\n",
-                target, cmd, risk, current_policy
-            );
-            let _ = session.extended_data(channel, 1, notice.into_bytes());
-
-            let approval_id = uuid::Uuid::new_v4().to_string();
-            let (tx, rx) = mpsc::channel();
-            {
-                let mut pending = self.gateway.pending_approvals.lock().unwrap();
-                pending.insert(approval_id.clone(), tx);
-            }
-
-            let req_payload = ApprovalRequestPayload {
-                id: approval_id.clone(),
-                server_target: target.clone(),
-                command: cmd.clone(),
-                risk_level: risk,
-                policy: current_policy,
-                timestamp: Local::now().format("%H:%M:%S").to_string(),
-            };
-            let _ = self.gateway.app_handle.emit("agent_approval_needed", req_payload);
-
-            // Wait for GUI click with 60s timeout
-            approved_by_user = match rx.recv_timeout(Duration::from_secs(60)) {
-                Ok(val) => val,
-                Err(_) => {
-                    let mut pending = self.gateway.pending_approvals.lock().unwrap();
-                    pending.remove(&approval_id);
-                    false
-                }
-            };
-        }
-
-        if !approved_by_user {
-            let reject_msg = "\r\n\x1b[31m[UltimateShell Gateway] ❌ 操作已被用户拒绝或审批超时。\x1b[0m\r\n";
-            let _ = session.extended_data(channel, 1, reject_msg.as_bytes().to_vec());
-            let _ = session.exit_status_request(channel, 1);
-            let _ = session.eof(channel);
-            let _ = session.close(channel);
-
-            self.gateway.record_audit_log(AuditLogEntry {
-                id: uuid::Uuid::new_v4().to_string(),
-                timestamp: Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
-                agent_name,
-                server_target: target,
-                command: cmd,
-                risk_level: risk,
-                policy_applied: current_policy,
-                approved_by_user: false,
-                status: "denied".to_string(),
-                exit_code: Some(1),
-                output_snippet: Some("操作已被用户拒绝或审批超时".to_string()),
-                duration_ms: 0,
-            });
+        if cmd.is_empty() {
+            session.channel_failure(channel)?;
             return Ok(());
         }
-
-        let notice_exec = "\x1b[32m[UltimateShell Gateway] ✅ 审批通过，正在通过安全通道执行...\x1b[0m\r\n";
-        let _ = session.extended_data(channel, 1, notice_exec.as_bytes().to_vec());
-
-        let start_time = Instant::now();
-        let exec_res = self.gateway.execute_on_target(&target, &cmd);
-        let duration_ms = start_time.elapsed().as_millis() as u64;
-
-        match exec_res {
-            Ok((exit_code, stdout, stderr)) => {
-                let redacted_stdout = redact_sensitive_output(&stdout);
-                let redacted_stderr = redact_sensitive_output(&stderr);
-
-                if !redacted_stdout.is_empty() {
-                    let _ = session.data(channel, redacted_stdout.as_bytes().to_vec());
-                }
-                if !redacted_stderr.is_empty() {
-                    let _ = session.extended_data(channel, 1, redacted_stderr.as_bytes().to_vec());
-                }
-                let _ = session.exit_status_request(channel, exit_code as u32);
-                let _ = session.eof(channel);
-                let _ = session.close(channel);
-
-                let snippet = if !redacted_stdout.is_empty() {
-                    Some(redacted_stdout.chars().take(500).collect())
-                } else if !redacted_stderr.is_empty() {
-                    Some(redacted_stderr.chars().take(500).collect())
-                } else {
-                    None
-                };
-
-                self.gateway.record_audit_log(AuditLogEntry {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    timestamp: Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
-                    agent_name,
-                    server_target: target,
-                    command: cmd,
-                    risk_level: risk,
-                    policy_applied: current_policy,
-                    approved_by_user,
-                    status: if exit_code == 0 { "success".to_string() } else { "error".to_string() },
-                    exit_code: Some(exit_code),
-                    output_snippet: snippet,
-                    duration_ms,
-                });
+        session.channel_success(channel)?;
+        let gateway = self.gateway.clone();
+        let target = self.target_user.clone();
+        session.extended_data(
+            channel,
+            1,
+            b"[UltimateShell] Request received; approval may be required in the desktop app.\n"
+                .to_vec(),
+        )?;
+        let result = tokio::task::spawn_blocking(move || {
+            let _slot = slot;
+            let _work = work_slot;
+            gateway.scoped_state(|| gateway.execute_audited(&target, &cmd, "Native SSH Client"))
+        })
+        .await;
+        match result {
+            Ok(Ok((code, out, err))) => {
+                session.data(channel, redact_sensitive_output(&out).into_bytes())?;
+                session.extended_data(channel, 1, redact_sensitive_output(&err).into_bytes())?;
+                session.exit_status_request(channel, code as u32)?;
             }
-            Err(e) => {
-                let err_msg = format!("\r\n\x1b[31m[UltimateShell Gateway] 执行错误: {}\x1b[0m\r\n", e);
-                let _ = session.extended_data(channel, 1, err_msg.as_bytes().to_vec());
-                let _ = session.exit_status_request(channel, 1);
-                let _ = session.eof(channel);
-                let _ = session.close(channel);
-
-                self.gateway.record_audit_log(AuditLogEntry {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    timestamp: Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
-                    agent_name,
-                    server_target: target,
-                    command: cmd,
-                    risk_level: risk,
-                    policy_applied: current_policy,
-                    approved_by_user,
-                    status: "failed".to_string(),
-                    exit_code: Some(1),
-                    output_snippet: Some(e),
-                    duration_ms,
-                });
+            other => {
+                let error = match other {
+                    Ok(Err(e)) => e,
+                    Err(e) => e.to_string(),
+                    _ => unreachable!(),
+                };
+                session.extended_data(channel, 1, redact_sensitive_output(&error).into_bytes())?;
+                session.exit_status_request(channel, 1)?;
             }
         }
-
+        session.eof(channel)?;
+        session.close(channel)?;
         Ok(())
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn gateway_token_is_persistent_private_and_never_silently_rotated() {
-        let dir = std::env::temp_dir().join(format!("us-gateway-token-{}", uuid::Uuid::new_v4()));
-        let path = dir.join("token");
-        let first = load_gateway_token(&path).unwrap();
-        assert!(first.starts_with("us_gate_"));
-        assert_eq!(load_gateway_token(&path).unwrap(), first);
-        #[cfg(unix)] {
-            use std::os::unix::fs::PermissionsExt;
-            assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
-        }
-        std::fs::write(&path, "invalid").unwrap();
-        assert!(load_gateway_token(&path).is_err());
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "invalid");
-        std::fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
-    fn gateway_target_never_defaults_to_local() {
-        use serde_json::json;
-        assert_eq!(request_target(&json!({"server":"3.6"})).unwrap(), "3.6");
-        assert_eq!(request_target(&json!({"target":" 3.6 "})).unwrap(), "3.6");
-        assert_eq!(request_target(&json!({"target":"local"})).unwrap(), "local");
-        assert_eq!(request_target(&json!({"target":"3.6", "server":"3.6"})).unwrap(), "3.6");
-        for value in [json!({}), json!({"server":""}), json!({"target":null}), json!({"target":3}), json!({"target":"local","server":"3.6"})] {
-            assert!(request_target(&value).is_err());
-        }
-    }
-
-    #[test]
-    fn gateway_host_key_survives_restart_and_rejects_corruption() {
-        let dir = std::env::temp_dir().join(format!("us-gateway-key-{}", uuid::Uuid::new_v4()));
-        let path = dir.join("host_ed25519");
-        let first = load_gateway_host_key(&path).unwrap();
-        let second = load_gateway_host_key(&path).unwrap();
-        assert_eq!(first.public_key(), second.public_key());
-        let published = russh::keys::PublicKey::read_openssh_file(path.with_extension("pub")).unwrap();
-        assert_eq!(first.public_key(), &published);
-        #[cfg(unix)] {
-            use std::os::unix::fs::PermissionsExt;
-            assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
-            assert_eq!(std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777, 0o700);
-        }
-        std::fs::write(&path, "damaged-key").unwrap();
-        assert!(load_gateway_host_key(&path).is_err());
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "damaged-key");
-        std::fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
-    fn test_risk_classification() {
-        assert_eq!(classify_command("ps aux"), CommandRiskLevel::Safe);
-        assert_eq!(classify_command("cat /etc/nginx/nginx.conf"), CommandRiskLevel::Safe);
-        assert_eq!(classify_command("systemctl status nginx"), CommandRiskLevel::Safe);
-        assert_eq!(classify_command("uptime"), CommandRiskLevel::Safe);
-
-        assert_eq!(classify_command("systemctl restart nginx"), CommandRiskLevel::Mutation);
-        assert_eq!(classify_command("docker restart web"), CommandRiskLevel::Mutation);
-        assert_eq!(classify_command("mkdir -p /data/logs"), CommandRiskLevel::Mutation);
-        assert_eq!(classify_command("chmod 755 /var/www"), CommandRiskLevel::Mutation);
-
-        assert_eq!(classify_command("rm -rf /var/www"), CommandRiskLevel::Critical);
-        assert_eq!(classify_command("mkfs.ext4 /dev/sdb1"), CommandRiskLevel::Critical);
-        assert_eq!(classify_command("iptables -F"), CommandRiskLevel::Critical);
-        assert_eq!(classify_command("reboot"), CommandRiskLevel::Critical);
-    }
-
-    #[test]
-    fn test_policy_approvals() {
-        // Strict: mutations and critical require approval, safe passes
-        assert_eq!(needs_user_approval(CommandRiskLevel::Safe, ApprovalPolicy::Strict), false);
-        assert_eq!(needs_user_approval(CommandRiskLevel::Mutation, ApprovalPolicy::Strict), true);
-        assert_eq!(needs_user_approval(CommandRiskLevel::Critical, ApprovalPolicy::Strict), true);
-
-        // Smart: only critical requires approval
-        assert_eq!(needs_user_approval(CommandRiskLevel::Safe, ApprovalPolicy::Smart), false);
-        assert_eq!(needs_user_approval(CommandRiskLevel::Mutation, ApprovalPolicy::Smart), false);
-        assert_eq!(needs_user_approval(CommandRiskLevel::Critical, ApprovalPolicy::Smart), true);
-
-        // Auto: all pass
-        assert_eq!(needs_user_approval(CommandRiskLevel::Safe, ApprovalPolicy::Auto), false);
-        assert_eq!(needs_user_approval(CommandRiskLevel::Mutation, ApprovalPolicy::Auto), false);
-        assert_eq!(needs_user_approval(CommandRiskLevel::Critical, ApprovalPolicy::Auto), false);
-    }
-
-    #[test]
-    fn test_redaction() {
-        let input = "Server responded with password=SuperSecret123&token=abcde456; and done";
-        let redacted = redact_sensitive_output(input);
-        assert!(!redacted.contains("SuperSecret123"));
-        assert!(!redacted.contains("abcde456"));
-        assert!(redacted.contains("***"));
-    }
-}
+#[path = "agent_gateway_tests.rs"]
+mod tests;

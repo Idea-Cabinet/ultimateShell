@@ -73,6 +73,20 @@ pub fn authenticate(sess: &ssh2::Session, opts: &SpawnOptions) -> Result<(), Str
     }
 }
 
+// Authenticate only after the endpoint's host key has matched the user's OpenSSH trust store.
+pub fn verify_host_key(session:&ssh2::Session,opts:&SpawnOptions)->Result<(),String>{
+    let path=std::env::var_os("HOME").map(PathBuf::from).ok_or("无法定位主机信任文件")?.join(".ssh/known_hosts");
+    verify_host_key_at(session,opts.host.as_deref().ok_or("目标主机为空")?,opts.port.unwrap_or(22),&path)
+}
+pub(crate) fn verify_host_key_at(session:&ssh2::Session,host:&str,port:u16,path:&Path)->Result<(),String>{
+    use base64::Engine;
+    let mut known=session.known_hosts().map_err(|e|e.to_string())?;
+    if path.exists(){known.read_file(path,ssh2::KnownHostFileKind::OpenSSH).map_err(|e|format!("读取known_hosts失败：{e}"))?;}
+    let (key,_)=session.host_key().ok_or("SSH服务器未提供主机公钥")?;
+    let fingerprint=session.host_key_hash(ssh2::HashType::Sha256).map(|bytes|base64::engine::general_purpose::STANDARD_NO_PAD.encode(bytes)).unwrap_or_default();
+    match known.check_port(host,port,key){ssh2::CheckResult::Match=>Ok(()),ssh2::CheckResult::Mismatch=>Err(format!("服务器{host}:{port}主机密钥变化，认证前已阻止。当前指纹SHA256:{fingerprint}，请核实后更新信任记录")),_=>Err(format!("服务器{host}:{port}主机密钥未受信任，尚未发送登录凭据。指纹SHA256:{fingerprint}，请先通过可信渠道核实并在终端确认"))}
+}
+
 // Shared connection setup, without sharing connection ownership between features.
 pub fn connect_session(opts: &SpawnOptions) -> Result<ssh2::Session, String> {
     let tcp = crate::transport::connect(opts)?;
@@ -80,6 +94,7 @@ pub fn connect_session(opts: &SpawnOptions) -> Result<ssh2::Session, String> {
     session.set_timeout(15000);
     session.set_tcp_stream(tcp);
     session.handshake().map_err(|e| format!("SSH 握手失败：{e}"))?;
+    verify_host_key(&session,opts)?;
     authenticate(&session, opts)?;
     Ok(session)
 }

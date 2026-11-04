@@ -1,122 +1,68 @@
-# UltimateShell AI Agent Security Gateway Skill (双轨制)
+# UltimateShell Gateway
 
-## 1. 概述与核心安全架构
-本 Skill 允许 AI Agent 通过 UltimateShell 提供的本地安全隧道网关，安全受控地操作用户的 Linux/Unix 服务器。网关采用**双轨制**，无论是命令行终端 Agent 还是大模型插件都可以无缝接入。
+通过用户电脑上的 UltimateShell 网关执行已授权的服务器操作。程序必须保持运行，无需置于前台，也无需预先打开服务器终端。
 
-### 零泄漏安全原则
-- 🔒 **私钥与密码零泄露**：用户的服务器登录密码、SSH 私钥严格存储于 UltimateShell 客户端的本地 Rust 内存与硬件指纹安全保险库中。AI Agent 仅通过逻辑名称（如 `服务器名称` 或 `IP`）指定目标，AI 端绝对拿不到、也读不到任何密码和私钥。
-- 🛡️ **三级本地审批机制**：
-  1. **请求批准 (Strict)**：所有写操作（增删改、配置变更、系统重启）均需用户在本地弹窗逐条人工确认。
-  2. **帮我批准 (Smart，默认推荐)**：系统运维只读查询与常规安全操作自动放行，仅在检测到高危指令（如 `rm -rf`, `mkfs`, `iptables -F`, `dd` 等）时触发弹窗询问。
-  3. **全部批准 (Auto)**：全部自动通过，无弹窗打扰，但所有指令、耗时及输出完整记录于本地审计日志中。
-- 🧼 **敏感输出自动脱敏**：网关自动对命令输出中的密码、API Token、私钥标识进行掩码处理（`***`）。
+## 连接与认证
 
----
-
-## 2. 轨道一：原生 SSH 命令行直连 (推荐 Claude Code CLI / 终端 Agent)
-
-针对拥有 Bash/终端命令执行能力的 AI Agent，可以直接像连普通 SSH 服务器一样执行命令，无需任何 HTTP 客户端。
-
-### 2.1 连接地址与端口
-- **Host**: `127.0.0.1`
-- **端口**: `2222`（如冲突自动回退至 `39222`）
-- **认证**: 回环网络免密放行，零密码要求
-
-### 2.2 命令行执行方式
+### SSH
 ```bash
-# 格式: ssh -p <网关端口> <目标服务器名称>@127.0.0.1 "<command>"
-ssh -p 2222 生产主库@127.0.0.1 "systemctl status nginx"
+ssh -i ~/.ultimateshell/agent-gateway/client_ed25519 -o IdentitiesOnly=yes -p 2222 -l '192.168.3.6' 127.0.0.1 'hostname'
+```
+使用目标服务器的 IP 或 ID 作为 SSH 用户名。保留主机密钥验证；首次信任前，与本机公钥指纹核对：
+```bash
+ssh-keygen -lf ~/.ultimateshell/agent-gateway/host_ed25519.pub
+```
+网关专用 client_ed25519 由程序生成并设为600权限，只用于本机网关，不是真实服务器私钥。原生 SSH 需要这把专用密钥，不接受匿名连接或任意公钥。不要关闭主机密钥验证，不读取真实服务器密码或私钥。
+
+### HTTP API
+基址：http://127.0.0.1:39281
+鉴权：Authorization: Bearer <token>
+Token 固定保存在本机。单独通过受保护的环境变量或客户端配置传入，不写入 Skill、仓库或日志。
+
+```bash
+curl --noproxy '*' --fail-with-body \
+  -H "Authorization: Bearer $ULTIMATESHELL_GATEWAY_TOKEN" \
+  http://127.0.0.1:39281/api/servers
 ```
 
-### 2.3 终端审批感知
-当命令触发三级策略拦截时：
-1. SSH 终端 stderr 将实时显示：
-   `[UltimateShell Gateway] ⚠️ 命令已挂起等待客户端审批...`
-2. 用户桌面即时弹出审批卡片；
-3. 用户在 UI 点击【批准】后，真实服务器命令继续执行，输出实时回显到 SSH 终端。
+| 操作 | 接口 | JSON 字段 |
+| --- | --- | --- |
+| 查询服务器 | GET /api/servers | 无 |
+| 执行命令 | POST /api/exec | server, command, agent_name |
+| 读取文件 | POST /api/read_file | server, path |
+| 创建上传 | POST /api/uploads | server, request_id, path, size, sha256, overwrite=false |
+| 上传分块 | POST /api/uploads/{id}/chunk | offset, data（Base64，解码后最多64 KiB） |
+| 查看上传 | GET /api/uploads/{id} | 无 |
+| 提交/终止 | POST /api/uploads/{id}/commit 或 abort | 无 |
+| 清理上传记录 | DELETE /api/uploads/{id} | 仅已完成/已终止 |
+| 启动长任务 | POST /api/jobs | server, request_id, command |
+| 查询长任务 | GET /api/jobs/{id}?offset=0&stderr_offset=0 | 原始字节偏移 |
+| 清理长任务 | DELETE /api/jobs/{id} | 仅已确认结束 |
+| 读取审计 | GET /api/audit_logs | 无 |
 
-### 2.4 可选：配置快捷别名 (`~/.ssh/config`)
-将以下配置加入外部 Agent 的 `~/.ssh/config`，即可直接使用 `ssh ai-生产主库 "<cmd>"`：
-```ssh-config
-Host ai-*
-  HostName 127.0.0.1
-  Port 2222
-  UserKnownHostsFile /dev/null
-  StrictHostKeyChecking no
-```
+新建上传或长任务先检查 GET /api/status 的 protocol_version>=2（网关1.2.0及以上），旧版先更新并重新运行。请求必须明确指定服务器；本机操作显式使用 local。当前提供 SSH 和 HTTP API，不提供原生 MCP 协议端点。
 
----
+## 发布包与长任务
 
-## 3. 轨道二：HTTP / MCP API 接口 (推荐 Claude Desktop / Cursor / Web Agent)
+SSH 入口只执行命令，不支持交互式 shell、stdin 文件管道或 SFTP 子系统。不要用 scp，也不要将文件 Base64 塞进命令。同步命令最多32 KiB、120秒，输出最多保留1 MiB；长任务使用 jobs。
 
-### 3.1 网关连接规范
-- **默认监听地址**：`http://127.0.0.1:39281`
-- **鉴权方式**：HTTP Header `Authorization: Bearer <GATEWAY_TOKEN>`
-  （Token 可在 UltimateShell 界面底部「AI 网关」面板中一键查看与复制）
+上传必须显式提供绝对目标文件路径、文件大小、SHA-256和UUID request_id。单文件最多256 MiB，同时最多4个未完成上传。权限使用保存的登录账号，终端 sudo/su 不会改变身份。默认拒绝覆盖，覆盖需创建时显式 overwrite=true。分块必须连续；同一 offset 重复块只有内容相同才接受。断线后先GET会话，按offset继续；commit中断仍使用同一ID核查，禁止盲目追加或换目录。先写同目录临时文件，完整校验后提交。新文件为600权限；覆盖保留原文件所有者和基本权限，保留失败不替换原文件。覆盖提交额外需要目标Python 3，通过os.replace原子替换，不先删除旧文件。文件传输依赖目标服务器SFTP支持，HTTP分块可续传，远程提交阶段中断后可能重传临时文件。
 
-### 3.2 接口 1: 获取服务器列表 (`list_servers`)
-- **Method**: `GET`
-- **Path**: `/api/servers`
-- **响应示例**:
-```json
-{
-  "active_sessions": [
-    { "session_id": "sess_1", "title": "生产主库 (192.168.1.100)", "server_name": "生产主库" }
-  ],
-  "saved_hosts": [
-    { "id": "h_1", "name": "生产主库", "host": "192.168.1.100", "port": 22, "username": "root" },
-    { "id": "h_2", "name": "测试服务器", "host": "192.168.1.105", "port": 22, "username": "deploy" }
-  ]
-}
-```
+jobs 在目标服务器保存命令、stdout、stderr和退出码，不依赖网关持续连接。request_id须在首次请求前生成并保存；同ID只启动一次。启动结果未知时只查询同一任务。job.status=running 不等于成功，必须等到success/error并检查exit_code。两路输出按原始字节offset分页读取，显示按UTF-8替换无效字节，不因解码失败重跑。长任务先检查 GET /api/status 的 job_log_mode=bounded_streams，并确认目标服务器安装 Python 3（标准库即可）。每路日志最多保留8 MiB，超限后继续排空而不阻塞任务，查询会标记 stdout_truncated / stderr_truncated；不会给任务数据文件施加大小限制。任务命令需自行设置适合业务的运行时限。
 
-### 3.3 接口 2: 执行命令 (`exec_command`)
-- **Method**: `POST`
-- **Path**: `/api/exec`
-- **请求体 (JSON)**:
-```json
-{
-  "server": "生产主库",
-  "command": "systemctl status nginx",
-  "agent_name": "Antigravity Agent",
-  "timeout_secs": 30
-}
-```
-- **响应示例**:
-```json
-{
-  "exit_code": 0,
-  "stdout": "● nginx.service - A high performance web server\n   Active: active (running)...",
-  "stderr": "",
-  "duration_ms": 128,
-  "risk_level": "Safe",
-  "approved_by_user": false,
-  "audit_id": "audit_abc123"
-}
-```
+后台命令默认工作目录是独立任务目录；脚本需要项目相对路径时先显式cd到项目目录。采集器异常会先终止并等待本任务进程组，再记录采集错误；不能把采集器退出码冒充任务退出码。任务目录内的脚本及原始输出仅当前远程账号可读写，验收后可按ID清理。清理保留最小ID记录，不允许同一ID再次执行。损坏或不可读记录直接报错，不当成新任务。
 
-### 3.4 接口 3: 读取远程文件 (`read_file`)
-- **Method**: `POST`
-- **Path**: `/api/read_file`
-- **请求体 (JSON)**:
-```json
-{
-  "server": "生产主库",
-  "path": "/etc/nginx/nginx.conf"
-}
-```
+项目附带 scripts/gateway-client.py，可用 upload、job、job-status、upload-status、upload-abort、upload-delete、job-cleanup 子命令。它不会自动重试写请求；中断后用已打印ID查询或显式恢复。
 
----
+审批策略只能在桌面界面修改，HTTP禁止修改。未知脚本及复合Shell命令需要按高危策略审批，不把脚本判为只读。审计区分人工批准、自动放行、拒绝和超时；轮转文件位于 ~/.ultimateshell/agent-gateway/audit.jsonl（仅当前用户可读写），保留两份每份约2 MiB。最近300条载入界面，脚本/载荷仅保存大小和哈希，不保存脚本正文。审计写盘失败会保留有界待写队列并提示错误，下次写入时补写；缓存溢出会明确显示丢失条数。
 
-## 4. 推荐 Agent 工作流程与对话范例
+## 连接生命周期
 
-### 用户场景示例：
-> 用户问：“帮我看看腾讯云服务器的 nginx 是否正常？”
+AI命令、任务控制和文件提交分别使用连接池，与用户终端隔离，避免慢上传阻塞任务查询。目标ID优先于名称/IP，存在多个账号匹配时需明确ID，不随机选择。每次审批固定目标配置，配置改变后拒绝继续旧会话。目标和跳板SSH主机密钥均需匹配本机 ~/.ssh/known_hosts，认证前核验；未知或变化的密钥不自动信任。每次请求独立创建命令通道，完成后关闭；底层 SSH 短期复用，空闲约 5 分钟释放。执行中及排队中的请求不参与空闲回收。
+同步命令同时读取stdout/stderr，保留故障前已收到的输出；仅命令发送前的通道创建失败允许重连一次。发送后超时或连接中断，执行状态可能未知，不自动重跑写操作。
 
-### Agent 标准执行步骤：
-1. **匹配服务器**：调用 `GET /api/servers` 或在本地主机配置中匹配“腾讯云服务器”。
-2. **检查服务**：
-   - 原生 SSH 方式：`ssh -p 2222 腾讯云服务器@127.0.0.1 "systemctl status nginx"`
-   - 或 HTTP API 方式：`POST /api/exec {"server": "腾讯云服务器", "command": "systemctl status nginx"}`
-3. **测试配置**：执行 `nginx -t` 查看语法错误。
-4. **归纳诊断并给出建议**：根据获得的信息直接回答用户，给出排查结论。
+## 审批与异常处理
+
+按用户授权范围操作。需要审批时保持原请求等待桌面批准，不重复提交或切换入口绕过审批。被拒绝后停止。未知结果先做只读核查，不重新下单或重复写入。
+
+连接失败时先区分网关未启动、HTTP 401、主机密钥验证和工具沙箱权限。沙箱返回 Operation not permitted 时按工具权限流程申请本机网络访问，不将网关暴露到外网。

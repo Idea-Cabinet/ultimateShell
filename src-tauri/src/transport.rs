@@ -241,6 +241,7 @@ pub fn connect(opts: &SpawnOptions) -> Result<Transport, String> {
     session
         .handshake()
         .map_err(|e| format!("跳板机握手失败：{e}"))?;
+    crate::sftp::verify_host_key(&session,&jump_opts)?;
     crate::sftp::authenticate(&session, &jump_opts).map_err(|e| format!("跳板机{e}"))?;
     let mut channel = session
         .channel_direct_tcpip(

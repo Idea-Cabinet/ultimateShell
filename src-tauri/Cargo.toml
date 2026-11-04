@@ -14,6 +14,9 @@ edition = "2024"
 name = "ultimateshell_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[dev-dependencies]
+tokio = { version = "1.54.1", features = ["process"] }
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -34,6 +37,8 @@ tiny_http = "0.12.0"
 russh = "0.65.0"
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "net", "sync", "io-util", "time"] }
 rand = "0.10.3"
+regex = "1"
+libc = "0.2"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

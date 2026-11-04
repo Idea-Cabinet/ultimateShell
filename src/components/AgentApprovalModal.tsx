@@ -17,7 +17,8 @@ export interface ApprovalRequest {
   id: string;
   server_target: string;
   command: string;
-  risk_level: "Safe" | "Mutation" | "Critical";
+  risk_level: "safe" | "mutation" | "critical";
+  expires_at_ms: number;
   policy: "strict" | "smart" | "auto";
   timestamp: string;
 }
@@ -29,58 +30,44 @@ interface Props {
 export const AgentApprovalModal: React.FC<Props> = ({ onApprovalResolved }) => {
   const { t } = useI18n();
   const [requests, setRequests] = useState<ApprovalRequest[]>([]);
-  const [countdown, setCountdown] = useState<number>(60);
+  const [now, setNow] = useState(() => Date.now());
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [resolveError,setResolveError]=useState<string | null>(null);
 
-  // Listen for agent_approval_needed Tauri events
   useEffect(() => {
-    let unlisten: (() => void) | null = null;
-    let disposed = false;
-
-    listen<ApprovalRequest>("agent_approval_needed", (event) => {
+    const removers: (() => void)[] = []; let disposed = false;
+    const finished = new Map<string, number>();
+    const add = (request: ApprovalRequest) => {
       if (disposed) return;
-      setRequests((prev) => {
-        // Avoid duplicate by id
-        if (prev.some((r) => r.id === event.payload.id)) return prev;
-        return [...prev, event.payload];
-      });
-      setCountdown(60);
-    }).then((fn) => {
-      if (disposed) fn();
-      else unlisten = fn;
-    });
-
-    return () => {
-      disposed = true;
-      if (unlisten) unlisten();
+      for (const [id, expiry] of finished) if (expiry <= Date.now()) finished.delete(id);
+      if (finished.has(request.id)) return;
+      const deadline = Number.isFinite(request.expires_at_ms) ? request.expires_at_ms : Date.now() + 60000;
+      if (deadline <= Date.now()) return;
+      setRequests(previous => previous.some(item => item.id === request.id) ? previous : [...previous, {...request, expires_at_ms: deadline}].sort((a,b) => a.expires_at_ms - b.expires_at_ms));
+      setNow(Date.now());
     };
+    const bind = (registration: Promise<() => void>) => registration.then(remove => { if (disposed) remove(); else removers.push(remove); }).catch(error => console.error("Failed to listen for approvals", error));
+    const registrations = [
+      bind(listen<ApprovalRequest>("agent_approval_needed", event => add(event.payload))),
+      bind(listen<string>("agent_approval_finished", event => { finished.set(event.payload, Date.now() + 60000); if (!disposed) setRequests(previous => previous.filter(request => request.id !== event.payload)); }))
+    ];
+    void Promise.all(registrations).then(() => disposed ? [] : invoke<ApprovalRequest[]>("agent_get_pending_approvals")).then(requests => { if (!disposed) requests.forEach(add); }).catch(error => console.error("Failed to restore pending approvals", error));
+    return () => { disposed = true; removers.forEach(remove => remove()); };
   }, []);
 
-  // 60-second countdown timer for current top request
   useEffect(() => {
-    if (requests.length === 0) return;
-
-    const timer = setInterval(() => {
-      setCountdown((prev) => {
-        if (prev <= 1) {
-          // Time expired for top request, pop it
-          setRequests((curr) => curr.slice(1));
-          return 60;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [requests.length]);
+    const tick = () => { const time = Date.now(); setNow(time); setRequests(previous => previous.filter(request => request.expires_at_ms > time)); };
+    const timer = setInterval(tick, 250); return () => clearInterval(timer);
+  }, []);
 
   if (requests.length === 0) return null;
 
   const currentReq = requests[0];
+  const countdown = Math.max(0, Math.ceil((currentReq.expires_at_ms - now) / 1000));
 
   const handleResolve = async (approved: boolean, switchToAuto = false) => {
     if (isSubmitting) return;
-    setIsSubmitting(true);
+    setIsSubmitting(true);setResolveError(null);
     try {
       await invoke("agent_resolve_approval", {
         id: currentReq.id,
@@ -89,19 +76,19 @@ export const AgentApprovalModal: React.FC<Props> = ({ onApprovalResolved }) => {
       });
       // Pop current request
       setRequests((prev) => prev.filter((r) => r.id !== currentReq.id));
-      setCountdown(60);
+      setNow(Date.now());
       onApprovalResolved?.();
     } catch (err) {
       console.error("Failed to resolve approval:", err);
-      // Even if failed (e.g. timeout), remove from view
-      setRequests((prev) => prev.filter((r) => r.id !== currentReq.id));
+      if (/审批已超时|不存在|请求已结束/.test(String(err))) setRequests(previous => previous.filter(request => request.id !== currentReq.id));
+      else setResolveError(`审批未确认：${String(err)}`);
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const isCritical = currentReq.risk_level === "Critical";
-  const isMutation = currentReq.risk_level === "Mutation";
+  const isCritical = currentReq.risk_level.toLowerCase() === "critical";
+  const isMutation = currentReq.risk_level.toLowerCase() === "mutation";
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-16 px-4 bg-black/40 backdrop-blur-sm animate-in fade-in duration-200">
@@ -221,6 +208,7 @@ export const AgentApprovalModal: React.FC<Props> = ({ onApprovalResolved }) => {
           </p>
         </div>
 
+        {resolveError && <p role="alert" className="mt-3 text-xs text-red-500">{resolveError}</p>}
         {/* Actions Button Bar */}
         <div className="mt-4 pt-3 border-t border-[var(--border-subtle)] flex items-center justify-between gap-2">
           {/* Reject */}

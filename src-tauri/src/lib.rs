@@ -15,6 +15,11 @@ mod vault;
 mod tunnel;
 mod agent_gateway;
 mod agent_connections;
+mod gateway_io;
+mod gateway_audit;
+mod gateway_transfer;
+mod gateway_jobs;
+mod gateway_state;
 
 use hosts::{load_hosts, save_hosts, HostProfile};
 use ops::{DiskPartition, ProcessEntry};
@@ -23,7 +28,7 @@ use pty::{PtyManager, SpawnOptions};
 use sftp::{DirResult, SftpPool};
 use transfer::TransferState;
 use tunnel::{TunnelEntry, TunnelManager};
-use agent_gateway::{AgentGateway, ApprovalPolicy, AuditLogEntry, GatewayStatusPayload};
+use agent_gateway::{AgentGateway, ApprovalPolicy, AuditLogEntry, GatewayStatusPayload,ApprovalRequestPayload};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -940,6 +945,7 @@ fn agent_get_gateway_status(
         active_servers_count: pty_sessions_count,
         audit_count,
         pending_approvals_count: pending_count,
+        audit_error: gateway.audit_error.lock().unwrap().clone(),
     })
 }
 
@@ -953,7 +959,7 @@ fn agent_set_gateway_policy(
         "auto" => ApprovalPolicy::Auto,
         _ => ApprovalPolicy::Smart,
     };
-    *gateway.policy.lock().unwrap() = new_policy;
+    gateway.set_policy_from_desktop(new_policy);
     Ok(new_policy)
 }
 
@@ -964,17 +970,17 @@ fn agent_resolve_approval(
     approved: bool,
     switch_to_auto: Option<bool>,
 ) -> Result<(), String> {
-    if switch_to_auto == Some(true) {
-        *gateway.policy.lock().unwrap() = ApprovalPolicy::Auto;
-    }
+    let sender = gateway.pending_approvals.lock().unwrap().remove(&id)
+        .ok_or("审批已超时或不存在")?;
+    sender.send(approved).map_err(|_| "审批请求已结束".to_string())?;
+    if switch_to_auto==Some(true)&&approved {gateway.set_policy_from_desktop(ApprovalPolicy::Auto);}
+    Ok(())
+}
 
-    let mut pending = gateway.pending_approvals.lock().unwrap();
-    if let Some(sender) = pending.remove(&id) {
-        let _ = sender.send(approved);
-        Ok(())
-    } else {
-        Err("审批已超时或不存在".to_string())
-    }
+#[tauri::command]
+fn agent_get_pending_approvals(gateway:State<'_,AgentGateway>)->Result<Vec<ApprovalRequestPayload>,String>{
+    let now=chrono::Utc::now().timestamp_millis() as u64;
+    Ok(gateway.approval_requests.lock().map_err(|e|e.to_string())?.values().filter(|p|p.expires_at_ms>now).cloned().collect())
 }
 
 #[tauri::command]
@@ -988,7 +994,7 @@ fn agent_get_audit_logs(
 fn agent_clear_audit_logs(
     gateway: State<'_, AgentGateway>,
 ) -> Result<(), String> {
-    gateway.audit_logs.lock().unwrap().clear();
+    gateway.clear_audit()?;
     Ok(())
 }
 
@@ -998,7 +1004,7 @@ fn agent_toggle_gateway(
     enabled: bool,
 ) -> Result<bool, String> {
     if enabled {
-        gateway.start_server();
+        gateway.start_server()?;
     } else {
         gateway.stop_server();
     }
@@ -1026,7 +1032,7 @@ pub fn run() {
         .setup(|app| {
             let gateway = AgentGateway::new(pty_mgr_gw, app.handle().clone())
                 .map_err(std::io::Error::other)?;
-            gateway.start_server();
+            if let Err(error)=gateway.start_server(){eprintln!("[gateway] 自动启动失败：{error}");}
             app.manage(gateway);
 
             let show_item = MenuItem::with_id(app, "show", "显示主窗口", true, None::<&str>)?;
@@ -1163,6 +1169,7 @@ pub fn run() {
             agent_set_gateway_policy,
             agent_resolve_approval,
             agent_get_audit_logs,
+            agent_get_pending_approvals,
             agent_clear_audit_logs,
             agent_toggle_gateway,
         ])

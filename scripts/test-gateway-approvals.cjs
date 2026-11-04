@@ -1,0 +1,17 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),ts=require('typescript'),vm=require('node:vm');
+let now=100000,cursor=0,effects=[],slots=[],tick;const events=new Map(),calls=[];let snapshotResolve;
+const react={useState(initial){const index=cursor++;if(!(index in slots))slots[index]=typeof initial==='function'?initial():initial;return[slots[index],value=>slots[index]=typeof value==='function'?value(slots[index]):value]},useEffect(fn,deps){const index=cursor++;if(!(index in slots)||deps.some((v,i)=>v!==slots[index][i]))effects.push(fn);slots[index]=deps}};
+const mocks={react,'react/jsx-runtime':{jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props})},'../i18n':{useI18n:()=>({t:key=>key})},'@tauri-apps/api/event':{listen:async(name,fn)=>{events.set(name,fn);return()=>events.delete(name)}},'@tauri-apps/api/core':{invoke:async(name,params)=>{calls.push([name,params]);if(name==='agent_get_pending_approvals')return new Promise(resolve=>snapshotResolve=resolve);return null}}};
+const code=ts.transpileModule(fs.readFileSync('src/components/AgentApprovalModal.tsx','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText;const m={exports:{}};
+vm.runInNewContext(`(function(require,module,exports){${code}\n})`,{console,Date:{now:()=>now},setInterval:fn=>{tick=fn;return 1},clearInterval(){}})(name=>name in mocks?mocks[name]:require(name),m,m.exports);
+function render(){cursor=0;const tree=m.exports.AgentApprovalModal({});const pending=effects;effects=[];pending.forEach(fn=>fn());return tree;}
+function find(tree,fn){if(!tree||typeof tree!=='object')return;if(fn(tree))return tree;for(const child of [tree.props?.children].flat(Infinity)){const hit=find(child,fn);if(hit)return hit;}}
+function text(tree){if(tree==null)return'';if(typeof tree!=='object')return String(tree);return[tree.props?.children].flat(Infinity).map(text).join(' ')}
+const request=(id,expires)=>({id,server_target:id,command:'command '+id,risk_level:'critical',policy:'smart',timestamp:'12:00:00',expires_at_ms:expires});
+async function main(){render();await new Promise(setImmediate);assert.ok(snapshotResolve);events.get('agent_approval_needed')({payload:request('one',160000)});let tree=render();assert.ok(text(tree).includes('command one'));assert.ok(find(tree,node=>node.props?.className?.includes('from-red-500')));
+now=130000;events.get('agent_approval_needed')({payload:request('two',190000)});tree=render();assert.ok(text(tree).includes('command one'));assert.ok(text(tree).includes('30'));
+events.get('agent_approval_finished')({payload:'one'});tree=render();assert.ok(!text(tree).includes('command one'));
+snapshotResolve([request('one',160000),request('expired',90000)]);await new Promise(setImmediate);tree=render();assert.ok(!text(tree).includes('command one'));assert.ok(!text(tree).includes('command expired'));
+now=190001;tick();assert.equal(render(),null);
+events.get('agent_approval_needed')({payload:request('three',250000)});tree=render();const reject=find(tree,node=>node.type==='button'&&text(node).includes('agent.reject'));await reject.props.onClick();assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1))),['agent_resolve_approval',{id:'three',approved:false,switchToAuto:false}]);assert.equal(render(),null);console.log('PASS: real approval component deadline queue, critical styling, finished events, stale snapshot suppression, expiry and reject IPC');}
+main().catch(error=>{console.error(error);process.exitCode=1});

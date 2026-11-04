@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useI18n } from "../i18n";
+import { auditResult, approvalLabel } from "../utils/gatewayAudit";
 import { GatewayGuide } from "./GatewayGuide";
 import {
   Bot,
@@ -25,11 +26,13 @@ export interface AuditLogEntry {
   agent_name: string;
   server_target: string;
   command: string;
-  risk_level: "Safe" | "Mutation" | "Critical";
+  risk_level: "safe" | "mutation" | "critical";
   policy_applied: ApprovalPolicy;
   approved_by_user: boolean;
-  status: "success" | "denied" | "error" | "timeout";
-  exit_code?: number;
+  status: "success" | "executed" | "failed" | "denied" | "error" | "timeout" | "unknown" | "running" | "starting";
+  approval_source?: string;
+  execution_phase?: string;
+  exit_code?: number | null;
   output_snippet?: string;
   duration_ms: number;
 }
@@ -44,6 +47,7 @@ export interface GatewayStatusPayload {
   active_servers_count: number;
   audit_count: number;
   pending_approvals_count: number;
+  audit_error?: string | null;
 }
 
 interface Props {
@@ -59,6 +63,7 @@ export const AgentGatewayDrawer: React.FC<Props> = ({ isOpen, onClose }) => {
   const [activeTab, setActiveTab] = useState<"logs" | "guide">("logs");
   const [filterRisk, setFilterRisk] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [actionError,setActionError] = useState<string | null>(null);
 
   const fetchStatus = async () => {
     try {
@@ -106,31 +111,34 @@ export const AgentGatewayDrawer: React.FC<Props> = ({ isOpen, onClose }) => {
   }, []);
 
   const handlePolicyChange = async (newPolicy: ApprovalPolicy) => {
+    setActionError(null);
     try {
       await invoke("agent_set_gateway_policy", { policy: newPolicy });
       setStatus((prev) => (prev ? { ...prev, policy: newPolicy } : null));
     } catch (e) {
-      console.error("Failed to update policy:", e);
+      console.error("Failed to update policy:", e);setActionError(`策略修改失败：${String(e)}`);
     }
   };
 
   const handleToggleRunning = async () => {
     if (!status) return;
+    setActionError(null);
     try {
       const nextState = !status.is_running;
       await invoke("agent_toggle_gateway", { enabled: nextState });
       setStatus((prev) => (prev ? { ...prev, is_running: nextState } : null));
     } catch (e) {
-      console.error("Failed to toggle gateway:", e);
+      console.error("Failed to toggle gateway:", e);setActionError(`网关启停失败：${String(e)}`);
     }
   };
 
   const handleClearLogs = async () => {
+    setActionError(null);
     try {
       await invoke("agent_clear_audit_logs");
-      setAuditLogs([]);
+      await fetchAuditLogs();
     } catch (e) {
-      console.error("Failed to clear logs:", e);
+      console.error("Failed to clear logs:", e);setActionError(`清理记录失败：${String(e)}`);
     }
   };
 
@@ -280,6 +288,8 @@ export const AgentGatewayDrawer: React.FC<Props> = ({ isOpen, onClose }) => {
           </div>
         </div>
 
+        {actionError && <div role="alert" className="mx-4 my-2 rounded-lg bg-red-500/10 px-3 py-2 text-[11px] text-red-500">{actionError}</div>}
+        {status?.audit_error && <div role="alert" className="mx-4 my-2 rounded-lg bg-red-500/10 px-3 py-2 text-[11px] text-red-500">审计未能保存到磁盘：{status.audit_error}</div>}
         {/* Tab Switcher: Audit Logs vs Skill / MCP Guide */}
         <div className="flex items-center px-4 pt-2 border-b border-[var(--border-subtle)] bg-[var(--bg-app)]">
           <button
@@ -365,14 +375,15 @@ export const AgentGatewayDrawer: React.FC<Props> = ({ isOpen, onClose }) => {
                   <Bot className="w-10 h-10 mb-2 opacity-30" />
                   <p className="text-[12px]">暂无 AI Agent 审计执行记录</p>
                   <p className="text-[11px] text-[var(--text-tertiary)] mt-1">
-                    当外部 Agent 连接本网关并执行命令时，将在此处保留完整记录与脱敏输出。
+                    当外部 Agent 连接本网关并执行命令时，将在此处显示最近 300 条记录；历史按大小轮转保存到本机。
                   </p>
                 </div>
               ) : (
                 filteredLogs.map((log) => {
                   const isExpanded = expandedLogId === log.id;
-                  const isCrit = log.risk_level === "Critical";
-                  const isMut = log.risk_level === "Mutation";
+                  const result = auditResult(log.status, log.exit_code);
+                  const isCrit = log.risk_level.toLowerCase() === "critical";
+                  const isMut = log.risk_level.toLowerCase() === "mutation";
 
                   return (
                     <div
@@ -426,18 +437,14 @@ export const AgentGatewayDrawer: React.FC<Props> = ({ isOpen, onClose }) => {
                         <div className="text-right flex-shrink-0">
                           <span
                             className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                              log.status === "success"
+                              result.tone === "success"
                                 ? "text-emerald-500 bg-emerald-500/10"
-                                : log.status === "denied"
+                                : result.tone === "error"
                                 ? "text-red-500 bg-red-500/10"
                                 : "text-amber-500 bg-amber-500/10"
                             }`}
                           >
-                            {log.status === "success"
-                              ? "成功"
-                              : log.status === "denied"
-                              ? "已拒绝"
-                              : "错误"}
+                            {result.label}
                           </span>
                           <div className="text-[10px] text-[var(--text-tertiary)] mt-1">
                             {log.timestamp} · {log.duration_ms}ms
@@ -449,8 +456,8 @@ export const AgentGatewayDrawer: React.FC<Props> = ({ isOpen, onClose }) => {
                       {isExpanded && (
                         <div className="px-3 pb-3 pt-1 border-t border-[var(--border-subtle)] bg-[var(--bg-app)]/50">
                           <div className="flex items-center justify-between text-[10.5px] text-[var(--text-tertiary)] mb-1">
-                            <span>执行输出脱敏摘要 (敏感密码/Key已抹除):</span>
-                            {log.exit_code !== undefined && (
+                            <span>{approvalLabel(log.approval_source, log.approved_by_user)} · 输出摘要:</span>
+                            {log.exit_code != null && (
                               <span>退出码: {log.exit_code}</span>
                             )}
                           </div>
